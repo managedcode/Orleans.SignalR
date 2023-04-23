@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -115,13 +116,14 @@ public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
         return Task.FromResult(true);
     }
 
-    public Task TryCompleteResult(string invocationId, CompletionMessage message)
+    public async Task TryCompleteResult(string connectionId, CompletionMessage message)
     {
-        _ = Task.Run(() => NameHelperGenerator
-            .GetStream<THub, CompletionMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), invocationId)
-            .OnNextAsync(message));
-        
-        return Task.CompletedTask;
+        var stream = NameHelperGenerator
+            .GetStream<THub, CompletionMessage>(
+                this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
+                message.InvocationId);
+        var sub = await stream.GetAllSubscriptionHandles();
+        await stream.OnNextAsync(message);
     }
 
     public Task<ReturnType> TryGetReturnType(string connectionId)

@@ -59,37 +59,37 @@ public class InterfaceHubTests
         
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
         
-        // //push random
-        // await grain.PushRandom();
-        //
-        // await Task.Delay(TimeSpan.FromSeconds(5));
-        //
-        // messages1.Should().HaveCount(1);
-        // messages2.Should().HaveCount(1);
-        //
-        // messages1.Clear();
-        // messages2.Clear();
-        //
-        // //push message
-        // await grain.PushMessage("test");
-        //
-        // await Task.Delay(TimeSpan.FromSeconds(5));
-        //
-        // messages1.Should().HaveCount(1);
-        // messages2.Should().HaveCount(1);
-        //
-        // messages1.Clear();
-        // messages2.Clear();
-        
         var msg1 = await grain.GetMessage(connection1.ConnectionId);
         var msg2 = await grain.GetMessage(connection2.ConnectionId);
-        var msg3 = await grain.GetMessage("non-existing");
+        //var msg3 = await grain.GetMessage("non-existing");
 
         msg1.Should().Be(connection1.ConnectionId);
         msg2.Should().Be(connection2.ConnectionId);
         
         messages1.Should().HaveCount(0);
         messages2.Should().HaveCount(0);
+        
+        //push random
+        await grain.PushRandom();
+        
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        
+        messages1.Should().HaveCount(1);
+        messages2.Should().HaveCount(1);
+        
+        messages1.Clear();
+        messages2.Clear();
+        
+        //push message
+        await grain.PushMessage("test");
+        
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        
+        messages1.Should().HaveCount(1);
+        messages2.Should().HaveCount(1);
+        
+        messages1.Clear();
+        messages2.Clear();
 
         await connection1.StopAsync();
         await connection2.StopAsync();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -186,7 +187,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 .RemoveConnection(connectionId));
     }
 
-    
+    private static ConcurrentDictionary<string, StreamSubscriptionHandle<CompletionMessage>> _handlers = new ();
+    private static ConcurrentDictionary<string, SignalRAsyncObserver<CompletionMessage>> _handlers2 = new ();
      public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args, CancellationToken cancellationToken)
      {
          // send thing
@@ -203,7 +205,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
          var tcs = new TaskCompletionSource<T>();
          
          var stream = NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider, invocationId);
-         var handler = await stream.SubscribeAsync((completionMessage, token) =>
+
+
+         var observer = new SignalRAsyncObserver<CompletionMessage>();
+
+         observer.OnNextAsync = (completionMessage) =>
          {
              if (completionMessage.HasResult)
              {
@@ -215,7 +221,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
              }
 
              return Task.CompletedTask;
-         });
+         };
+         var handler = await stream.SubscribeAsync(observer);
+
+         _handlers2[invocationId] = observer;
+         _handlers[invocationId] = handler;
          
          await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
              .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T))); ;
@@ -243,7 +253,12 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
          try
          {
              var result =  await tcs.Task;
-             await handler.UnsubscribeAsync();
+
+             if (_handlers.TryRemove(invocationId, out var streamSubscriptionHandle))
+             {
+                 await streamSubscriptionHandle.UnsubscribeAsync();
+             }
+             
              return result;
              //return await task;
          }
@@ -337,16 +352,18 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private static string GenerateInvocationId()
     {
-        Span<byte> buffer = stackalloc byte[16];
-        var success = Guid.NewGuid().TryWriteBytes(buffer);
-        Debug.Assert(success);
-        // 16 * 4/3 = 21.333 which means base64 encoding will use 22 characters of actual data and 2 characters of padding ('=')
-        Span<char> base64 = stackalloc char[24];
-        success = Convert.TryToBase64Chars(buffer, base64, out var written);
-        Debug.Assert(success);
-        Debug.Assert(written == 24);
-        // Trim the two '=='
-        Debug.Assert(base64.EndsWith("=="));
-        return new string(base64[..^2]);
+
+        return Guid.NewGuid().ToString("N");
+        // Span<byte> buffer = stackalloc byte[16];
+        // var success = Guid.NewGuid().TryWriteBytes(buffer);
+        // Debug.Assert(success);
+        // // 16 * 4/3 = 21.333 which means base64 encoding will use 22 characters of actual data and 2 characters of padding ('=')
+        // Span<char> base64 = stackalloc char[24];
+        // success = Convert.TryToBase64Chars(buffer, base64, out var written);
+        // Debug.Assert(success);
+        // Debug.Assert(written == 24);
+        // // Trim the two '=='
+        // Debug.Assert(base64.EndsWith("=="));
+        // return new string(base64[..^2]);
     }
 }
