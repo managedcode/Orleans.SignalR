@@ -222,6 +222,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         var invocationMessage = new InvocationMessage(invocationId, methodName, args);
 
+        var ssssss = stream.StreamId.ToString();
+        
         if (connection == null)
         {
             // TODO: Need to handle other server going away while waiting for connection result

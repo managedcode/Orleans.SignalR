@@ -22,11 +22,14 @@ public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
         _ = Task.Run(() => NameHelperGenerator
             .GetStream<THub, CompletionMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), _invocationInfo.InvocationId)
             .OnNextAsync(message));
-        
+
         var stream = NameHelperGenerator
             .GetStream<THub, CompletionMessage>(
                 this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), _invocationInfo.InvocationId);
-        var sub = await stream.GetAllSubscriptionHandles();
+
+        var ssssss = stream.StreamId.ToString(); // STREAMID
+        var subs = await stream.GetAllSubscriptionHandles();
+
         await stream.OnNextAsync(message);
     }
 
