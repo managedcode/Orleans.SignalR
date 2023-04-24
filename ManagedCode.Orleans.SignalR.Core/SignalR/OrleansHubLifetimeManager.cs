@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
@@ -19,10 +20,6 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where THub : Hub
 {
-    private static readonly ConcurrentDictionary<string, StreamSubscriptionHandle<CompletionMessage>> _handlers = new();
-    private static readonly ConcurrentDictionary<string, SignalRAsyncObserver<CompletionMessage>> _observers = new();
-
-    //private readonly ClientResultsManager _clientResultsManager = new();
     private readonly IClusterClient _clusterClient;
     private readonly HubConnectionStore _connections = new();
     private readonly IOptions<HubOptions>? _globalHubOptions;
@@ -46,7 +43,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
     }
-
+    
+    
     public override async Task OnConnectedAsync(HubConnectionContext connection)
     {
         _connections.Add(connection);
@@ -203,60 +201,49 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         var tcs = new TaskCompletionSource<T>();
 
-        var stream =
-            NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider,
-                connectionId);
-
-
-        var observer = new SignalRAsyncObserver<CompletionMessage>();
-
-        observer.OnNextAsync = completionMessage =>
+        var stream = NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider,
+            invocationId);
+        var observer = new SignalRAsyncObserver<CompletionMessage>
         {
-            if (completionMessage.HasResult)
-                tcs.SetResult((T)completionMessage.Result);
-            else
-                tcs.SetException(new Exception(completionMessage.Error));
+            OnNextAsync = completionMessage =>
+            {
+                if (completionMessage.HasResult)
+                    tcs.SetResult((T)completionMessage.Result);
+                else
+                    tcs.SetException(new Exception(completionMessage.Error));
 
-            return Task.CompletedTask;
+                return Task.CompletedTask;
+            }
         };
         var handler = await stream.SubscribeAsync(observer);
-
-        _observers[invocationId] = observer;
-        _handlers[invocationId] = handler;
-
+        
         await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
             .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T)));
-        ;
 
-        //if (connection == null)
+        var invocationMessage = new InvocationMessage(invocationId, methodName, args);
+
+        if (connection == null)
         {
             // TODO: Need to handle other server going away while waiting for connection result
-            var invocation = await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
-                .InvokeConnectionAsync(connectionId, new InvocationMessage(invocationId, methodName, args));
+            var invocation = await NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
+                .SendToConnection(invocationMessage, connectionId);
 
             if (invocation == false)
                 throw new IOException($"Connection '{connectionId}' does not exist.");
         }
-        // else
-        // {
-        //     // We're sending to a single connection
-        //     // Write message directly to connection without caching it in memory
-        //     var message = new InvocationMessage(invocationId, methodName, args);
-        //     await connection.WriteAsync(message, cancellationToken);
-        // }
+        else
+        {
+            // We're sending to a single connection
+            // Write message directly to connection without caching it in memory
+            await connection.WriteAsync(invocationMessage, cancellationToken);
+        }
 
 
         try
         {
             var result = await tcs.Task;
-
-            if (_handlers.TryRemove(invocationId, out var streamSubscriptionHandle))
-                await streamSubscriptionHandle.UnsubscribeAsync();
-            
-            _observers.TryRemove(invocationId, out var observerSubscriptionHandle);
-
-                return result;
-            //return await task;
+            _ = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).RemoveInvocation();
+            return result;
         }
         catch
         {
@@ -264,6 +251,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             if (connection?.ConnectionAborted.IsCancellationRequested == true)
                 throw new IOException($"Connection '{connectionId}' disconnected.");
             throw;
+        }
+        finally
+        {
+            observer.Dispose();
+            _ = handler.UnsubscribeAsync();
         }
     }
 
@@ -276,7 +268,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     public override bool TryGetReturnType(string invocationId, [NotNullWhen(true)] out Type? type)
     {
         var result = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
-            .TryGetReturnType(invocationId).Result;
+            .TryGetReturnType().Result;
 
         type = result.GetReturnType();
         return result.Result;
@@ -338,27 +330,19 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         connection.Features.Set(invocationConnectionChannel);
         connection.Features.Set(invocationHandler);
     }
-
-    private static string GenerateServerName()
-    {
-        // Use the machine name for convenient diagnostics, but add a guid to make it unique.
-        // Example: MyServerName_02db60e5fab243b890a847fa5c4dcb29
-        return $"{Environment.MachineName}_{Guid.NewGuid():N}";
-    }
-
+    
     private static string GenerateInvocationId()
     {
-        return Guid.NewGuid().ToString("N");
-        // Span<byte> buffer = stackalloc byte[16];
-        // var success = Guid.NewGuid().TryWriteBytes(buffer);
-        // Debug.Assert(success);
-        // // 16 * 4/3 = 21.333 which means base64 encoding will use 22 characters of actual data and 2 characters of padding ('=')
-        // Span<char> base64 = stackalloc char[24];
-        // success = Convert.TryToBase64Chars(buffer, base64, out var written);
-        // Debug.Assert(success);
-        // Debug.Assert(written == 24);
-        // // Trim the two '=='
-        // Debug.Assert(base64.EndsWith("=="));
-        // return new string(base64[..^2]);
+        Span<byte> buffer = stackalloc byte[16];
+        var success = Guid.NewGuid().TryWriteBytes(buffer);
+        Debug.Assert(success);
+        // 16 * 4/3 = 21.333 which means base64 encoding will use 22 characters of actual data and 2 characters of padding ('=')
+        Span<char> base64 = stackalloc char[24];
+        success = Convert.TryToBase64Chars(buffer, base64, out var written);
+        Debug.Assert(success);
+        Debug.Assert(written == 24);
+        // Trim the two '=='
+        Debug.Assert(base64.EndsWith("=="));
+        return new string(base64[..^2]);
     }
 }

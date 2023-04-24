@@ -16,11 +16,9 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
 {
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<SignalRConnectionHolderGrain<THub>> _logger;
+    
     private readonly ConnectionState _state = new();
-
-    private Dictionary<string, string> _invocations = new();
-
-
+    
     public SignalRConnectionHolderGrain(ILogger<SignalRConnectionHolderGrain<THub>> logger, IGrainFactory grainFactory)
     {
         _logger = logger;
@@ -75,14 +73,17 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
         return Task.CompletedTask;
     }
 
-    public Task SendToConnection(InvocationMessage message, string connectionId)
+    public Task<bool> SendToConnection(InvocationMessage message, string connectionId)
     {
+        if (!_state.ConnectionIds.Contains(connectionId))
+            return Task.FromResult(false);
+        
         _ = Task.Run(() => NameHelperGenerator
             .GetStream<THub, InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
                 connectionId)
             .OnNextAsync(message));
 
-        return Task.CompletedTask;
+        return Task.FromResult(true);
     }
 
     public Task SendToConnections(InvocationMessage message, string[] connectionIds)

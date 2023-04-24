@@ -12,6 +12,6 @@ public interface ISignalRConnectionHolderGrain<THub> : IGrainWithStringKey
     Task SendToAll(InvocationMessage message);
     Task SendToAllExcept(InvocationMessage message, string[] excludedConnectionIds);
 
-    Task SendToConnection(InvocationMessage message, string connectionId);
+    Task<bool> SendToConnection(InvocationMessage message, string connectionId);
     Task SendToConnections(InvocationMessage message, string[] connectionIds);
 }

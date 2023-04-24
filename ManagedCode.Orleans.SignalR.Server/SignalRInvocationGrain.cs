@@ -13,33 +13,26 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
 {
     private InvocationInfo? _invocationInfo;
-
-    public Task<bool> InvokeConnectionAsync(string connectionId, InvocationMessage message)
-    {
-        //if (!_state.ConnectionIds.Contains(connectionId))
-        //    return Task.FromResult(false);
-
-        _ = Task.Run(() => NameHelperGenerator
-            .GetStream<THub, InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
-                connectionId)
-            .OnNextAsync(message));
-
-        return Task.FromResult(true);
-    }
-
+    
     public async Task TryCompleteResult(string connectionId, CompletionMessage message)
     {
+        if (_invocationInfo == null || _invocationInfo.ConnectionId != connectionId)
+            return;
+        
+        _ = Task.Run(() => NameHelperGenerator
+            .GetStream<THub, CompletionMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), _invocationInfo.InvocationId)
+            .OnNextAsync(message));
+        
         var stream = NameHelperGenerator
             .GetStream<THub, CompletionMessage>(
-                this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
-                connectionId);
+                this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), _invocationInfo.InvocationId);
         var sub = await stream.GetAllSubscriptionHandles();
         await stream.OnNextAsync(message);
     }
 
-    public Task<ReturnType> TryGetReturnType(string connectionId)
+    public Task<ReturnType> TryGetReturnType()
     {
-        if (_invocationInfo == null || _invocationInfo.ConnectionId != connectionId)
+        if (_invocationInfo == null)
             return Task.FromResult(new ReturnType());
 
         return Task.FromResult(new ReturnType

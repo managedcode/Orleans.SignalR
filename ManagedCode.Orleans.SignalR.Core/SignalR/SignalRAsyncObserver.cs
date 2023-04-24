@@ -4,7 +4,7 @@ using Orleans.Streams;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
-public class SignalRAsyncObserver<T> : IAsyncObserver<T>
+public class SignalRAsyncObserver<T> : IAsyncObserver<T>, IDisposable
 {
     public SignalRAsyncObserver(Func<T, Task>? onNextAction = null, Func<Exception, Task>? onErrorAction = null,
         Func<Task>? onCompletedAction = null)
@@ -39,4 +39,13 @@ public class SignalRAsyncObserver<T> : IAsyncObserver<T>
     public event EventHandler<T> OnNext;
     public event EventHandler OnCompleted;
     public event EventHandler<Exception> OnError;
+    public void Dispose()
+    {
+        OnNext = null;
+        OnCompleted  = null;
+        OnError = null;
+        OnNextAsync = null;
+        OnCompletedAsync = null;
+        OnErrorAsync = null;
+    }
 }

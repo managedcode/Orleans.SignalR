@@ -6,18 +6,18 @@ namespace ManagedCode.Orleans.SignalR.Core.Models;
 [GenerateSerializer]
 public class InvocationInfo
 {
-    public InvocationInfo(string invocationId, string connectionId, Type type)
+    public InvocationInfo(string connectionId, string invocationId, Type type)
     {
-        InvocationId = invocationId;
         ConnectionId = connectionId;
+        InvocationId = invocationId;
         SetResultType(type);
     }
 
     [Id(0)]
-    public string InvocationId { get; private set; }
-
-    [Id(1)]
     public string ConnectionId { get; private set; }
+    
+    [Id(1)]
+    public string InvocationId { get; private set; }
 
     [Id(2)]
     public string Type { get; private set; }
