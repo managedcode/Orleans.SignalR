@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -49,7 +44,8 @@ public class SignalRUserGrain<THub> : Grain, ISignalRUserGrain<THub>
 
         foreach (var connectionId in _state.ConnectionIds)
             tasks.Add(NameHelperGenerator
-                .GetStream<THub,InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), connectionId)
+                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
+                    connectionId)
                 .OnNextAsync(message));
 
         _ = Task.Run(() => Task.WhenAll(tasks));

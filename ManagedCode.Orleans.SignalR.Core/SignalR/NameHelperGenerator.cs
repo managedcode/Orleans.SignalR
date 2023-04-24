@@ -1,5 +1,4 @@
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans;
 using Orleans.Runtime;
 using Orleans.Streams;
@@ -17,12 +16,13 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRConnectionHolderGrain<THub>>(typeof(THub).FullName);
     }
-    
-    public static ISignalRInvocationGrain<THub> GetInvocationGrain<THub>(IGrainFactory grainFactory, string invocationId)
+
+    public static ISignalRInvocationGrain<THub> GetInvocationGrain<THub>(IGrainFactory grainFactory,
+        string invocationId)
     {
         return grainFactory.GetGrain<ISignalRInvocationGrain<THub>>(typeof(THub).FullName + "." + invocationId);
     }
-    
+
     public static ISignalRGroupHolderGrain<THub> GetGroupHolderGrain<THub>(IGrainFactory grainFactory)
     {
         return grainFactory.GetGrain<ISignalRGroupHolderGrain<THub>>(typeof(THub).FullName);

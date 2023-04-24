@@ -1,6 +1,6 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
@@ -12,48 +12,47 @@ public class SimpleTestHub : Hub
         await Clients.Caller.SendAsync("DoTest", "test");
         return new Random().Next(1, 100);
     }
-    
+
     public async Task<string> DoUser()
     {
         if (string.IsNullOrEmpty(Context.UserIdentifier))
-        {
             return "no";
-        }
         await Clients.User(Context.UserIdentifier).SendAsync("DoUser", Context.UserIdentifier);
         return Context.UserIdentifier;
     }
-    
+
     public async Task AddToGroup(string groupName)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
-        await Clients.Group(groupName).SendAsync("SendAll", $"{Context.ConnectionId} has joined the group {groupName}.");
+        await Clients.Group(groupName)
+            .SendAsync("SendAll", $"{Context.ConnectionId} has joined the group {groupName}.");
     }
-    
+
     public async Task RemoveFromGroup(string groupName)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
     }
-    
+
     public async Task GroupSendAsync(string groupName, string message)
     {
         await Clients.Group(groupName).SendAsync("SendAll", $"{Context.ConnectionId} send message: {message}.");
     }
-    
+
     public async Task ManyGroupSendAsync(string[] groupNames, string message)
     {
         await Clients.Groups(groupNames).SendAsync("SendAll", $"{Context.ConnectionId} send message: {message}.");
     }
-    
+
     public async Task SendGroupExceptAsync(string groupName, string message, string[] connections)
     {
-        await Clients.GroupExcept(groupName,connections).SendAsync("SendAll", $"{Context.ConnectionId} send message: {message}.");
+        await Clients.GroupExcept(groupName, connections)
+            .SendAsync("SendAll", $"{Context.ConnectionId} send message: {message}.");
     }
-    
+
     public async IAsyncEnumerable<int> Counter(
         int count,
         int delay,
-        [EnumeratorCancellation]
-        CancellationToken cancellationToken)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         for (var i = 0; i < count; i++)
         {
@@ -68,7 +67,7 @@ public class SimpleTestHub : Hub
             await Task.Delay(delay, cancellationToken);
         }
     }
-    
+
     public ChannelReader<int> CounterReader(
         int count,
         int delay,
@@ -111,64 +110,61 @@ public class SimpleTestHub : Hub
             writer.Complete(localException);
         }
     }
-    
+
     public async Task UploadStream(IAsyncEnumerable<string> stream)
     {
         await foreach (var item in stream)
         {
             if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStream)))
-            {
-                TestWebApplication.StaticLogs[nameof(UploadStream)] = new();
-            }
-     
+                TestWebApplication.StaticLogs[nameof(UploadStream)] = new ConcurrentQueue<string>();
+
             TestWebApplication.StaticLogs[nameof(UploadStream)].Enqueue(item);
         }
     }
-    
+
     public async Task UploadStreamChannelReader(ChannelReader<string> stream)
     {
         while (await stream.WaitToReadAsync())
+        while (stream.TryRead(out var item))
         {
-            while (stream.TryRead(out var item))
-            {
-                if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStreamChannelReader)))
-                {
-                    TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)] = new();
-                }
-     
-                TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)].Enqueue(item);
-            }
+            if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStreamChannelReader)))
+                TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)] = new ConcurrentQueue<string>();
+
+            TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)].Enqueue(item);
         }
     }
+
     public async Task<int> All()
     {
         await Clients.All.SendAsync("SendAll", "test");
         return new Random().Next(1, 100);
     }
+
     public async Task<int> Connections(string[] connections)
     {
         await Clients.Clients(connections).SendAsync("SendAll", "test");
         return new Random().Next(1, 100);
     }
+
     public async Task<int> Others()
     {
         await Clients.Others.SendAsync("SendAll", "test");
         return new Random().Next(1, 100);
     }
+
     public async Task<int> AllExcept(string[] connectionIds)
     {
         await Clients.AllExcept(connectionIds).SendAsync("SendAll", "test");
         return new Random().Next(1, 100);
     }
-    
+
     public async Task SentToUser(string userId, string message)
     {
         await Clients.User(userId).SendAsync("SendAll", message);
     }
-    
+
     public async Task SentToUserIds(string[] userIds, string message)
     {
         await Clients.Users(userIds).SendAsync("SendAll", message);
     }
-
 }

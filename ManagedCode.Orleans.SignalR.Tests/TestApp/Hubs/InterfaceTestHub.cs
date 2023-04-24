@@ -13,7 +13,7 @@ public class InterfaceTestHub : Hub<IClientInterfaceHub>, IServerInterfaceHub
     {
         return Clients.All.SendMessage(message);
     }
-    
+
     public async Task<string> WaitForMessage(string connectionId)
     {
         var message = await Clients.Client(connectionId).GetMessage();

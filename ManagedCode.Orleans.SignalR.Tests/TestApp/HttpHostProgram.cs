@@ -1,7 +1,6 @@
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,17 +18,13 @@ public class HttpHostProgram
         builder.Services.AddControllers();
 
         if (builder.Environment.IsProduction())
-        {
             builder.Services
                 .AddSignalR()
                 .AddOrleans();
-        }
         else
-        {
             builder.Services
                 .AddSignalR()
                 .AddStackExchangeRedis();
-        }
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
@@ -55,14 +50,10 @@ public class HttpHostProgram
 
         builder.Services.AddAuthorization(options =>
         {
-            options.AddPolicy("RequireAuthenticatedUser", policy =>
-            {
-                policy.RequireAuthenticatedUser();
-            });
+            options.AddPolicy("RequireAuthenticatedUser", policy => { policy.RequireAuthenticatedUser(); });
         });
-        
-        
-    
+
+
         var app = builder.Build();
 
         app.UseAuthentication();
@@ -72,7 +63,7 @@ public class HttpHostProgram
         app.MapControllers();
         app.MapHub<SimpleTestHub>(nameof(SimpleTestHub));
         app.MapHub<InterfaceTestHub>(nameof(InterfaceTestHub));
-        
+
         app.Run();
     }
 }

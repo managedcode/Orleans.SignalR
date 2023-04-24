@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Threading.Channels;
 using FluentAssertions;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
@@ -53,20 +52,18 @@ public class HubTests
         await hubConnection.StopAsync();
         hubConnection.State.Should().Be(HubConnectionState.Disconnected);
     }
-    
+
     [Fact]
     public async Task AuthInvokeAsyncAndOnTest()
     {
         var client = _firstApp.CreateHttpClient();
         var responseMessage = await client.GetAsync("/auth?user=TestUser");
         var token = await responseMessage.Content.ReadAsStringAsync();
-        var hubConnection1 = _firstApp.CreateSignalRClient(nameof(SimpleTestHub), configureConnection: options =>
-        {
-            options.AccessTokenProvider = () => Task.FromResult(token);
-        });
+        var hubConnection1 = _firstApp.CreateSignalRClient(nameof(SimpleTestHub),
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token); });
         var hubConnection2 = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
 
-        
+
         await hubConnection1.StartAsync();
         await hubConnection2.StartAsync();
         hubConnection1.State.Should().Be(HubConnectionState.Connected);
@@ -79,7 +76,7 @@ public class HubTests
             message1 = m;
             _outputHelper.WriteLine(message1);
         });
-        
+
         var message2 = string.Empty;
         hubConnection2.On("DoUser", (string m) =>
         {
@@ -105,7 +102,7 @@ public class HubTests
         var hubConnection1 = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
         await hubConnection1.StartAsync();
         hubConnection1.State.Should().Be(HubConnectionState.Connected);
-        
+
         var hubConnection2 = _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
         await hubConnection2.StartAsync();
         hubConnection2.State.Should().Be(HubConnectionState.Connected);
@@ -124,11 +121,11 @@ public class HubTests
             messages2.Add(m);
             _outputHelper.WriteLine(m);
         });
-        
+
         await hubConnection1.InvokeAsync("AddToGroup", "test");
         await hubConnection2.InvokeAsync("AddToGroup", "test");
-        
-        
+
+
         await Task.Delay(TimeSpan.FromSeconds(5));
 
 
@@ -139,7 +136,7 @@ public class HubTests
     [Fact]
     public async Task AsyncEnumerableServerToClientStreamingTest()
     {
-        int iterations = 100;
+        var iterations = 100;
         var hubConnection = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
         await hubConnection.StartAsync();
         hubConnection.State.Should().Be(HubConnectionState.Connected);
@@ -150,7 +147,7 @@ public class HubTests
         var stream = hubConnection.StreamAsync<int>(
             "Counter", iterations, 100, cancellationTokenSource.Token);
 
-        int count = 0;
+        var count = 0;
         await foreach (var number in stream)
         {
             count++;
@@ -162,10 +159,10 @@ public class HubTests
         do
         {
             await Task.Delay(TimeSpan.FromMilliseconds(500));
-        } 
-        while (count != iterations);
+        } while (count != iterations);
+
         cancellationTokenSource.Cancel();
-        
+
         await Task.Delay(TimeSpan.FromMilliseconds(1000));
 
         await hubConnection.StopAsync();
@@ -173,15 +170,15 @@ public class HubTests
 
         iterations.Should().Be(count);
     }
-    
+
     [Fact]
     public async Task StreamAsChannelAsyncServerToClientStreamingTest()
     {
-        int iterations = 100;
+        var iterations = 100;
         var hubConnection = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
         await hubConnection.StartAsync();
         hubConnection.State.Should().Be(HubConnectionState.Connected);
-        
+
         // Call "Cancel" on this CancellationTokenSource to send a cancellation message to
         // the server, which will trigger the corresponding token in the hub method.
         var cancellationTokenSource = new CancellationTokenSource();
@@ -193,26 +190,24 @@ public class HubTests
         {
             // Wait asynchronously for data to become available
             while (await channel.WaitToReadAsync())
-            {
                 // Read all currently available data synchronously, before waiting for more data
-                while (channel.TryRead(out var msg))
-                {
-                    count++;
-                    _outputHelper.WriteLine($"{count}/{iterations}");
-                
-                    if(count == iterations)
-                        cancellationTokenSource.Cancel();
-                }
+            while (channel.TryRead(out var msg))
+            {
+                count++;
+                _outputHelper.WriteLine($"{count}/{iterations}");
+
+                if (count == iterations)
+                    cancellationTokenSource.Cancel();
             }
         }
-        catch (System.OperationCanceledException e)
+        catch (OperationCanceledException e)
         {
             //skip
         }
-       
-        
+
+
         _outputHelper.WriteLine("Streaming completed");
-        
+
         await Task.Delay(TimeSpan.FromMilliseconds(1000));
 
         await hubConnection.StopAsync();
@@ -222,76 +217,69 @@ public class HubTests
     }
 
     [Fact]
-    public async Task  AsyncEnumerableClientToServerStreamingTest()
+    public async Task AsyncEnumerableClientToServerStreamingTest()
     {
         TestWebApplication.StaticLogs.Clear();
-        
-        int iterations = 100;
+
+        var iterations = 100;
         var hubConnection = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
         await hubConnection.StartAsync();
         hubConnection.State.Should().Be(HubConnectionState.Connected);
-        
+
         async IAsyncEnumerable<string> clientStreamData()
         {
             for (var i = 0; i < iterations; i++)
-            {
                 yield return i.ToString();
-            }
             //After the for loop has completed and the local function exits the stream completion will be sent.
         }
 
         await hubConnection.SendAsync("UploadStream", clientStreamData());
 
         await Task.Delay(TimeSpan.FromSeconds(5));
-        
+
         await hubConnection.StopAsync();
         hubConnection.State.Should().Be(HubConnectionState.Disconnected);
-        
+
         TestWebApplication.StaticLogs.Count.Should().Be(1);
         TestWebApplication.StaticLogs["UploadStream"].Count.Should().Be(iterations);
     }
-    
+
     [Fact]
-    public async Task  ChannelWriterClientToServerStreamingTest()
+    public async Task ChannelWriterClientToServerStreamingTest()
     {
         TestWebApplication.StaticLogs.Clear();
-        
-        int iterations = 100;
+
+        var iterations = 100;
         var hubConnection = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
         await hubConnection.StartAsync();
         hubConnection.State.Should().Be(HubConnectionState.Connected);
-        
+
         var channel = Channel.CreateBounded<string>(10);
         await hubConnection.SendAsync("UploadStreamChannelReader", channel.Reader);
         for (var i = 0; i < iterations; i++)
-        {
             await channel.Writer.WriteAsync(i.ToString());
-        }
         channel.Writer.Complete();
-        
+
         await Task.Delay(TimeSpan.FromSeconds(5));
         await hubConnection.StopAsync();
         hubConnection.State.Should().Be(HubConnectionState.Disconnected);
-        
+
         TestWebApplication.StaticLogs.Count.Should().Be(1);
         TestWebApplication.StaticLogs["UploadStreamChannelReader"].Count.Should().Be(iterations);
-
-    
     }
-    
+
     [Fact]
     public async Task AllTest()
     {
         List<HubConnection> connections = new();
-        ConcurrentDictionary<string ,string> messages = new();
+        ConcurrentDictionary<string, string> messages = new();
 
-        for (int i = 0; i < 10; i++) 
+        for (var i = 0; i < 10; i++)
         {
-            var hubConnection =  i % 2 == 0  ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub)) : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
-            hubConnection.On("SendAll", (string m) =>
-            {
-                messages[hubConnection.ConnectionId] = m;
-            });
+            var hubConnection = i % 2 == 0
+                ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
+                : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
+            hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
             await hubConnection.StartAsync();
             hubConnection.State.Should().Be(HubConnectionState.Connected);
             connections.Add(hubConnection);
@@ -302,27 +290,26 @@ public class HubTests
         await Task.Delay(TimeSpan.FromSeconds(5));
         messages.Count.Should().Be(10);
         messages.Clear();
-        
-        await connections[0].InvokeAsync<int>("Connections", connections.Take(5).Select(s=>s.ConnectionId));
+
+        await connections[0].InvokeAsync<int>("Connections", connections.Take(5).Select(s => s.ConnectionId));
         await Task.Delay(TimeSpan.FromSeconds(5));
         messages.Count.Should().Be(5);
-        
-        await Task.WhenAll(connections.Select(f=>f.StopAsync()));
+
+        await Task.WhenAll(connections.Select(f => f.StopAsync()));
     }
-    
+
     [Fact]
     public async Task OtherTest()
     {
         List<HubConnection> connections = new();
-        ConcurrentDictionary<string ,string> messages = new();
+        ConcurrentDictionary<string, string> messages = new();
 
-        for (int i = 0; i < 10; i++) 
+        for (var i = 0; i < 10; i++)
         {
-            var hubConnection =  i % 2 == 0  ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub)) : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
-            hubConnection.On("SendAll", (string m) =>
-            {
-                messages[hubConnection.ConnectionId] = m;
-            });
+            var hubConnection = i % 2 == 0
+                ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
+                : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
+            hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
             await hubConnection.StartAsync();
             hubConnection.State.Should().Be(HubConnectionState.Connected);
             connections.Add(hubConnection);
@@ -331,158 +318,150 @@ public class HubTests
         await connections[0].InvokeAsync<int>("Others");
 
         await Task.Delay(TimeSpan.FromSeconds(5));
-        messages.Count.Should().Be(10-1);
-        
-        await Task.WhenAll(connections.Select(f=>f.StopAsync()));
+        messages.Count.Should().Be(10 - 1);
+
+        await Task.WhenAll(connections.Select(f => f.StopAsync()));
     }
-    
+
     [Fact]
     public async Task AllExceptTest()
     {
         List<HubConnection> connections = new();
-        ConcurrentDictionary<string ,string> messages = new();
+        ConcurrentDictionary<string, string> messages = new();
 
-        for (int i = 0; i < 10; i++) 
+        for (var i = 0; i < 10; i++)
         {
-            var hubConnection =  i % 2 == 0  ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub)) : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
-            hubConnection.On("SendAll", (string m) =>
-            {
-                messages[hubConnection.ConnectionId] = m;
-            });
+            var hubConnection = i % 2 == 0
+                ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
+                : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
+            hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
             await hubConnection.StartAsync();
             hubConnection.State.Should().Be(HubConnectionState.Connected);
             connections.Add(hubConnection);
         }
 
-        await connections[0].InvokeAsync<int>("AllExcept", connections.Take(4).Select(s=>s.ConnectionId));
+        await connections[0].InvokeAsync<int>("AllExcept", connections.Take(4).Select(s => s.ConnectionId));
 
         await Task.Delay(TimeSpan.FromSeconds(5));
-        messages.Count.Should().Be(10-4);
-        
-        await Task.WhenAll(connections.Select(f=>f.StopAsync()));
+        messages.Count.Should().Be(10 - 4);
+
+        await Task.WhenAll(connections.Select(f => f.StopAsync()));
     }
-    
-     [Fact]
+
+    [Fact]
     public async Task GroupTest()
     {
         List<HubConnection> connections = new();
-        ConcurrentDictionary<string ,string> messages = new();
+        ConcurrentDictionary<string, string> messages = new();
 
-        for (int i = 0; i < 10; i++) 
+        for (var i = 0; i < 10; i++)
         {
-            var hubConnection =  i % 2 == 0  ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub)) : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
-            hubConnection.On("SendAll", (string m) =>
-            {
-                messages[hubConnection.ConnectionId] =  m;
-            });
+            var hubConnection = i % 2 == 0
+                ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
+                : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
+            hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
             await hubConnection.StartAsync();
             hubConnection.State.Should().Be(HubConnectionState.Connected);
             connections.Add(hubConnection);
         }
 
         foreach (var connection in connections)
-        {
             await connection.InvokeAsync("AddToGroup", "testGroup");
-        }
-        
+
         await connections[0].InvokeAsync("GroupSendAsync", "testGroup", "test");
-       
+
         //all group members
         await Task.Delay(TimeSpan.FromSeconds(3));
         messages.Count.Should().Be(10);
         messages.Clear();
-        
+
         //remove 2 connections from group
         await connections[0].InvokeAsync("RemoveFromGroup", "testGroup");
         await connections[1].InvokeAsync("RemoveFromGroup", "testGroup");
-        
+
         //add to another 2 connections from group
         await connections[0].InvokeAsync("AddToGroup", "testGroup2");
         await connections[1].InvokeAsync("AddToGroup", "testGroup2");
-       
+
         await Task.Delay(TimeSpan.FromSeconds(2));
         messages.Clear();
-        
+
         await connections[0].InvokeAsync("GroupSendAsync", "testGroup", "test");
         await Task.Delay(TimeSpan.FromSeconds(4));
         messages.Count.Should().Be(8);
         messages.Clear();
-        
+
         await connections[0].InvokeAsync("GroupSendAsync", "testGroup2", "test");
         await Task.Delay(TimeSpan.FromSeconds(4));
         messages.Count.Should().Be(2);
         messages.Clear();
-        
+
         //exclude 4 connections for request
-        await connections[0].InvokeAsync("SendGroupExceptAsync", "testGroup", "test", connections.Skip(4).Take(4).Select(s=>s.ConnectionId));
+        await connections[0].InvokeAsync("SendGroupExceptAsync", "testGroup", "test",
+            connections.Skip(4).Take(4).Select(s => s.ConnectionId));
 
         await Task.Delay(TimeSpan.FromSeconds(3));
         messages.Count.Should().Be(4);
         messages.Clear();
-        
+
         //send to all, but two was removed
         await connections[0].InvokeAsync("GroupSendAsync", "testGroup", "test");
         await Task.Delay(TimeSpan.FromSeconds(3));
         messages.Count.Should().Be(8);
         messages.Clear();
-        
+
         //send to all grups
-        await connections[0].InvokeAsync("ManyGroupSendAsync", new List<string>{"testGroup", "testGroup2"}, "test");
+        await connections[0].InvokeAsync("ManyGroupSendAsync", new List<string> { "testGroup", "testGroup2" }, "test");
         await Task.Delay(TimeSpan.FromSeconds(3));
         messages.Count.Should().Be(10);
         messages.Clear();
-        
-        await Task.WhenAll(connections.Select(f=>f.StopAsync()));
+
+        await Task.WhenAll(connections.Select(f => f.StopAsync()));
     }
 
     [Fact]
     public async Task UsersTest()
     {
         List<HubConnection> connections = new();
-        ConcurrentDictionary<string ,string> messages = new();
+        ConcurrentDictionary<string, string> messages = new();
 
-        for (int i = 0; i < 10; i++)
+        for (var i = 0; i < 10; i++)
         {
             var client = i % 2 == 0 ? _firstApp.CreateHttpClient() : _secondApp.CreateHttpClient();
-            var responseMessage = await client.GetAsync("/auth?user=TestUser"+i);
+            var responseMessage = await client.GetAsync("/auth?user=TestUser" + i);
             var token = await responseMessage.Content.ReadAsStringAsync();
 
-            for (int j = 0; j < 4; j++)
+            for (var j = 0; j < 4; j++)
             {
                 var hubConnection = j % 2 == 0
-                    ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub), configureConnection: options =>
-                    {
-                        options.AccessTokenProvider = () => Task.FromResult(token);
-                    })
-                    : _secondApp.CreateSignalRClient(nameof(SimpleTestHub), configureConnection: options =>
-                    {
-                        options.AccessTokenProvider = () => Task.FromResult(token);
-                    });
-                hubConnection.On("SendAll", (string m) =>
-                {
-                    messages[hubConnection.ConnectionId] =  m;
-                });
+                    ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub),
+                        configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token); })
+                    : _secondApp.CreateSignalRClient(nameof(SimpleTestHub),
+                        configureConnection: options =>
+                        {
+                            options.AccessTokenProvider = () => Task.FromResult(token);
+                        });
+                hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
                 await hubConnection.StartAsync();
                 hubConnection.State.Should().Be(HubConnectionState.Connected);
                 connections.Add(hubConnection);
             }
-           
         }
-        
+
 
         //send message to user with 4 connections
         await connections[0].InvokeAsync("SentToUser", "TestUser4", "test");
         await Task.Delay(TimeSpan.FromSeconds(3));
         messages.Count.Should().Be(4);
         messages.Clear();
-        
+
         //send message to user with 4 connections
-        await connections[0].InvokeAsync("SentToUserIds", new List<string>{ "TestUser4", "TestUser5", "nonExist"}, "test");
+        await connections[0].InvokeAsync("SentToUserIds", new List<string> { "TestUser4", "TestUser5", "nonExist" },
+            "test");
         await Task.Delay(TimeSpan.FromSeconds(3));
         messages.Count.Should().Be(8);
         messages.Clear();
 
-        await Task.WhenAll(connections.Select(f=>f.StopAsync()));
-        
+        await Task.WhenAll(connections.Select(f => f.StopAsync()));
     }
 }

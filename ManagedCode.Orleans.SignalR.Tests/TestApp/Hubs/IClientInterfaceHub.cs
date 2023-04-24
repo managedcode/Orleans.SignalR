@@ -1,6 +1,6 @@
 namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 
-public interface IClientInterfaceHub 
+public interface IClientInterfaceHub
 {
     Task SendRandom(int random);
     Task SendMessage(string message);

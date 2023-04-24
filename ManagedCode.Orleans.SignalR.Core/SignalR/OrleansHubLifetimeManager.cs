@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
@@ -20,7 +19,10 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where THub : Hub
 {
-   //private readonly ClientResultsManager _clientResultsManager = new();
+    private static readonly ConcurrentDictionary<string, StreamSubscriptionHandle<CompletionMessage>> _handlers = new();
+    private static readonly ConcurrentDictionary<string, SignalRAsyncObserver<CompletionMessage>> _observers = new();
+
+    //private readonly ClientResultsManager _clientResultsManager = new();
     private readonly IClusterClient _clusterClient;
     private readonly HubConnectionStore _connections = new();
     private readonly IOptions<HubOptions>? _globalHubOptions;
@@ -29,7 +31,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private readonly ILogger _logger;
     private readonly IOptions<OrleansSignalROptions> _options;
-    
+
     public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger,
         IOptions<OrleansSignalROptions> options,
         IClusterClient clusterClient,
@@ -187,108 +189,100 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 .RemoveConnection(connectionId));
     }
 
-    private static ConcurrentDictionary<string, StreamSubscriptionHandle<CompletionMessage>> _handlers = new ();
-    private static ConcurrentDictionary<string, SignalRAsyncObserver<CompletionMessage>> _handlers2 = new ();
-     public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args, CancellationToken cancellationToken)
-     {
-         // send thing
-         if (string.IsNullOrEmpty(connectionId))
-         {
-             throw new ArgumentNullException(nameof(connectionId));
-         }
+    public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args,
+        CancellationToken cancellationToken)
+    {
+        // send thing
+        if (string.IsNullOrEmpty(connectionId))
+            throw new ArgumentNullException(nameof(connectionId));
 
-         var connection = _connections[connectionId];
+        var connection = _connections[connectionId];
 
-         // ID needs to be unique for each invocation and across servers, we generate a GUID every time, that should provide enough uniqueness guarantees.
-         var invocationId = GenerateInvocationId();
+        // ID needs to be unique for each invocation and across servers, we generate a GUID every time, that should provide enough uniqueness guarantees.
+        var invocationId = GenerateInvocationId();
 
-         var tcs = new TaskCompletionSource<T>();
-         
-         var stream = NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider, invocationId);
+        var tcs = new TaskCompletionSource<T>();
 
-
-         var observer = new SignalRAsyncObserver<CompletionMessage>();
-
-         observer.OnNextAsync = (completionMessage) =>
-         {
-             if (completionMessage.HasResult)
-             {
-                 tcs.SetResult((T)completionMessage.Result);
-             }
-             else
-             {
-                 tcs.SetException(new Exception(completionMessage.Error));
-             }
-
-             return Task.CompletedTask;
-         };
-         var handler = await stream.SubscribeAsync(observer);
-
-         _handlers2[invocationId] = observer;
-         _handlers[invocationId] = handler;
-         
-         await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
-             .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T))); ;
-
-         //if (connection == null)
-         {
-             // TODO: Need to handle other server going away while waiting for connection result
-             var invocation = await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
-                 .InvokeConnectionAsync(connectionId, new InvocationMessage(invocationId, methodName, args));
-           
-             if (invocation == false)
-             {
-                 throw new IOException($"Connection '{connectionId}' does not exist.");
-             }
-         }
-         // else
-         // {
-         //     // We're sending to a single connection
-         //     // Write message directly to connection without caching it in memory
-         //     var message = new InvocationMessage(invocationId, methodName, args);
-         //     await connection.WriteAsync(message, cancellationToken);
-         // }
+        var stream =
+            NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider,
+                connectionId);
 
 
-         try
-         {
-             var result =  await tcs.Task;
+        var observer = new SignalRAsyncObserver<CompletionMessage>();
 
-             if (_handlers.TryRemove(invocationId, out var streamSubscriptionHandle))
-             {
-                 await streamSubscriptionHandle.UnsubscribeAsync();
-             }
-             
-             return result;
-             //return await task;
-         }
-         catch
-         {
-             // ConnectionAborted will trigger a generic "Canceled" exception from the task, let's convert it into a more specific message.
-             if (connection?.ConnectionAborted.IsCancellationRequested == true)
-             {
-                 throw new IOException($"Connection '{connectionId}' disconnected.");
-             }
-             throw;
-         }
-     }
-     
-     public override async Task SetConnectionResultAsync(string connectionId, CompletionMessage result)
-     {
-         await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, result.InvocationId)
-             .TryCompleteResult(connectionId, result);
-     }
-     
-     public override bool TryGetReturnType(string invocationId, [NotNullWhen(true)] out Type? type)
-     {
-         var result = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
-             .TryGetReturnType(invocationId).Result;
-         
-         type = result.GetReturnType();
-         return result.Result;
-     }
-     
-     private SignalRAsyncObserver<InvocationMessage> CreateInvocationMessageObserver(HubConnectionContext connection)
+        observer.OnNextAsync = completionMessage =>
+        {
+            if (completionMessage.HasResult)
+                tcs.SetResult((T)completionMessage.Result);
+            else
+                tcs.SetException(new Exception(completionMessage.Error));
+
+            return Task.CompletedTask;
+        };
+        var handler = await stream.SubscribeAsync(observer);
+
+        _observers[invocationId] = observer;
+        _handlers[invocationId] = handler;
+
+        await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
+            .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T)));
+        ;
+
+        //if (connection == null)
+        {
+            // TODO: Need to handle other server going away while waiting for connection result
+            var invocation = await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
+                .InvokeConnectionAsync(connectionId, new InvocationMessage(invocationId, methodName, args));
+
+            if (invocation == false)
+                throw new IOException($"Connection '{connectionId}' does not exist.");
+        }
+        // else
+        // {
+        //     // We're sending to a single connection
+        //     // Write message directly to connection without caching it in memory
+        //     var message = new InvocationMessage(invocationId, methodName, args);
+        //     await connection.WriteAsync(message, cancellationToken);
+        // }
+
+
+        try
+        {
+            var result = await tcs.Task;
+
+            if (_handlers.TryRemove(invocationId, out var streamSubscriptionHandle))
+                await streamSubscriptionHandle.UnsubscribeAsync();
+            
+            _observers.TryRemove(invocationId, out var observerSubscriptionHandle);
+
+                return result;
+            //return await task;
+        }
+        catch
+        {
+            // ConnectionAborted will trigger a generic "Canceled" exception from the task, let's convert it into a more specific message.
+            if (connection?.ConnectionAborted.IsCancellationRequested == true)
+                throw new IOException($"Connection '{connectionId}' disconnected.");
+            throw;
+        }
+    }
+
+    public override async Task SetConnectionResultAsync(string connectionId, CompletionMessage result)
+    {
+        await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, result.InvocationId)
+            .TryCompleteResult(connectionId, result);
+    }
+
+    public override bool TryGetReturnType(string invocationId, [NotNullWhen(true)] out Type? type)
+    {
+        var result = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
+            .TryGetReturnType(invocationId).Result;
+
+        type = result.GetReturnType();
+        return result.Result;
+    }
+
+    private SignalRAsyncObserver<InvocationMessage> CreateInvocationMessageObserver(HubConnectionContext connection)
     {
         var observer = new SignalRAsyncObserver<InvocationMessage>();
 
@@ -337,12 +331,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private async Task SubscribeToConnection(HubConnectionContext connection)
     {
-        var invocationConnectionChannel = NameHelperGenerator.GetStream<THub, InvocationMessage>(_clusterClient, _options.Value.StreamProvider, connection.ConnectionId);
-        var invocationHandler = await invocationConnectionChannel.SubscribeAsync(CreateInvocationMessageObserver(connection));
+        var invocationConnectionChannel = NameHelperGenerator.GetStream<THub, InvocationMessage>(_clusterClient,
+            _options.Value.StreamProvider, connection.ConnectionId);
+        var invocationHandler =
+            await invocationConnectionChannel.SubscribeAsync(CreateInvocationMessageObserver(connection));
         connection.Features.Set(invocationConnectionChannel);
         connection.Features.Set(invocationHandler);
     }
-    
+
     private static string GenerateServerName()
     {
         // Use the machine name for convenient diagnostics, but add a guid to make it unique.
@@ -352,7 +348,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private static string GenerateInvocationId()
     {
-
         return Guid.NewGuid().ToString("N");
         // Span<byte> buffer = stackalloc byte[16];
         // var success = Guid.NewGuid().TryWriteBytes(buffer);

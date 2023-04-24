@@ -32,7 +32,8 @@ public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
 
         foreach (var connectionId in _state.ConnectionIds)
             tasks.Add(NameHelperGenerator
-                .GetStream<THub,InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), connectionId)
+                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
+                    connectionId)
                 .OnNextAsync(message));
 
         _ = Task.Run(() => Task.WhenAll(tasks));
@@ -51,7 +52,8 @@ public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
                 continue;
 
             tasks.Add(NameHelperGenerator
-                .GetStream<THub,InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), connectionId)
+                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider),
+                    connectionId)
                 .OnNextAsync(message));
         }
 

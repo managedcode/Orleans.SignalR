@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.SignalR;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Cluster.Grains;
 
-public class TestGrain :Grain, ITestGrain
+public class TestGrain : Grain, ITestGrain
 {
     private readonly IHubContext<InterfaceTestHub> _hubContext;
 
@@ -12,7 +12,7 @@ public class TestGrain :Grain, ITestGrain
     {
         _hubContext = hubContext;
     }
-    
+
 
     public Task PushRandom()
     {
@@ -26,7 +26,8 @@ public class TestGrain :Grain, ITestGrain
 
     public async Task<string> GetMessage(string connectionId)
     {
-        var message = await _hubContext.Clients.Client(connectionId).InvokeAsync<string>("GetMessage", CancellationToken.None);
+        var message = await _hubContext.Clients.Client(connectionId)
+            .InvokeAsync<string>("GetMessage", CancellationToken.None);
         return message;
     }
 }

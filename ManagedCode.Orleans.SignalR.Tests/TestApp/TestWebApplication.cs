@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections.Client;
@@ -13,11 +12,9 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp;
 
 public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
 {
+    private readonly TestCluster _cluster;
     private readonly int _port;
     private readonly bool _useOrleans;
-    private readonly TestCluster _cluster;
-
-    public static ConcurrentDictionary<string, ConcurrentQueue<string>> StaticLogs { get; } = new();
 
     public TestWebApplication(SiloCluster cluster, int port = 80, bool useOrleans = true)
     {
@@ -26,17 +23,14 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
         _cluster = cluster.Cluster;
     }
 
+    public static ConcurrentDictionary<string, ConcurrentQueue<string>> StaticLogs { get; } = new();
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         if (_useOrleans)
-        {
             builder.UseEnvironment("Production");
-        }
         else
-        {
             builder.UseEnvironment("Development");
-        }
-
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -47,17 +41,17 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
 
     public HttpClient CreateHttpClient(WebApplicationFactoryClientOptions options = null)
     {
-        options ??= new ();
+        options ??= new WebApplicationFactoryClientOptions();
         options.BaseAddress = new Uri($"http://localhost:{_port}");
         var client = CreateClient(options);
         return client;
     }
 
-    
+
     public HubConnection CreateSignalRClient(string hubUrl, Action<HubConnectionBuilder>? configure = null,
-        Action<HttpConnectionOptions>? configureConnection = null )
+        Action<HttpConnectionOptions>? configureConnection = null)
     {
-        var client = CreateClient(new WebApplicationFactoryClientOptions()
+        var client = CreateClient(new WebApplicationFactoryClientOptions
         {
             BaseAddress = new Uri($"http://localhost:{_port}")
         });
@@ -65,10 +59,9 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
         configure?.Invoke(builder);
         return builder
             .WithUrl(new Uri(client.BaseAddress, hubUrl), options =>
-            { 
+            {
                 configureConnection?.Invoke(options);
                 options.HttpMessageHandlerFactory = _ => Server.CreateHandler();
             }).Build();
     }
 }
-
