@@ -1,4 +1,8 @@
+using System;
+using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Orleans.Hosting;
 
 namespace ManagedCode.Orleans.SignalR.Server.Extensions;
@@ -9,13 +13,16 @@ namespace ManagedCode.Orleans.SignalR.Server.Extensions;
 /// </summary>
 public static class OrleansDependencyInjectionExtensions
 {
-    /// <summary>
-    ///     Adds scale-out to a <see cref="ISignalRServerBuilder" />, using a shared Redis server.
-    /// </summary>
-    /// <param name="signalrBuilder">The <see cref="ISignalRServerBuilder" />.</param>
-    /// <returns>The same instance of the <see cref="ISignalRServerBuilder" /> for chaining.</returns>
-    public static ISiloBuilder AddOrleansSignalr(this ISiloBuilder siloBuilder)
+    public static ISignalRServerBuilder AddOrleans(this ISignalRServerBuilder signalrBuilder)
     {
-        return siloBuilder;
+        signalrBuilder.Services.AddSingleton(typeof(HubLifetimeManager<>), typeof(OrleansHubLifetimeManager<>));
+        return signalrBuilder;
+    }
+    
+    public static ISignalRServerBuilder AddOrleans(this ISignalRServerBuilder signalrBuilder, Action<OrleansSignalROptions> options)
+    {
+        signalrBuilder.Services.AddOptions<OrleansSignalROptions>().Configure(options);
+        signalrBuilder.Services.AddSingleton(typeof(HubLifetimeManager<>), typeof(OrleansHubLifetimeManager<>));
+        return signalrBuilder;
     }
 }
