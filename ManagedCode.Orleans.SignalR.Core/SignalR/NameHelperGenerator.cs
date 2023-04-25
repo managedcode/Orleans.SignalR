@@ -9,7 +9,7 @@ public static class NameHelperGenerator
 {
     private static string ConnectionNamespace<THub, TMessage>()
     {
-        return $"{typeof(THub).Name}.{typeof(TMessage).Name}";
+        return $"{typeof(THub).FullName}.{typeof(TMessage).FullName}";
     }
 
     public static ISignalRConnectionHolderGrain<THub> GetConnectionHolderGrain<THub>(IGrainFactory grainFactory)

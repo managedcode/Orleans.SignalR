@@ -1,8 +1,10 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 
@@ -12,15 +14,17 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRGroupHolderGrain<THub> : Grain, ISignalRGroupHolderGrain<THub>
 {
     private readonly IGrainFactory _grainFactory;
+    private readonly IOptions<OrleansSignalROptions> _options;
     private readonly ConnectionGroupState _groups = new();
 
     private readonly ILogger<SignalRGroupHolderGrain<THub>> _logger;
 
 
-    public SignalRGroupHolderGrain(ILogger<SignalRGroupHolderGrain<THub>> logger, IGrainFactory grainFactory)
+    public SignalRGroupHolderGrain(ILogger<SignalRGroupHolderGrain<THub>> logger, IGrainFactory grainFactory, IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
         _grainFactory = grainFactory;
+        _options = options;
     }
 
 

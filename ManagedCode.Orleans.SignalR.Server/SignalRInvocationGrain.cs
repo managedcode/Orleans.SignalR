@@ -4,6 +4,7 @@ using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 
@@ -13,24 +14,30 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
 {
     private InvocationInfo? _invocationInfo;
+    private IOptions<OrleansSignalROptions> _options;
+    
+    public SignalRInvocationGrain(IOptions<OrleansSignalROptions> options)
+    {
+        _options = options;
+    }
     
     public async Task TryCompleteResult(string connectionId, CompletionMessage message)
     {
         if (_invocationInfo == null || _invocationInfo.ConnectionId != connectionId)
             return;
-        
-        _ = Task.Run(() => NameHelperGenerator
-            .GetStream<THub, CompletionMessage>(this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), _invocationInfo.InvocationId)
-            .OnNextAsync(message));
-
+       
         var stream = NameHelperGenerator
             .GetStream<THub, CompletionMessage>(
-                this.GetStreamProvider(new OrleansSignalROptions().StreamProvider), _invocationInfo.InvocationId);
+                this.GetStreamProvider(_options.Value.StreamProvider), _invocationInfo.InvocationId);
 
         var ssssss = stream.StreamId.ToString(); // STREAMID
         var subs = await stream.GetAllSubscriptionHandles();
-
-        await stream.OnNextAsync(message);
+        
+        //
+        
+        _ = Task.Run(() => NameHelperGenerator
+            .GetStream<THub, CompletionMessage>(this.GetStreamProvider(_options.Value.StreamProvider), _invocationInfo.InvocationId)
+            .OnNextAsync(message));
     }
 
     public Task<ReturnType> TryGetReturnType()

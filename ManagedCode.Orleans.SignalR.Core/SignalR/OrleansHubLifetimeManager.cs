@@ -201,8 +201,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         var tcs = new TaskCompletionSource<T>();
 
-        var stream = NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider,
-            invocationId);
+        var stream = NameHelperGenerator.GetStream<THub, CompletionMessage>(_clusterClient, _options.Value.StreamProvider, invocationId);
         var observer = new SignalRAsyncObserver<CompletionMessage>
         {
             OnNextAsync = completionMessage =>
@@ -216,6 +215,10 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             }
         };
         var handler = await stream.SubscribeAsync(observer);
+        
+        var subs = await stream.GetAllSubscriptionHandles();
+        await handler.ResumeAsync(observer);
+        subs = await stream.GetAllSubscriptionHandles();
         
         await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
             .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T)));
@@ -239,11 +242,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             // Write message directly to connection without caching it in memory
             await connection.WriteAsync(invocationMessage, cancellationToken);
         }
-
-
+        
         try
         {
             var result = await tcs.Task;
+            //handler.UnsubscribeAsync();
             _ = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).RemoveInvocation();
             return result;
         }
@@ -253,11 +256,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             if (connection?.ConnectionAborted.IsCancellationRequested == true)
                 throw new IOException($"Connection '{connectionId}' disconnected.");
             throw;
-        }
-        finally
-        {
-            observer.Dispose();
-            _ = handler.UnsubscribeAsync();
         }
     }
 
@@ -317,6 +315,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             // Forward message from other server to client
             // Normal client method invokes and client result invokes use the same message
             return connection.WriteAsync(invocation, CancellationToken.None).AsTask();
+            
+            // if it is not working - then connection is closed?
         };
 
         return observer;
