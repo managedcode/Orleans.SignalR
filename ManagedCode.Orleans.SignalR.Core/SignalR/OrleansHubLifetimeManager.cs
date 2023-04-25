@@ -215,18 +215,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             }
         };
         var handler = await stream.SubscribeAsync(observer);
-        
-        var subs = await stream.GetAllSubscriptionHandles();
-        await handler.ResumeAsync(observer);
-        subs = await stream.GetAllSubscriptionHandles();
-        
         await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
             .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T)));
 
         var invocationMessage = new InvocationMessage(invocationId, methodName, args);
 
-        var ssssss = stream.StreamId.ToString();
-        
         if (connection == null)
         {
             // TODO: Need to handle other server going away while waiting for connection result
@@ -247,6 +240,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             var result = await tcs.Task;
             //handler.UnsubscribeAsync();
+            //observer.Dispose();
             _ = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).RemoveInvocation();
             return result;
         }
@@ -278,45 +272,21 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var observer = new SignalRAsyncObserver<InvocationMessage>();
 
-        observer.OnNextAsync = invocation =>
+        observer.OnNextAsync = async invocation =>
         {
-            // This is a Client result we need to setup state for the completion and forward the message to the client
-            if (!string.IsNullOrEmpty(invocation.InvocationId))
+            try
             {
-                var x = 5;
-
-                // await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId)
-                //     .TryCompleteResult(connection.ConnectionId, completionMessage);
-                //
-                // CancellationTokenRegistration? tokenRegistration = null;
-                // _clientResultsManager.AddInvocation(invocation.InvocationId, (typeof(RawResult), connection.ConnectionId, null, async (_, completionMessage) =>
-                //     {
-                //         tokenRegistration?.Dispose();
-                //         try
-                //         {
-                //
-                //
-                //         }
-                //         catch (Exception ex)
-                //         {
-                //             _logger.LogError(completionMessage.InvocationId, ex);
-                //         }
-                //     }));
-                //
-                // // TODO: this isn't great
-                // tokenRegistration = connection.ConnectionAborted.UnsafeRegister(_ =>
-                // {
-                //     await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId)
-                //     var invocationInfo = _clientResultsManager.RemoveInvocation(invocation.InvocationId);
-                //     invocationInfo?.Completion(null!, CompletionMessage.WithError(invocation.InvocationId, "Connection disconnected."));
-                // }, null);
+                // Forward message from other server to client
+                // Normal client method invokes and client result invokes use the same message
+                await connection.WriteAsync(invocation, CancellationToken.None);
             }
-
-            // Forward message from other server to client
-            // Normal client method invokes and client result invokes use the same message
-            return connection.WriteAsync(invocation, CancellationToken.None).AsTask();
-            
-            // if it is not working - then connection is closed?
+            catch (Exception e)
+            {
+                if(!string.IsNullOrEmpty(invocation.InvocationId))
+                    await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId).RemoveInvocation();
+                //     invocationInfo?.Completion(null!, CompletionMessage.WithError(invocation.InvocationId, "Connection disconnected."));
+                throw;
+            }
         };
 
         return observer;

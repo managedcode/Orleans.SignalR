@@ -1,3 +1,4 @@
+using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Server.Extensions;
 using Microsoft.Extensions.DependencyInjection;
 using Orleans.TestingHost;
@@ -10,12 +11,15 @@ public class TestSiloConfigurations : ISiloConfigurator
     {
         //AddOrleansSignalr
 
-        siloBuilder.AddMemoryStreams("SimpleStreamProvider")
+        siloBuilder
+            .AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider)
             .AddMemoryGrainStorage("PubSubStore");
         
-        siloBuilder.Services.AddSignalR().AddOrleans(options =>
-        {
-            options.StreamProvider = "SimpleStreamProvider";
-        });
+        siloBuilder.Services
+            .AddSignalR()
+            .AddOrleans(options =>
+            {
+                options.StreamProvider = OrleansSignalROptions.DefaultSignalRStreamProvider;
+            });
     }
 }

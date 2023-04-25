@@ -26,8 +26,9 @@ public class TestGrain : Grain, ITestGrain
 
     public async Task<string> GetMessage(string connectionId)
     {
-        var message = await _hubContext.Clients.Client(connectionId)
-            .InvokeAsync<string>("GetMessage", CancellationToken.None);
+        var message = await Task.Run(()=> _hubContext.Clients.Client(connectionId)
+            .InvokeAsync<string>("GetMessage", CancellationToken.None)) ;
+        
         return message;
     }
 }

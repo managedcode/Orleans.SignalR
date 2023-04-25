@@ -3,6 +3,7 @@ using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Xunit;
 using Xunit.Abstractions;
@@ -34,7 +35,29 @@ public class InterfaceHubTests
     }
 
     [Fact]
-    public async Task InvokeAsyncTest()
+    public async Task InvokeAsyncSignalRTest()
+    {
+        var connection1 = await CreateHubConnection(_firstApp);
+        var connection2 = await CreateHubConnection(_secondApp);
+        
+        connection1.On("GetMessage", () => "connection1");
+        connection2.On("GetMessage", () => "connection2");
+        
+        //invoke in SignalR
+        var msg1 = await connection2.InvokeAsync<string>("WaitForMessage", connection1.ConnectionId);
+        msg1.Should().Be("connection1");
+        
+        var msg2 = await connection2.InvokeAsync<string>("WaitForMessage", connection2.ConnectionId);
+        msg2.Should().Be("connection2");
+        
+        await Assert.ThrowsAsync<HubException>(async () => await connection2.InvokeAsync<string>("WaitForMessage", "non-existing"));
+        
+        await connection1.StopAsync();
+        await connection2.StopAsync();
+    }
+    
+    [Fact]
+    public async Task InvokeAsyncGrainTest()
     {
         var connection1 = await CreateHubConnection(_firstApp);
         var connection2 = await CreateHubConnection(_secondApp);
@@ -46,27 +69,17 @@ public class InterfaceHubTests
         
         connection2.On("GetMessage", () => "connection2");
         
-        //invoke in SignalR
-        try
-        {
-            var msg = await connection2.InvokeAsync<string>("WaitForMessage", connection1.ConnectionId);
-            msg.Should().Be("connection1");
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e);
-            throw;
-        }
-
-        
         //invoke in Grain
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
+       
         var msg1 = await grain.GetMessage(connection1.ConnectionId);
         var msg2 = await grain.GetMessage(connection2.ConnectionId);
-        //var msg3 = await grain.GetMessage("non-existing");
+      
+        await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
 
-        msg1.Should().Be(connection1.ConnectionId);
-        msg2.Should().Be(connection2.ConnectionId);
+
+        msg1.Should().Be("connection1");
+        msg2.Should().Be("connection2");
         
         
         await connection1.StopAsync();
@@ -93,7 +106,7 @@ public class InterfaceHubTests
         //push random
         await grain.PushRandom();
 
-        await Task.Delay(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromSeconds(3));
 
         messages1.Should().HaveCount(1);
         messages2.Should().HaveCount(1);
@@ -104,7 +117,7 @@ public class InterfaceHubTests
         //push message
         await grain.PushMessage("test");
 
-        await Task.Delay(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromSeconds(3));
 
         messages1.Should().HaveCount(1);
         messages2.Should().HaveCount(1);

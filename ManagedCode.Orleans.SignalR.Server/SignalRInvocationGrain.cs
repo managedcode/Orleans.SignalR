@@ -25,19 +25,10 @@ public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
     {
         if (_invocationInfo == null || _invocationInfo.ConnectionId != connectionId)
             return;
-       
-        var stream = NameHelperGenerator
-            .GetStream<THub, CompletionMessage>(
-                this.GetStreamProvider(_options.Value.StreamProvider), _invocationInfo.InvocationId);
-
-        var ssssss = stream.StreamId.ToString(); // STREAMID
-        var subs = await stream.GetAllSubscriptionHandles();
-        
-        //
         
         _ = Task.Run(() => NameHelperGenerator
-            .GetStream<THub, CompletionMessage>(this.GetStreamProvider(_options.Value.StreamProvider), _invocationInfo.InvocationId)
-            .OnNextAsync(message));
+            .GetStream<THub, CompletionMessage>(
+                this.GetStreamProvider(_options.Value.StreamProvider), _invocationInfo.InvocationId).OnNextAsync(message));
     }
 
     public Task<ReturnType> TryGetReturnType()

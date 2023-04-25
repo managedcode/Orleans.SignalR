@@ -10,10 +10,13 @@ public class TestClientConfigurations : IClientBuilderConfigurator
 {
     public void Configure(IConfiguration configuration, IClientBuilder clientBuilder)
     {
-        clientBuilder.AddMemoryStreams("SimpleStreamProvider");
-        clientBuilder.Services.AddSignalR().AddOrleans(options =>
-        {
-            options.StreamProvider = "SimpleStreamProvider";
-        });
+        clientBuilder.AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider);
+        
+        clientBuilder.Services
+            .AddSignalR()
+            .AddOrleans(options =>
+            {
+                options.StreamProvider = OrleansSignalROptions.DefaultSignalRStreamProvider;
+            });
     }
 }
