@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -7,33 +8,40 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
+using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 public class SignalRGroupHolderGrain<THub> : Grain, ISignalRGroupHolderGrain<THub>
 {
-    private readonly IGrainFactory _grainFactory;
-    private readonly IOptions<OrleansSignalROptions> _options;
-    private readonly ConnectionGroupState _groups = new();
-
     private readonly ILogger<SignalRGroupHolderGrain<THub>> _logger;
-
-
-    public SignalRGroupHolderGrain(ILogger<SignalRGroupHolderGrain<THub>> logger, IGrainFactory grainFactory, IOptions<OrleansSignalROptions> options)
+    private readonly IPersistentState<ConnectionGroupState> _stateStorage;
+    private readonly IOptions<OrleansSignalROptions> _options;
+    
+    public SignalRGroupHolderGrain(ILogger<SignalRGroupHolderGrain<THub>> logger,  
+        [PersistentState(nameof(SignalRGroupHolderGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionGroupState> stateStorage,
+        IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
-        _grainFactory = grainFactory;
+        _stateStorage = stateStorage;
         _options = options;
     }
 
+    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
+    {
+        if(_stateStorage.State.Groups.Count == 0)
+            await _stateStorage.ClearStateAsync();
+        else
+            await _stateStorage.WriteStateAsync();
+    }
 
     public Task AddConnectionToGroup(string connectionId, string groupName)
     {
-        if (_groups.Groups.TryGetValue(groupName, out var state))
+        if (_stateStorage.State.Groups.TryGetValue(groupName, out var state))
             state.ConnectionIds.Add(connectionId);
         else
-            _groups.Groups.Add(groupName, new ConnectionState
+            _stateStorage.State.Groups.Add(groupName, new ConnectionState
             {
                 ConnectionIds = new HashSet<string> { connectionId }
             });
@@ -43,7 +51,7 @@ public class SignalRGroupHolderGrain<THub> : Grain, ISignalRGroupHolderGrain<THu
 
     public Task RemoveConnectionFromGroup(string connectionId, string groupName)
     {
-        if (_groups.Groups.TryGetValue(groupName, out var state))
+        if (_stateStorage.State.Groups.TryGetValue(groupName, out var state))
             state.ConnectionIds.Remove(connectionId);
         return Task.CompletedTask;
     }
@@ -51,7 +59,7 @@ public class SignalRGroupHolderGrain<THub> : Grain, ISignalRGroupHolderGrain<THu
 
     public Task RemoveConnection(string connectionId)
     {
-        foreach (var connections in _groups.Groups.Values)
+        foreach (var connections in _stateStorage.State.Groups.Values)
             connections.ConnectionIds.Remove(connectionId);
         return Task.CompletedTask;
     }

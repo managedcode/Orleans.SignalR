@@ -17,14 +17,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-
-        <PackageReference Include="ManagedCode.Communication" Version="2.0.19"/>
-        <PackageReference Include="ManagedCode.Communication.Orleans" Version="2.0.19"/>
-
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="7.0.0"/>
-
-        <PackageReference Include="Microsoft.Orleans.Reminders" Version="7.1.2"/>
-
         <PackageReference Include="Microsoft.Orleans.Serialization" Version="7.1.2"/>
         <PackageReference Include="Microsoft.Orleans.Server" Version="7.1.2"/>
         <PackageReference Include="Microsoft.Orleans.Streaming" Version="7.1.2"/>

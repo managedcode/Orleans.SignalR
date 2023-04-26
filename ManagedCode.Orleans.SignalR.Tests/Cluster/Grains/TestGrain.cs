@@ -12,8 +12,7 @@ public class TestGrain : Grain, ITestGrain
     {
         _hubContext = hubContext;
     }
-
-
+    
     public Task PushRandom()
     {
         return _hubContext.Clients.All.SendAsync("SendRandom", new Random().Next());
@@ -27,7 +26,7 @@ public class TestGrain : Grain, ITestGrain
     public async Task<string> GetMessage(string connectionId)
     {
         var message = await Task.Run(()=> _hubContext.Clients.Client(connectionId)
-            .InvokeAsync<string>("GetMessage", CancellationToken.None)) ;
+            .InvokeAsync<string>("GetMessage", CancellationToken.None));
         
         return message;
     }

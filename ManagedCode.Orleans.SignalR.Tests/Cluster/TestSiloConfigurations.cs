@@ -9,11 +9,10 @@ public class TestSiloConfigurations : ISiloConfigurator
 {
     public void Configure(ISiloBuilder siloBuilder)
     {
-        //AddOrleansSignalr
-
         siloBuilder
+            .AddMemoryGrainStorage("PubSubStore")
             .AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider)
-            .AddMemoryGrainStorage("PubSubStore");
+            .AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
         
         siloBuilder.Services
             .AddSignalR()
