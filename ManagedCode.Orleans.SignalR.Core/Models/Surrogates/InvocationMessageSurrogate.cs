@@ -3,8 +3,8 @@ using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Models;
 
-[GenerateSerializer]
 [Immutable]
+[GenerateSerializer]
 public readonly struct InvocationMessageSurrogate
 {
     [Id(0)] public readonly string? InvocationId;

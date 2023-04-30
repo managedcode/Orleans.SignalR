@@ -15,6 +15,7 @@ using Orleans.Runtime;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
+//[GrainType("ManagedCode.SignalRConnectionHolderGrain")]
 public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolderGrain<THub>
 {
     private readonly ILogger<SignalRConnectionHolderGrain<THub>> _logger;
