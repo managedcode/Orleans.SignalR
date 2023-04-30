@@ -1,8 +1,26 @@
 using System;
 using System.Threading.Tasks;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans.Streams;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
+
+public class SignalRConnection<THub> : ISignalRConnection<THub>
+{
+    public SignalRConnection(Func<InvocationMessage, Task>? onNextAction = null)
+    {
+        OnNextAsync = onNextAction;
+    }
+    
+    public Task SendMessage(InvocationMessage message)
+    {
+        return OnNextAsync?.Invoke(message) ?? Task.CompletedTask;
+    }
+    
+    public Func<InvocationMessage, Task>? OnNextAsync { get; set; }
+}
+
 
 public class SignalRAsyncObserver<T> : IAsyncObserver<T>, IDisposable
 {

@@ -28,12 +28,10 @@ public class StressTests
         _secondApp = new TestWebApplication(_siloCluster, 8082);
     }
 
-    private async Task<HubConnection> CreateHubConnection(TestWebApplication app)
+    private Task<HubConnection> CreateHubConnection(TestWebApplication app)
     {
         var hubConnection = app.CreateSignalRClient(nameof(StressTestHub));
-        await hubConnection.StartAsync();
-        hubConnection.State.Should().Be(HubConnectionState.Connected);
-        return hubConnection;
+        return Task.FromResult(hubConnection);
     } 
     
     private async Task<HubConnection> CreateHubConnection(string user, TestWebApplication app)
@@ -43,8 +41,6 @@ public class StressTests
         var token = await responseMessage.Content.ReadAsStringAsync();
         var hubConnection = app.CreateSignalRClient(nameof(StressTestHub),
             configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token); });
-        await hubConnection.StartAsync();
-        hubConnection.State.Should().Be(HubConnectionState.Connected);
         return hubConnection;
     }
     
@@ -79,36 +75,31 @@ public class StressTests
                     connection = await CreateHubConnection(server);
                 }
 
+                connection.On("All", (string m) =>
+                {
+                    Interlocked.Increment(ref allCount);
+                });
+                
+                await connection.StartAsync();
+                connection.State.Should().Be(HubConnectionState.Connected);
+                
                 if (!string.IsNullOrEmpty(group))
                 {
                     groups[group] = 0;
                     await connection.InvokeAsync("AddToGroup", "test");
                 }
-                
-                connection.On("All", (string m) =>
-                {
-                    Interlocked.Increment(ref allCount);
-                });
+
+
                 connections.Enqueue(connection);
             }
         }
 
 
-        await Task.WhenAll(
-            CreateConnections(10_000), 
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000),
-            CreateConnections(10_000)
-        );
        
-           
-        
+        await Task.WhenAll(Enumerable.Repeat(100, 100).Select(CreateConnections));
+
+
+
         sw.Stop();
         _outputHelper.WriteLine($"Init time {sw.Elapsed}; connections {connections.Count}; users {users.Count}; groups {groups.Count}");
         sw.Reset();
@@ -118,14 +109,22 @@ public class StressTests
         //--------------------------------
         //---SignalR
         //Init time 00:01:16.6498487; connections 100000; users 10000; groups 10000
-        //All count 100000
-        //All connections: 100000; recived: 100000 messages; time: 00:00:06.6428702
+        //All count 1_00_000
+        //All connections: 100000; recived: 100_000 messages; time: 00:00:06.6428702
         
         //---Orleans
         //Init time 00:01:38.7127252; connections 100000; users 10000; groups 10000
-        //All count 100000
+        //All count 1_00_000
         //All connections: 100000; recived: 100000 messages; time: 00:00:56.9603385
         
+        
+        //obsevers
+        //---SignalR
+        // Init time 00:00:07.3090994; connections 10_000; users 100; groups 100
+        // All count 10000
+        // All connections: 10_000; recived: 10_000 messages; time: 00:00:00.0300137
+        //---Orleans
+
         
         sw.Start();
         
@@ -133,7 +132,8 @@ public class StressTests
 
         while (allCount < connections.Count)
         {
-            await Task.Delay(100);
+            await Task.Delay(10000);
+            _outputHelper.WriteLine($"All count {allCount}");
         }
         _outputHelper.WriteLine($"All count {allCount}");
         

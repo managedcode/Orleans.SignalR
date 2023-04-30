@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
@@ -48,31 +49,40 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     public override async Task OnConnectedAsync(HubConnectionContext connection)
     {
         _connections.Add(connection);
+        
         var tasks = new List<Task>();
-        tasks.Add(SubscribeToConnection(connection));
-        tasks.Add(NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
-            .AddConnection(connection.ConnectionId));
-
+        
+        var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
+        //Create a reference for SignalRConnection, usable for subscribing to the observable grain.
+        var observer = _clusterClient.CreateObjectReference<ISignalRConnection<THub>>(CreateInvocationMessageObserver(connection));
+        //Subscribe the instance to receive messages.
+        await connectionHolderGrain.AddConnection(connection.ConnectionId, observer);
+        
+        connection.Features.Set(observer);
+        
+        
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
             tasks.Add(NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!)
                 .AddConnection(connection.ConnectionId));
 
         await Task.WhenAll(tasks);
+        
+        
     }
 
     public override Task OnDisconnectedAsync(HubConnectionContext connection)
     {
         _connections.Remove(connection);
 
-        var invocationChannel = connection.Features.Get<IAsyncStream<InvocationMessage>>();
-        var invocationHandler = connection.Features.Get<StreamSubscriptionHandle<InvocationMessage>>();
+        var observer = connection.Features.Get<SignalRConnection<THub>>();
+
 
         // If the bus is null then the Redis connection failed to be established and none of the other connection setup ran
-        if (invocationChannel is null && invocationHandler is null)
+        if (observer is null)
             return Task.CompletedTask;
 
         var tasks = new List<Task>();
-        tasks.Add(invocationHandler!.UnsubscribeAsync());
+        //tasks.Add(invocationHandler!.UnsubscribeAsync());
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
             tasks.Add(NameHelperGenerator
@@ -80,7 +90,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 .RemoveConnection(connection.ConnectionId));
 
         tasks.Add(NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
-            .RemoveConnection(connection.ConnectionId));
+            .RemoveConnection(connection.ConnectionId, observer));
         tasks.Add(NameHelperGenerator.GetGroupHolderGrain<THub>(_clusterClient)
             .RemoveConnection(connection.ConnectionId));
 
@@ -268,9 +278,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return result.Result;
     }
 
-    private SignalRAsyncObserver<InvocationMessage> CreateInvocationMessageObserver(HubConnectionContext connection)
+    private SignalRConnection<THub> CreateInvocationMessageObserver(HubConnectionContext connection)
     {
-        var observer = new SignalRAsyncObserver<InvocationMessage>();
+        var observer = new SignalRConnection<THub>();
 
         observer.OnNextAsync = async invocation =>
         {
@@ -285,22 +295,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 if(!string.IsNullOrEmpty(invocation.InvocationId))
                     await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId).RemoveInvocation();
                 //     invocationInfo?.Completion(null!, CompletionMessage.WithError(invocation.InvocationId, "Connection disconnected."));
+                
+                // probably we have to remove connection too
                 throw;
             }
         };
 
         return observer;
-    }
-
-
-    private async Task SubscribeToConnection(HubConnectionContext connection)
-    {
-        var invocationConnectionChannel = NameHelperGenerator.GetStream<THub, InvocationMessage>(_clusterClient,
-            _options.Value.StreamProvider, connection.ConnectionId);
-        var invocationHandler =
-            await invocationConnectionChannel.SubscribeAsync(CreateInvocationMessageObserver(connection));
-        connection.Features.Set(invocationConnectionChannel);
-        connection.Features.Set(invocationHandler);
     }
     
     private static string GenerateInvocationId()

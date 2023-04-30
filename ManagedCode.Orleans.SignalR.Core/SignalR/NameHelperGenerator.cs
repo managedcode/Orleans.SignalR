@@ -38,7 +38,7 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRGroupGrain<THub>>(typeof(THub).FullName + "." + groupId);
     }
-
+    
     public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,
         string streamProviderName, string streamName)
     {
