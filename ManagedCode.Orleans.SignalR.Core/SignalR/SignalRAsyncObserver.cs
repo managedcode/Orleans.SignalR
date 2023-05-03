@@ -13,9 +13,10 @@ public class SignalRConnection<THub> : ISignalRConnection<THub>
         OnNextAsync = onNextAction;
     }
     
-    public Task SendMessage(InvocationMessage message)
+    public async Task SendMessage(InvocationMessage message)
     {
-        return OnNextAsync?.Invoke(message) ?? Task.CompletedTask;
+        await OnNextAsync.Invoke(message);
+        //return Task.CompletedTask;
     }
     
     public Func<InvocationMessage, Task>? OnNextAsync { get; set; }

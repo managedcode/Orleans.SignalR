@@ -44,37 +44,36 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
     }
-    
+
+
+    private static List<object> oo = new(0);
     
     public override async Task OnConnectedAsync(HubConnectionContext connection)
     {
         _connections.Add(connection);
         
-        var tasks = new List<Task>();
         
         var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
         //Create a reference for SignalRConnection, usable for subscribing to the observable grain.
         var observer = _clusterClient.CreateObjectReference<ISignalRConnection<THub>>(CreateInvocationMessageObserver(connection));
+        
         //Subscribe the instance to receive messages.
         await connectionHolderGrain.AddConnection(connection.ConnectionId, observer);
         
         connection.Features.Set(observer);
-        
+        oo.Add(observer);
         
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
-            tasks.Add(NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!)
-                .AddConnection(connection.ConnectionId));
+            await NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!)
+                .AddConnection(connection.ConnectionId);
 
-        await Task.WhenAll(tasks);
-        
-        
     }
 
     public override Task OnDisconnectedAsync(HubConnectionContext connection)
     {
         _connections.Remove(connection);
 
-        var observer = connection.Features.Get<SignalRConnection<THub>>();
+        var observer = connection.Features.Get<ISignalRConnection<THub>>();
 
 
         // If the bus is null then the Redis connection failed to be established and none of the other connection setup ran
@@ -278,7 +277,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return result.Result;
     }
 
-    private SignalRConnection<THub> CreateInvocationMessageObserver(HubConnectionContext connection)
+    private ISignalRConnection<THub> CreateInvocationMessageObserver(HubConnectionContext connection)
     {
         var observer = new SignalRConnection<THub>();
 

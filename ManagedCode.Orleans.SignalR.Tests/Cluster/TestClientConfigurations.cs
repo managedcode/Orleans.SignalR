@@ -10,6 +10,7 @@ public class TestClientConfigurations : IClientBuilderConfigurator
 {
     public void Configure(IConfiguration configuration, IClientBuilder clientBuilder)
     {
+        
         clientBuilder.AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider);
         
         clientBuilder.Services

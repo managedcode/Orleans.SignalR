@@ -19,7 +19,7 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 
 
-[Reentrant]
+//[Reentrant]
 //[GrainType("ManagedCode.SignalRConnectionHolderGrain")]
 public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolderGrain<THub>
 {
@@ -37,7 +37,10 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
         _globalHubOptions = globalHubOptions;
         _stateStorage = stateStorage;
         _options = options;
-        _observerManager = new ObserverManager<ISignalRConnection<THub>>(_globalHubOptions.Value.KeepAliveInterval.Value, logger);
+        _observerManager = new ObserverManager<ISignalRConnection<THub>>(
+            //_globalHubOptions.Value.KeepAliveInterval.Value,
+            TimeSpan.FromMinutes(5), 
+            logger);
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
@@ -62,11 +65,15 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
         return Task.CompletedTask;
     }
     
-    public Task SendToAll(InvocationMessage message)
+    public async Task SendToAll(InvocationMessage message)
     {
-        var msg = message;
-        _ = _observerManager.Notify(s => s.SendMessage(msg));
-        return Task.CompletedTask;
+        foreach (var xxxx in  _observerManager)
+        {
+            Task.Factory.StartNew(()=>xxxx.SendMessage(message));
+        }
+    
+        //_ = _observerManager.Notify(s => s.SendMessage(message));
+        var x = 5;
     }
 
     public Task SendToAllExcept(InvocationMessage message, string[] excludedConnectionIds)

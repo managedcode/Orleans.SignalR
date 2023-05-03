@@ -19,7 +19,7 @@ public interface ISignalRConnectionHolderGrain<THub> : IGrainWithStringKey
     //[OneWay]
     Task RemoveConnection(string connectionId, ISignalRConnection<THub> connection);
 
-    [OneWay]
+    //[OneWay]
     Task SendToAll(InvocationMessage message);
     
     [OneWay]

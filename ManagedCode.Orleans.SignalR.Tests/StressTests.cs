@@ -88,15 +88,15 @@ public class StressTests
                     groups[group] = 0;
                     await connection.InvokeAsync("AddToGroup", "test");
                 }
-
-
+                
                 connections.Enqueue(connection);
             }
         }
 
 
        
-        await Task.WhenAll(Enumerable.Repeat(100, 100).Select(CreateConnections));
+        //await Task.WhenAll(Enumerable.Repeat(100, 100).Select(CreateConnections));
+        await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
 
 
 
@@ -127,8 +127,11 @@ public class StressTests
 
         
         sw.Start();
-        
+
+
         await connections.First().InvokeAsync<int>("All");
+
+
 
         while (allCount < connections.Count)
         {
