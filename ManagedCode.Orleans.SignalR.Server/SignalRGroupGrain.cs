@@ -15,6 +15,7 @@ using Orleans.Runtime;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
+[GrainType($"ManagedCode.${nameof(SignalRGroupGrain<THub>)}")]
 public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
 {
     private readonly ILogger<SignalRGroupGrain<THub>> _logger;
