@@ -281,7 +281,10 @@ public class HubTests
             var hubConnection = i % 2 == 0
                 ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
                 : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
-            hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
+            hubConnection.On("SendAll", (string m) =>
+            {
+                messages[hubConnection.ConnectionId] = m;
+            });
             await hubConnection.StartAsync();
             hubConnection.State.Should().Be(HubConnectionState.Connected);
             connections.Add(hubConnection);

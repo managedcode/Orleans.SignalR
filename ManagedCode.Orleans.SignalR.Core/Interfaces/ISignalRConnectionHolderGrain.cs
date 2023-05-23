@@ -7,7 +7,7 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRConnection : IGrainObserver
 {
-   [OneWay]
+    [OneWay]
     Task SendMessage(InvocationMessage message);
 }
 

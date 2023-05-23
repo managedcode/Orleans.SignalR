@@ -20,7 +20,7 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 
 [Reentrant]
-//[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain)}")]
+[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain)}")]
 public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
 {
     private readonly ILogger<SignalRConnectionHolderGrain> _logger;
@@ -38,7 +38,7 @@ public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
         _stateStorage = stateStorage;
         _options = options;
         _observerManager = new ObserverManager<ISignalRConnection>(
-            //_globalHubOptions.Value.KeepAliveInterval.Value,
+            //_globalHubOptions.Value.KeepAliveInterval.Value, //TODO:
             TimeSpan.FromMinutes(5), 
             logger);
     }
@@ -67,12 +67,8 @@ public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
     
     public async Task SendToAll(InvocationMessage message)
     {
-        foreach (var xxxx in  _observerManager)
-        {
-            Task.Factory.StartNew(()=>xxxx.SendMessage(message));
-        }
-    
-        //_ = _observerManager.Notify(s => s.SendMessage(message));
+        var local = message;
+        await _observerManager.Notify(s => s.SendMessage(local));
         var x = 5;
     }
 

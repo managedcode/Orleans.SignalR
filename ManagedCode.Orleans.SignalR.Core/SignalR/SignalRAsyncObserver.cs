@@ -6,17 +6,21 @@ using Orleans.Streams;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
-public class SignalRConnection<THub> : ISignalRConnection
+public class SignalRConnection : ISignalRConnection
 {
     public SignalRConnection(Func<InvocationMessage, Task>? onNextAction = null)
     {
         OnNextAsync = onNextAction;
     }
     
-    public async Task SendMessage(InvocationMessage message)
+    public Task SendMessage(InvocationMessage message)
     {
-        await OnNextAsync.Invoke(message);
-        //return Task.CompletedTask;
+        _ = Task.Run(() =>
+        {
+            OnNextAsync?.Invoke(message);
+        });
+        
+        return Task.CompletedTask;
     }
     
     public Func<InvocationMessage, Task>? OnNextAsync { get; set; }

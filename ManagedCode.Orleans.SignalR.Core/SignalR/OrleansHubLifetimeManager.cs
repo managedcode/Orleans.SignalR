@@ -44,15 +44,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
     }
-
-
-    private static List<object> oo = new(0);
     
     public override async Task OnConnectedAsync(HubConnectionContext connection)
     {
-        _connections.Add(connection);
-        
-        
         var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
         //Create a reference for SignalRConnection, usable for subscribing to the observable grain.
         var observer = _clusterClient.CreateObjectReference<ISignalRConnection>(CreateInvocationMessageObserver(connection));
@@ -61,12 +55,12 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         await connectionHolderGrain.AddConnection(connection.ConnectionId, observer);
         
         connection.Features.Set(observer);
-        oo.Add(observer);
-        
+
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
             await NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!)
                 .AddConnection(connection.ConnectionId);
-
+        
+        _connections.Add(connection);
     }
 
     public override Task OnDisconnectedAsync(HubConnectionContext connection)
@@ -279,7 +273,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private ISignalRConnection CreateInvocationMessageObserver(HubConnectionContext connection)
     {
-        var observer = new SignalRConnection<THub>();
+        var observer = new SignalRConnection();
 
         observer.OnNextAsync = async invocation =>
         {
@@ -287,7 +281,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             {
                 // Forward message from other server to client
                 // Normal client method invokes and client result invokes use the same message
-                await connection.WriteAsync(invocation, CancellationToken.None);
+                _ = Task.Run(()=>connection.WriteAsync(invocation, CancellationToken.None));
             }
             catch (Exception e)
             {
