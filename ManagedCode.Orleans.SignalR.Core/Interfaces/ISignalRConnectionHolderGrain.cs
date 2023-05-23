@@ -4,7 +4,7 @@ using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRConnectionHolderGrain<THub> : IGrainWithStringKey
+public interface ISignalRConnectionHolderGrain : IGrainWithStringKey
 {
     Task AddConnection(string connectionId);
     Task RemoveConnection(string connectionId);

@@ -4,7 +4,7 @@ using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRGroupGrain<THub> : IGrainWithStringKey
+public interface ISignalRGroupGrain : IGrainWithStringKey
 {
     Task SendToGroup(InvocationMessage message);
     Task SendToGroupExcept(InvocationMessage message, string[] excludedConnectionIds);

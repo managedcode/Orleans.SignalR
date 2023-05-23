@@ -15,15 +15,15 @@ using Orleans.Runtime;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-//[GrainType($"ManagedCode.${nameof(SignalRGroupGrain<THub>)}")]
-public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
+//[GrainType($"ManagedCode.${nameof(SignalRGroupGrain)}")]
+public class SignalRGroupGrain : Grain, ISignalRGroupGrain
 {
-    private readonly ILogger<SignalRGroupGrain<THub>> _logger;
+    private readonly ILogger<SignalRGroupGrain> _logger;
     private readonly IPersistentState<ConnectionState> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
     
-    public SignalRGroupGrain(ILogger<SignalRGroupGrain<THub>> logger,  
-        [PersistentState(nameof(SignalRGroupGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
+    public SignalRGroupGrain(ILogger<SignalRGroupGrain> logger,  
+        [PersistentState(nameof(SignalRGroupGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
         IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
@@ -41,12 +41,12 @@ public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
 
     public Task SendToGroup(InvocationMessage message)
     {
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(_stateStorage.State.ConnectionIds.Count);
 
         foreach (var connectionId in _stateStorage.State.ConnectionIds)
         {
             var stream = NameHelperGenerator
-                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider),
+                .GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider),
                     connectionId);
             
             tasks.Add(stream.OnNextAsync(message));
@@ -61,7 +61,7 @@ public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
     public Task SendToGroupExcept(InvocationMessage message, string[] excludedConnectionIds)
     {
         var hashSet = new HashSet<string>(excludedConnectionIds);
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(_stateStorage.State.ConnectionIds.Count);
 
         foreach (var connectionId in _stateStorage.State.ConnectionIds)
         {
@@ -69,7 +69,7 @@ public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
                 continue;
 
             var stream = NameHelperGenerator
-                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+                .GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             
             tasks.Add(stream.OnNextAsync(message));
         }

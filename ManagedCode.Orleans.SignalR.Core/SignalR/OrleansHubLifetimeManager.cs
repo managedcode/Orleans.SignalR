@@ -297,8 +297,10 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var invocationConnectionChannel = NameHelperGenerator.GetStream<THub, InvocationMessage>(_clusterClient,
             _options.Value.StreamProvider, connection.ConnectionId);
+        
         var invocationHandler =
             await invocationConnectionChannel.SubscribeAsync(CreateInvocationMessageObserver(connection));
+        
         connection.Features.Set(invocationConnectionChannel);
         connection.Features.Set(invocationHandler);
     }

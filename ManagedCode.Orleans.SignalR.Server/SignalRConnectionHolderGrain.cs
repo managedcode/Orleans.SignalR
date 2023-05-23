@@ -15,15 +15,15 @@ using Orleans.Runtime;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-//[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain<THub>)}")]
-public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolderGrain<THub>
+//[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain)}")]
+public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
 {
-    private readonly ILogger<SignalRConnectionHolderGrain<THub>> _logger;
+    private readonly ILogger<SignalRConnectionHolderGrain> _logger;
     private readonly IPersistentState<ConnectionState> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
     
-    public SignalRConnectionHolderGrain(ILogger<SignalRConnectionHolderGrain<THub>> logger,  
-        [PersistentState(nameof(SignalRConnectionHolderGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
+    public SignalRConnectionHolderGrain(ILogger<SignalRConnectionHolderGrain> logger,  
+        [PersistentState(nameof(SignalRConnectionHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
         IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
@@ -53,11 +53,11 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
     
     public Task SendToAll(InvocationMessage message)
     {
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(_stateStorage.State.ConnectionIds.Count);
 
         foreach (var connectionId in _stateStorage.State.ConnectionIds)
         {
-            var stream = NameHelperGenerator.GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            var stream = NameHelperGenerator.GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }
         
@@ -69,14 +69,14 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
     public Task SendToAllExcept(InvocationMessage message, string[] excludedConnectionIds)
     {
         var hashSet = new HashSet<string>(excludedConnectionIds);
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(_stateStorage.State.ConnectionIds.Count);
 
         foreach (var connectionId in _stateStorage.State.ConnectionIds)
         {
             if (hashSet.Contains(connectionId))
                 continue;
             
-            var stream = NameHelperGenerator.GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            var stream = NameHelperGenerator.GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }
 
@@ -91,7 +91,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
             return Task.FromResult(false);
 
         var stream = NameHelperGenerator
-            .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            .GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
         
         _ = Task.Run(() => stream.OnNextAsync(message));
 
@@ -100,11 +100,11 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
 
     public Task SendToConnections(InvocationMessage message, string[] connectionIds)
     {
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(_stateStorage.State.ConnectionIds.Count);
 
         foreach (var connectionId in connectionIds)
         {
-            var stream = NameHelperGenerator.GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            var stream = NameHelperGenerator.GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }
 

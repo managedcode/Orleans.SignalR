@@ -3,7 +3,7 @@ using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRGroupHolderGrain<THub> : IGrainWithStringKey
+public interface ISignalRGroupHolderGrain : IGrainWithStringKey
 {
     Task AddConnectionToGroup(string connectionId, string groupName);
     Task RemoveConnectionFromGroup(string connectionId, string groupName);

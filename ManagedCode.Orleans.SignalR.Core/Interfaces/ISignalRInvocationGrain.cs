@@ -5,7 +5,7 @@ using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRInvocationGrain<THub> : IGrainWithStringKey
+public interface ISignalRInvocationGrain : IGrainWithStringKey
 {
     //Task<bool> InvokeConnectionAsync(string connectionId, InvocationMessage message);
     Task TryCompleteResult(string connectionId, CompletionMessage message);
