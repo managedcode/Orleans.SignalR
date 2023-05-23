@@ -5,7 +5,7 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRGroupGrain<THub> : IGrainWithStringKey
+public interface ISignalRGroupGrain : IGrainWithStringKey
 {
     [OneWay]
     Task SendToGroup(InvocationMessage message);

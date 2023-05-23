@@ -6,7 +6,7 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRInvocationGrain<THub> : IGrainWithStringKey
+public interface ISignalRInvocationGrain : IGrainWithStringKey
 {
     [OneWay]
     Task TryCompleteResult(string connectionId, CompletionMessage message);

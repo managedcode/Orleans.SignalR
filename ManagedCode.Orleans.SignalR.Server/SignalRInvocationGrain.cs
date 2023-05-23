@@ -15,14 +15,14 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 //[GrainType($"ManagedCode.${nameof(SignalRInvocationGrain<THub>)}")]
-public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
+public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {
-    private readonly ILogger<SignalRInvocationGrain<THub>> _logger;
+    private readonly ILogger<SignalRInvocationGrain> _logger;
     private readonly IPersistentState<InvocationInfo> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
     
-    public SignalRInvocationGrain(ILogger<SignalRInvocationGrain<THub>> logger,  
-        [PersistentState(nameof(SignalRInvocationGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<InvocationInfo> stateStorage,
+    public SignalRInvocationGrain(ILogger<SignalRInvocationGrain> logger,  
+        [PersistentState(nameof(SignalRInvocationGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<InvocationInfo> stateStorage,
         IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
@@ -44,7 +44,7 @@ public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
             return Task.CompletedTask;
 
         var stream = NameHelperGenerator
-            .GetStream<THub, CompletionMessage>(this.GetStreamProvider(_options.Value.StreamProvider), _stateStorage.State.InvocationId);
+            .GetStream<CompletionMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), _stateStorage.State.InvocationId);
         
         _ = Task.Run(() => stream.OnNextAsync(message));
         

@@ -84,6 +84,8 @@ public class HubTests
             _outputHelper.WriteLine(message2);
         });
 
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        
         var u1 = await hubConnection1.InvokeAsync<string>("DoUser");
         var u2 = await hubConnection2.InvokeAsync<string>("DoUser");
 

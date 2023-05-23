@@ -15,15 +15,15 @@ using Orleans.Runtime;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-//[GrainType($"ManagedCode.${nameof(SignalRUserGrain<THub>)}")]
-public class SignalRUserGrain<THub> : Grain, ISignalRUserGrain<THub>
+//[GrainType($"ManagedCode.${nameof(SignalRUserGrain)}")]
+public class SignalRUserGrain : Grain, ISignalRUserGrain
 {
-    private readonly ILogger<SignalRUserGrain<THub>> _logger;
+    private readonly ILogger<SignalRUserGrain> _logger;
     private readonly IPersistentState<ConnectionState> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
     
-    public SignalRUserGrain(ILogger<SignalRUserGrain<THub>> logger,  
-        [PersistentState(nameof(SignalRUserGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
+    public SignalRUserGrain(ILogger<SignalRUserGrain> logger,  
+        [PersistentState(nameof(SignalRUserGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
         IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
@@ -53,12 +53,12 @@ public class SignalRUserGrain<THub> : Grain, ISignalRUserGrain<THub>
 
     public Task SendToUser(InvocationMessage message)
     {
-        var tasks = new List<Task>();
+        var tasks = new List<Task>(_stateStorage.State.ConnectionIds.Count);
 
         foreach (var connectionId in _stateStorage.State.ConnectionIds)
         {
             var stream = NameHelperGenerator
-                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider),
+                .GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider),
                     connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }

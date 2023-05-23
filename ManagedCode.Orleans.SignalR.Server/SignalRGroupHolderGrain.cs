@@ -14,14 +14,14 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 //[GrainType($"ManagedCode.${nameof(SignalRGroupHolderGrain<THub>)}")]
-public class SignalRGroupHolderGrain<THub> : Grain, ISignalRGroupHolderGrain<THub>
+public class SignalRGroupHolderGrain : Grain, ISignalRGroupHolderGrain
 {
-    private readonly ILogger<SignalRGroupHolderGrain<THub>> _logger;
+    private readonly ILogger<SignalRGroupHolderGrain> _logger;
     private readonly IPersistentState<ConnectionGroupState> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
     
-    public SignalRGroupHolderGrain(ILogger<SignalRGroupHolderGrain<THub>> logger,  
-        [PersistentState(nameof(SignalRGroupHolderGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionGroupState> stateStorage,
+    public SignalRGroupHolderGrain(ILogger<SignalRGroupHolderGrain> logger,  
+        [PersistentState(nameof(SignalRGroupHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionGroupState> stateStorage,
         IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;

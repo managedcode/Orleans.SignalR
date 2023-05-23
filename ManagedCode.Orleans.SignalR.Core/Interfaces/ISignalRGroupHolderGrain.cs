@@ -4,7 +4,7 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRGroupHolderGrain<THub> : IGrainWithStringKey
+public interface ISignalRGroupHolderGrain : IGrainWithStringKey
 {
     [OneWay]
     Task AddConnectionToGroup(string connectionId, string groupName);

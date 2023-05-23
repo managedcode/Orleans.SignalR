@@ -5,7 +5,7 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRUserGrain<THub> : IGrainWithStringKey
+public interface ISignalRUserGrain : IGrainWithStringKey
 {
     [OneWay]
     Task AddConnection(string connectionId);
