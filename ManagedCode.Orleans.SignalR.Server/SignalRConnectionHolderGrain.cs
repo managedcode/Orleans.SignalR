@@ -102,6 +102,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
 
         var stream = NameHelperGenerator
             .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+        
         _ = Task.Run(() => stream.OnNextAsync(message));
 
         return Task.FromResult(true);

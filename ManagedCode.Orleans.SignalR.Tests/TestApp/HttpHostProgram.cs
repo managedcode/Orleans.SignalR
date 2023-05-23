@@ -1,5 +1,6 @@
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
+using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -14,9 +15,15 @@ public class HttpHostProgram
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
-
+        
         builder.Services.AddControllers();
 
+        // builder.Host.UseOrleans(builder =>
+        // {
+        //     builder.UseLocalhostClustering();
+        //     new TestSiloConfigurations().Configure(builder);
+        // });
+        
         if (builder.Environment.IsProduction())
             builder.Services
                 .AddSignalR()
@@ -64,7 +71,7 @@ public class HttpHostProgram
         app.MapHub<SimpleTestHub>(nameof(SimpleTestHub));
         app.MapHub<InterfaceTestHub>(nameof(InterfaceTestHub)); 
         app.MapHub<StressTestHub>(nameof(StressTestHub));
-
+        
         app.Run();
     }
 }

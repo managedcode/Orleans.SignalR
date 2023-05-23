@@ -1,7 +1,8 @@
+using ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans;
 
-namespace ManagedCode.Orleans.SignalR.Core.Models;
+namespace ManagedCode.Orleans.SignalR.Core.Models.Converters;
 
 [RegisterConverter]
 public sealed class CompletionMessageConverter : IConverter<CompletionMessage, CompletionMessageSurrogate>

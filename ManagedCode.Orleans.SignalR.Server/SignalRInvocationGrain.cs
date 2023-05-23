@@ -47,8 +47,7 @@ public class SignalRInvocationGrain<THub> : Grain, ISignalRInvocationGrain<THub>
             .GetStream<THub, CompletionMessage>(this.GetStreamProvider(_options.Value.StreamProvider), _stateStorage.State.InvocationId);
         
         _ = Task.Run(() => stream.OnNextAsync(message));
-
-        //await RemoveInvocation();
+        
         return Task.CompletedTask;
     }
 
