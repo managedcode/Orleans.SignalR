@@ -1,3 +1,4 @@
+using ManagedCode.Orleans.SignalR.Core.HubContext;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -7,10 +8,12 @@ namespace ManagedCode.Orleans.SignalR.Tests.Cluster.Grains;
 public class TestGrain : Grain, ITestGrain
 {
     private readonly IHubContext<InterfaceTestHub> _hubContext;
+    private readonly IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> _orleansHubContext;
 
-    public TestGrain(IHubContext<InterfaceTestHub> hubContext)
+    public TestGrain(IHubContext<InterfaceTestHub> hubContext, IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> orleansHubContext)
     {
         _hubContext = hubContext;
+        _orleansHubContext = orleansHubContext;
     }
     
     public Task PushRandom()
@@ -20,13 +23,20 @@ public class TestGrain : Grain, ITestGrain
 
     public Task PushMessage(string message)
     {
-        return _hubContext.Clients.All.SendAsync("SendMessage", this.GetPrimaryKeyString());
+        return _orleansHubContext.Clients.All.SendMessage(this.GetPrimaryKeyString());
     }
 
-    public async Task<string> GetMessage(string connectionId)
+    public async Task<string> GetMessageOld(string connectionId)
     {
         var message = await Task.Run(()=> _hubContext.Clients.Client(connectionId)
             .InvokeAsync<string>("GetMessage", CancellationToken.None));
+        
+        return message;
+    }
+    
+    public async Task<string> GetMessage(string connectionId)
+    {
+        var message = await Task.Run(()=> _orleansHubContext.Clients.Client(connectionId).GetMessage());
         
         return message;
     }

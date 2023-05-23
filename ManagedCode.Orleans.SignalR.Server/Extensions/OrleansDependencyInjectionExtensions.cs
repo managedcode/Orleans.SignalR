@@ -1,5 +1,6 @@
 using System;
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.HubContext;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,6 +22,7 @@ public static class OrleansDependencyInjectionExtensions
     {
         signalrBuilder.Services.AddOptions<OrleansSignalROptions>().Configure(options);
         signalrBuilder.Services.AddSingleton(typeof(HubLifetimeManager<>), typeof(OrleansHubLifetimeManager<>));
+        signalrBuilder.Services.AddSingleton(typeof(IOrleansHubContext<,>), typeof(OrleansHubContext<,>));
         return signalrBuilder;
     }
 }
