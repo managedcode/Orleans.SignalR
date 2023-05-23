@@ -20,24 +20,24 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 
 [Reentrant]
-//[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain<THub>)}")]
-public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolderGrain<THub>
+//[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain)}")]
+public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
 {
-    private readonly ILogger<SignalRConnectionHolderGrain<THub>> _logger;
+    private readonly ILogger<SignalRConnectionHolderGrain> _logger;
     private readonly IOptions<HubOptions>? _globalHubOptions;
     private readonly IPersistentState<ConnectionState> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
-    private readonly ObserverManager<ISignalRConnection<THub>> _observerManager;
+    private readonly ObserverManager<ISignalRConnection> _observerManager;
     
-    public SignalRConnectionHolderGrain(ILogger<SignalRConnectionHolderGrain<THub>> logger, IOptions<HubOptions>? globalHubOptions, 
-        [PersistentState(nameof(SignalRConnectionHolderGrain<THub>), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
+    public SignalRConnectionHolderGrain(ILogger<SignalRConnectionHolderGrain> logger, IOptions<HubOptions>? globalHubOptions, 
+        [PersistentState(nameof(SignalRConnectionHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
         IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
         _globalHubOptions = globalHubOptions;
         _stateStorage = stateStorage;
         _options = options;
-        _observerManager = new ObserverManager<ISignalRConnection<THub>>(
+        _observerManager = new ObserverManager<ISignalRConnection>(
             //_globalHubOptions.Value.KeepAliveInterval.Value,
             TimeSpan.FromMinutes(5), 
             logger);
@@ -51,14 +51,14 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
             await _stateStorage.WriteStateAsync();
     }
     
-    public Task AddConnection(string connectionId, ISignalRConnection<THub> connection)
+    public Task AddConnection(string connectionId, ISignalRConnection connection)
     {
         _observerManager.Subscribe(connection, connection);
         _stateStorage.State.ConnectionIds.Add(connectionId);
         return Task.CompletedTask;
     }
 
-    public Task RemoveConnection(string connectionId, ISignalRConnection<THub> connection)
+    public Task RemoveConnection(string connectionId, ISignalRConnection connection)
     {
         _observerManager.Subscribe(connection, connection);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
@@ -86,7 +86,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
             if (hashSet.Contains(connectionId))
                 continue;
             
-            var stream = NameHelperGenerator.GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            var stream = NameHelperGenerator.GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }
 
@@ -101,7 +101,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
             return Task.FromResult(false);
 
         var stream = NameHelperGenerator
-            .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            .GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
         
         _ = Task.Run(() => stream.OnNextAsync(message));
 
@@ -114,7 +114,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
 
         foreach (var connectionId in connectionIds)
         {
-            var stream = NameHelperGenerator.GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+            var stream = NameHelperGenerator.GetStream<InvocationMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }
 

@@ -55,7 +55,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         
         var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
         //Create a reference for SignalRConnection, usable for subscribing to the observable grain.
-        var observer = _clusterClient.CreateObjectReference<ISignalRConnection<THub>>(CreateInvocationMessageObserver(connection));
+        var observer = _clusterClient.CreateObjectReference<ISignalRConnection>(CreateInvocationMessageObserver(connection));
         
         //Subscribe the instance to receive messages.
         await connectionHolderGrain.AddConnection(connection.ConnectionId, observer);
@@ -73,7 +73,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         _connections.Remove(connection);
 
-        var observer = connection.Features.Get<ISignalRConnection<THub>>();
+        var observer = connection.Features.Get<ISignalRConnection>();
 
 
         // If the bus is null then the Redis connection failed to be established and none of the other connection setup ran
@@ -277,7 +277,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return result.Result;
     }
 
-    private ISignalRConnection<THub> CreateInvocationMessageObserver(HubConnectionContext connection)
+    private ISignalRConnection CreateInvocationMessageObserver(HubConnectionContext connection)
     {
         var observer = new SignalRConnection<THub>();
 

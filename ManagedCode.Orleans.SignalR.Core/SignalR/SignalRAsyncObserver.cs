@@ -6,7 +6,7 @@ using Orleans.Streams;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
-public class SignalRConnection<THub> : ISignalRConnection<THub>
+public class SignalRConnection<THub> : ISignalRConnection
 {
     public SignalRConnection(Func<InvocationMessage, Task>? onNextAction = null)
     {
