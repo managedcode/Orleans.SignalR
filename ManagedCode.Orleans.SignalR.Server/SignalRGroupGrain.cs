@@ -69,8 +69,7 @@ public class SignalRGroupGrain<THub> : Grain, ISignalRGroupGrain<THub>
                 continue;
 
             var stream = NameHelperGenerator
-                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider),
-                    connectionId);
+                .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             
             tasks.Add(stream.OnNextAsync(message));
         }

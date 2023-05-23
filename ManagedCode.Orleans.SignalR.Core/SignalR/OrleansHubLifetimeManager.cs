@@ -215,6 +215,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             }
         };
         
+        var handler = await stream.SubscribeAsync(observer);
         await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId)
             .AddInvocation(new InvocationInfo(connectionId, invocationId, typeof(T)));
         
@@ -239,9 +240,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         try
         {
             var result = await tcs.Task;
-            //handler.UnsubscribeAsync();
-            //observer.Dispose();
-            _ = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).RemoveInvocation();
+            observer.Dispose();
+            _ = Task.WhenAll(handler.UnsubscribeAsync(), NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).RemoveInvocation().AsTask());
             return result;
         }
         catch

@@ -72,7 +72,7 @@ public class InterfaceHubTests
         //invoke in Grain
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
        
-        var msg1 = await grain.GetMessage(connection1.ConnectionId);
+        var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
         var msg2 = await grain.GetMessage(connection2.ConnectionId);
       
         await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));

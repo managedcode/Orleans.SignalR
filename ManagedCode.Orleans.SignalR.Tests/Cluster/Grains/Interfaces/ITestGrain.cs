@@ -5,4 +5,5 @@ public interface ITestGrain : IGrainWithStringKey
     Task PushRandom();
     Task PushMessage(string message);
     Task<string> GetMessage(string connectionId);
+    Task<string> GetMessageInvoke(string connectionId);
 }

@@ -60,8 +60,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
             var stream = NameHelperGenerator.GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
             tasks.Add(stream.OnNextAsync(message));
         }
-
-
+        
         _ = Task.Run(() => Task.WhenAll(tasks));
 
         return Task.CompletedTask;
@@ -93,6 +92,7 @@ public class SignalRConnectionHolderGrain<THub> : Grain, ISignalRConnectionHolde
 
         var stream = NameHelperGenerator
             .GetStream<THub, InvocationMessage>(this.GetStreamProvider(_options.Value.StreamProvider), connectionId);
+        
         _ = Task.Run(() => stream.OnNextAsync(message));
 
         return Task.FromResult(true);

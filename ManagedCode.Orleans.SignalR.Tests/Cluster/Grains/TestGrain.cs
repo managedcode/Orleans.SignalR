@@ -26,7 +26,7 @@ public class TestGrain : Grain, ITestGrain
         return _orleansHubContext.Clients.All.SendMessage(this.GetPrimaryKeyString());
     }
 
-    public async Task<string> GetMessageOld(string connectionId)
+    public async Task<string> GetMessageInvoke(string connectionId)
     {
         var message = await Task.Run(()=> _hubContext.Clients.Client(connectionId)
             .InvokeAsync<string>("GetMessage", CancellationToken.None));
