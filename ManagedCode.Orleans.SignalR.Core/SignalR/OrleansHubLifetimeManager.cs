@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 using Microsoft.AspNetCore.Mvc.TagHelpers.Cache;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
@@ -268,9 +269,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             foreach (var grain in subscription.Grains)
             {
-                //_ = Task.Run(() =>
-                await grain
-                    .RemoveConnection(connection?.ConnectionId, subscription.Reference); //, cancellationToken).ConfigureAwait(false);
+                _ = Task.Run(() => grain.RemoveConnection(connection?.ConnectionId, subscription.Reference), cancellationToken)
+                    .ConfigureAwait(false);
             }
             subscription.Dispose();
         }
@@ -300,7 +300,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     
     private Subscription CreateSubscription(Func<HubMessage, Task>? onNextAction)
     {
-        var subscription = new Subscription(new SignalRObserver(onNextAction));
+        var subscription = new Subscription(new SignalRObserver(onNextAction), _globalHubOptions.Value.KeepAliveInterval.Value);
         var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;

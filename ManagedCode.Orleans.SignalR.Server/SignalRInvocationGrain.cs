@@ -16,7 +16,7 @@ using Orleans.Utilities;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-[GrainType($"ManagedCode.${nameof(SignalRInvocationGrain)}")]
+//[GrainType($"ManagedCode.{nameof(SignalRInvocationGrain)}")]
 public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {
     private readonly ILogger<SignalRInvocationGrain> _logger;
@@ -96,6 +96,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
+        //ignore connectionId
         _observerManager.Unsubscribe(observer);
         _observerManager.Clear();
         await _stateStorage.ClearStateAsync();

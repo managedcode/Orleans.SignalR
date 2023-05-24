@@ -24,8 +24,8 @@ public class StressTests
     {
         _siloCluster = testApp;
         _outputHelper = outputHelper;
-        //_secondApp = new TestWebApplication(_siloCluster, 8082);
-        _secondApp = _firstApp;
+        _firstApp= new TestWebApplication(_siloCluster, 8081);
+        _secondApp = new TestWebApplication(_siloCluster, 8082);
     }
 
     private Task<HubConnection> CreateHubConnection(TestWebApplication app)
@@ -95,8 +95,8 @@ public class StressTests
 
 
        
-        //await Task.WhenAll(Enumerable.Repeat(100, 100).Select(CreateConnections));
-        await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
+        await Task.WhenAll(Enumerable.Repeat(100, 1000).Select(CreateConnections));
+        //await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
 
 
 
@@ -109,12 +109,12 @@ public class StressTests
         //--------------------------------
         //---SignalR
         //Init time 00:01:16.6498487; connections 100000; users 10000; groups 10000
-        //All count 1_00_000
+        //All count 100_000
         //All connections: 100000; recived: 100_000 messages; time: 00:00:06.6428702
         
         //---Orleans
         //Init time 00:01:38.7127252; connections 100000; users 10000; groups 10000
-        //All count 1_00_000
+        //All count 100_000
         //All connections: 100000; recived: 100000 messages; time: 00:00:56.9603385
         
         

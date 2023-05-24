@@ -20,7 +20,7 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 
 [Reentrant]
-[GrainType($"ManagedCode.${nameof(SignalRConnectionHolderGrain)}")]
+//[GrainType($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}")]
 public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
 {
     private readonly ILogger<SignalRConnectionHolderGrain> _logger;

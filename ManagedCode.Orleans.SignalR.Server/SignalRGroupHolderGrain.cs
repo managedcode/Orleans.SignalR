@@ -15,7 +15,7 @@ using Orleans.Utilities;
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-[GrainType($"ManagedCode.${nameof(SignalRGroupHolderGrain)}")]
+//[GrainType($"ManagedCode.{nameof(SignalRGroupHolderGrain)}")]
 public class SignalRGroupHolderGrain : Grain, ISignalRGroupHolderGrain
 {
     private readonly ILogger<SignalRGroupHolderGrain> _logger;
@@ -46,13 +46,16 @@ public class SignalRGroupHolderGrain : Grain, ISignalRGroupHolderGrain
 
     public Task AddConnectionToGroup(string connectionId, ISignalRObserver observer, string groupName)
     {
-        // if (_stateStorage.State.Groups.TryGetValue(groupName, out var state))
-        //     state.ConnectionIds.Add(connectionId);
-        // else
-        //     _stateStorage.State.Groups.Add(groupName, new ConnectionState
-        //     {
-        //         ConnectionIds = new { connectionId }
-        //     });
+        if (_stateStorage.State.Groups.TryGetValue(groupName, out var state))
+            state.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
+        else
+            _stateStorage.State.Groups.Add(groupName, new ConnectionState
+            {
+                ConnectionIds = new()
+                {
+                    [connectionId] = observer.GetPrimaryKeyString()
+                }
+            });
 
         return Task.CompletedTask;
     }
