@@ -23,7 +23,8 @@ public class InterfaceHubTests
         _siloCluster = testApp;
         _outputHelper = outputHelper;
         _firstApp = new TestWebApplication(_siloCluster, 8081);
-        _secondApp = new TestWebApplication(_siloCluster, 8082);
+        //_secondApp = new TestWebApplication(_siloCluster, 8082);
+        _secondApp = _firstApp;
     }
 
     private async Task<HubConnection> CreateHubConnection(TestWebApplication app)

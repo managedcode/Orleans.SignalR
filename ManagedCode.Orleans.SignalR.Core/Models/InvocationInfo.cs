@@ -7,12 +7,6 @@ namespace ManagedCode.Orleans.SignalR.Core.Models;
 [GenerateSerializer]
 public class InvocationInfo
 {
-    public InvocationInfo()
-    {
-        ConnectionId = null;
-        InvocationId = null;
-    }
-    
     public InvocationInfo(string connectionId, string invocationId, Type type)
     {
         ConnectionId = connectionId;
@@ -31,11 +25,11 @@ public class InvocationInfo
 
     public Type GetResultType()
     {
-        return string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type);
+        return string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type)!;
     }
 
-    public void SetResultType(Type type)
+    private void SetResultType(Type type)
     {
-        Type = type.FullName;
+        Type = type.FullName!;
     }
 }

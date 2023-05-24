@@ -6,14 +6,14 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRInvocationGrain : IGrainWithStringKey
+public interface ISignalRInvocationGrain : IGrainWithStringKey, IObserverConnectionManager
 {
     [OneWay]
-    Task TryCompleteResult(string connectionId, CompletionMessage message);
+    Task TryCompleteResult(string connectionId, HubMessage message);
     Task<ReturnType> TryGetReturnType();
     
     [OneWay]
-    ValueTask AddInvocation(InvocationInfo invocationInfo);
+    ValueTask AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo);
     
     [OneWay]
     ValueTask<InvocationInfo?> RemoveInvocation();

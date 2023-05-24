@@ -38,16 +38,16 @@ public static class NameHelperGenerator
         return grainFactory.GetGrain<ISignalRGroupGrain>(typeof(THub).FullName + "." + groupId);
     }
     
-    public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,
-        string streamProviderName, string streamName)
-    {
-        var streamProvider = clusterClient.GetStreamProvider(streamProviderName);
-        return GetStream<TMessage>(typeof(THub).FullName!, streamProvider, streamName);
-    }
-
-    public static IAsyncStream<TMessage> GetStream<TMessage>(string hub, IStreamProvider streamProvider, string streamName)
-    {
-        var streamId = StreamId.Create(ConnectionNamespace<TMessage>(hub), streamName);
-        return streamProvider.GetStream<TMessage>(streamId);
-    }
+    // public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,
+    //     string streamProviderName, string streamName)
+    // {
+    //     var streamProvider = clusterClient.GetStreamProvider(streamProviderName);
+    //     return GetStream<TMessage>(typeof(THub).FullName!, streamProvider, streamName);
+    // }
+    //
+    // public static IAsyncStream<TMessage> GetStream<TMessage>(string hub, IStreamProvider streamProvider, string streamName)
+    // {
+    //     var streamId = StreamId.Create(ConnectionNamespace<TMessage>(hub), streamName);
+    //     return streamProvider.GetStream<TMessage>(streamId);
+    // }
 }

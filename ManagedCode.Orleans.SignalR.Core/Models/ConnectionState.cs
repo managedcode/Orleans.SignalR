@@ -8,5 +8,5 @@ namespace ManagedCode.Orleans.SignalR.Core.Models;
 public class ConnectionState
 {
     [Id(0)]
-    public HashSet<string> ConnectionIds { get; set; } = new();
+    public Dictionary<string, string> ConnectionIds { get; set; } = new();
 }

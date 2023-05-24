@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -10,16 +11,18 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
+using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-//[GrainType($"ManagedCode.${nameof(SignalRInvocationGrain<THub>)}")]
+[GrainType($"ManagedCode.${nameof(SignalRInvocationGrain)}")]
 public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {
     private readonly ILogger<SignalRInvocationGrain> _logger;
     private readonly IPersistentState<InvocationInfo> _stateStorage;
     private readonly IOptions<OrleansSignalROptions> _options;
+    private readonly ObserverManager<ISignalRObserver> _observerManager;
     
     public SignalRInvocationGrain(ILogger<SignalRInvocationGrain> logger,  
         [PersistentState(nameof(SignalRInvocationGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<InvocationInfo> stateStorage,
@@ -28,6 +31,10 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _logger = logger;
         _stateStorage = stateStorage;
         _options = options;
+        _observerManager = new ObserverManager<ISignalRObserver>(
+            //_globalHubOptions.Value.KeepAliveInterval.Value, //TODO:
+            TimeSpan.FromMinutes(5), 
+            logger);
     }
     
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
@@ -38,17 +45,13 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
             await _stateStorage.WriteStateAsync();
     }
     
-    public Task TryCompleteResult(string connectionId, CompletionMessage message)
+    public async Task TryCompleteResult(string connectionId, HubMessage message)
     {
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
-            return Task.CompletedTask;
+            return;
 
-        var stream = NameHelperGenerator
-            .GetStream<CompletionMessage>(this.GetPrimaryKeyString(), this.GetStreamProvider(_options.Value.StreamProvider), _stateStorage.State.InvocationId);
+        await _observerManager.Notify(s => s.OnNextAsync(message));
         
-        _ = Task.Run(() => stream.OnNextAsync(message));
-        
-        return Task.CompletedTask;
     }
 
     public Task<ReturnType> TryGetReturnType()
@@ -63,17 +66,39 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         });
     }
 
-    public ValueTask AddInvocation(InvocationInfo invocationInfo)
+    public ValueTask AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo)
     {
+        _observerManager.Subscribe(observer, observer);
         _stateStorage.State = invocationInfo;
         return ValueTask.CompletedTask;
     }
-
+    
     public async ValueTask<InvocationInfo?> RemoveInvocation()
     {
+        _observerManager.Clear();
         var into = _stateStorage.State;
         await _stateStorage.ClearStateAsync();
         DeactivateOnIdle();
         return into;
+    }
+    
+    public ValueTask Ping(ISignalRObserver observer)
+    {
+        _observerManager.Subscribe(observer,observer);
+        return ValueTask.CompletedTask;
+    }
+    
+    public Task AddConnection(string connectionId, ISignalRObserver observer)
+    {
+        //ignore for this grain
+        return Task.CompletedTask;
+    }
+    
+    public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
+    {
+        _observerManager.Unsubscribe(observer);
+        _observerManager.Clear();
+        await _stateStorage.ClearStateAsync();
+        DeactivateOnIdle();
     }
 }

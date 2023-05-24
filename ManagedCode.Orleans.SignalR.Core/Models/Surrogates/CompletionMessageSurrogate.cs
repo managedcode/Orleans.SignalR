@@ -8,14 +8,11 @@ public readonly struct CompletionMessageSurrogate
 {
     [Id(0)] public readonly string? InvocationId;
 
-    [Id(1)]
-    public string? Error { get; }
+    [Id(1)] public readonly string? Error;
 
-    [Id(2)]
-    public object? Result { get; }
+    [Id(2)] public readonly object? Result;
 
-    [Id(3)]
-    public bool HasResult { get; }
+    [Id(3)] public readonly bool HasResult;
 
     public CompletionMessageSurrogate(string invocationId, string? error, object? result, bool hasResult)
     {

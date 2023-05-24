@@ -5,28 +5,34 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRConnection : IGrainObserver
+public interface ISignalRObserver : IGrainObserver
 {
-    [OneWay]
-    Task SendMessage(InvocationMessage message);
+    //[OneWay]
+    Task OnNextAsync(HubMessage message);
 }
 
-public interface ISignalRConnectionHolderGrain : IGrainWithStringKey
+public interface ISignalRConnectionHolderGrain : IGrainWithStringKey, IObserverConnectionManager
 {
     [OneWay]
-    Task AddConnection(string connectionId, ISignalRConnection connection);
+    Task SendToAll(HubMessage message);
     
     [OneWay]
-    Task RemoveConnection(string connectionId, ISignalRConnection connection);
+    Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds);
 
-    [OneWay]
-    Task SendToAll(InvocationMessage message);
+    Task<bool> SendToConnection(HubMessage message, string connectionId);
     
     [OneWay]
-    Task SendToAllExcept(InvocationMessage message, string[] excludedConnectionIds);
+    Task SendToConnections(HubMessage message, string[] connectionIds);
+}
 
-    Task<bool> SendToConnection(InvocationMessage message, string connectionId);
+public interface IObserverConnectionManager
+{
+    [OneWay]
+    Task AddConnection(string connectionId, ISignalRObserver observer);
     
     [OneWay]
-    Task SendToConnections(InvocationMessage message, string[] connectionIds);
+    Task RemoveConnection(string connectionId, ISignalRObserver observer);
+    
+    [OneWay]
+    ValueTask Ping(ISignalRObserver observer);
 }

@@ -4,14 +4,11 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRGroupHolderGrain : IGrainWithStringKey
+public interface ISignalRGroupHolderGrain : IGrainWithStringKey, IObserverConnectionManager
 {
     [OneWay]
-    Task AddConnectionToGroup(string connectionId, string groupName);
+    Task AddConnectionToGroup(string connectionId, ISignalRObserver observer, string groupName);
     
     [OneWay]
-    Task RemoveConnectionFromGroup(string connectionId, string groupName);
-
-    [OneWay]
-    Task RemoveConnection(string connectionId);
+    Task RemoveConnectionFromGroup(string connectionId, ISignalRObserver observer, string groupName);
 }

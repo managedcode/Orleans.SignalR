@@ -15,6 +15,6 @@ public class ReturnType
 
     public Type GetReturnType()
     {
-        return string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type);
+        return string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type)!;
     }
 }

@@ -5,17 +5,11 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRGroupGrain : IGrainWithStringKey
+public interface ISignalRGroupGrain : IGrainWithStringKey, IObserverConnectionManager
 {
     [OneWay]
-    Task SendToGroup(InvocationMessage message);
+    Task SendToGroup(HubMessage message);
     
     [OneWay]
-    Task SendToGroupExcept(InvocationMessage message, string[] excludedConnectionIds);
-
-    [OneWay]
-    Task AddConnection(string connectionId);
-    
-    [OneWay]
-    Task RemoveConnection(string connectionId);
+    Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds);
 }

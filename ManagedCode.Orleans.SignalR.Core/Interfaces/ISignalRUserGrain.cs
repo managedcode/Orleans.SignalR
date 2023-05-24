@@ -5,14 +5,8 @@ using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface ISignalRUserGrain : IGrainWithStringKey
+public interface ISignalRUserGrain : IGrainWithStringKey, IObserverConnectionManager
 {
     [OneWay]
-    Task AddConnection(string connectionId);
-    
-    [OneWay]
-    Task RemoveConnection(string connectionId);
-
-    [OneWay]
-    Task SendToUser(InvocationMessage message);
+    Task SendToUser(HubMessage message);
 }

@@ -23,7 +23,8 @@ public class HubTests
         _siloCluster = testApp;
         _outputHelper = outputHelper;
         _firstApp = new TestWebApplication(_siloCluster, 8081);
-        _secondApp = new TestWebApplication(_siloCluster, 8082);
+        //_secondApp = new TestWebApplication(_siloCluster, 8082);
+        _secondApp = _firstApp;
     }
 
     [Fact]
@@ -275,12 +276,18 @@ public class HubTests
     {
         List<HubConnection> connections = new();
         ConcurrentDictionary<string, string> messages = new();
-
+        int closdCount = 0;
+        
         for (var i = 0; i < 10; i++)
         {
             var hubConnection = i % 2 == 0
                 ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
                 : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
+            hubConnection.Closed += (e) =>
+            {
+                closdCount++;
+                return Task.CompletedTask;
+            };
             hubConnection.On("SendAll", (string m) =>
             {
                 messages[hubConnection.ConnectionId] = m;
