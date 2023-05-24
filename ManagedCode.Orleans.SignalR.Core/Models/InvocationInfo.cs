@@ -7,6 +7,10 @@ namespace ManagedCode.Orleans.SignalR.Core.Models;
 [GenerateSerializer]
 public class InvocationInfo
 {
+    public InvocationInfo()
+    {
+        // we need it for TryGetReturnType because of parameterless constructor
+    }
     public InvocationInfo(string connectionId, string invocationId, Type type)
     {
         ConnectionId = connectionId;

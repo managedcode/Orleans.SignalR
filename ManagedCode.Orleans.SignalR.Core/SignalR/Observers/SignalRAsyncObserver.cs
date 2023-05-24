@@ -10,23 +10,26 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public class Subscription : IDisposable
 {
-    public Subscription()
-    {
-    }
-    
+    private readonly SignalRObserver _observer;
     public Subscription(SignalRObserver observer)
     {
-        Observer = observer;
+        _observer = observer;
     }
     
-    public SignalRObserver Observer { get; set; }
-    public ISignalRObserver Reference { get; set; }
+    public void SetReference(ISignalRObserver reference)
+    {
+        Reference = reference;
+    }
+
+    public SignalRObserver GetObserver() => _observer;
+
+    public ISignalRObserver Reference { get; private set; }
     
-    public HashSet<GrainId> GrainIds { get; } = new();
+    public HashSet<IObserverConnectionManager> Grains { get; } = new();
 
     public void Dispose()
     {
-        Observer.Dispose();
+        _observer.Dispose();
         Reference = null!;
     }
 }

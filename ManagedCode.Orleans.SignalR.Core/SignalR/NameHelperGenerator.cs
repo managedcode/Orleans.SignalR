@@ -1,3 +1,4 @@
+using System;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Orleans;
 using Orleans.Runtime;
@@ -14,11 +15,10 @@ public static class NameHelperGenerator
 
     public static ISignalRConnectionHolderGrain GetConnectionHolderGrain<THub>(IGrainFactory grainFactory)
     {
-        return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(typeof(THub).FullName);
+        return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(typeof(THub).FullName!);
     }
 
-    public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory,
-        string invocationId)
+    public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory, string invocationId)
     {
         return grainFactory.GetGrain<ISignalRInvocationGrain>(typeof(THub).FullName + "." + invocationId);
     }
@@ -37,7 +37,7 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRGroupGrain>(typeof(THub).FullName + "." + groupId);
     }
-    
+
     // public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,
     //     string streamProviderName, string streamName)
     // {
@@ -50,4 +50,5 @@ public static class NameHelperGenerator
     //     var streamId = StreamId.Create(ConnectionNamespace<TMessage>(hub), streamName);
     //     return streamProvider.GetStream<TMessage>(streamId);
     // }
+
 }
