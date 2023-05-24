@@ -176,15 +176,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             return;
 
         var groupHolder = NameHelperGenerator.GetGroupHolderGrain<THub>(_clusterClient);
-        var connectionHolder = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
+        var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
 
-        await Task.WhenAll(
-            groupHolder.AddConnectionToGroup(connectionId, subscription.Reference, groupName),
-            connectionHolder.AddConnection(connectionId, subscription.Reference)).ConfigureAwait(false);
+        await Task.WhenAll(groupHolder.AddConnectionToGroup(connectionId, subscription.Reference, groupName),
+            groupGrain.AddConnection(connectionId, subscription.Reference)).ConfigureAwait(false);
 
 
         subscription.Grains.Add(groupHolder);
-        subscription.Grains.Add(connectionHolder);
+        subscription.Grains.Add(groupGrain);
 
     }
 
@@ -196,14 +195,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             return;
         
         var groupHolder = NameHelperGenerator.GetGroupHolderGrain<THub>(_clusterClient);
-        var connectionHolder = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
+        var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
         
-        await Task.WhenAll(
-            groupHolder.RemoveConnectionFromGroup(connectionId, subscription.Reference, groupName),
-            connectionHolder.RemoveConnection(connectionId, subscription.Reference)).ConfigureAwait(false);
+        await Task.WhenAll(groupHolder.RemoveConnectionFromGroup(connectionId, subscription.Reference, groupName),
+            groupGrain.RemoveConnection(connectionId, subscription.Reference)).ConfigureAwait(false);
         
         subscription.Grains.Remove(groupHolder);
-        //TODO: no connectionHolder, because it's different
+        subscription.Grains.Remove(groupGrain);
     }
 
     public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args,

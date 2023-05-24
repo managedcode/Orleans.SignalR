@@ -87,6 +87,41 @@ public class InterfaceHubTests
     }
     
     [Fact]
+    public async Task InvokeAsyncWithPingConnectionGrainTest()
+    {
+        var connection1 = await CreateHubConnection(_firstApp);
+        var connection2 = await CreateHubConnection(_secondApp);
+        
+        connection1.On("GetMessage", () =>
+        {
+            return "connection1";
+        });
+        
+        connection2.On("GetMessage", () => "connection2");
+
+        connection1.State.Should().Be(HubConnectionState.Connected);
+        connection2.State.Should().Be(HubConnectionState.Connected);
+
+        await Task.Delay(TimeSpan.FromMinutes(1));
+        
+        //invoke in Grain
+        var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
+       
+        var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
+        var msg2 = await grain.GetMessage(connection2.ConnectionId);
+      
+        await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
+
+
+        msg1.Should().Be("connection1");
+        msg2.Should().Be("connection2");
+        
+        
+        await connection1.StopAsync();
+        await connection2.StopAsync();
+    }
+    
+    [Fact]
     public async Task SignalRFromGrainTest()
     {
         List<string> messages1 = new();
