@@ -40,18 +40,29 @@ public class InterfaceHubTests
         var connection1 = await CreateHubConnection(_firstApp);
         var connection2 = await CreateHubConnection(_secondApp);
         
-        connection1.On("GetMessage", () => "connection1");
-        connection2.On("GetMessage", () => "connection2");
+        connection1.On("GetMessage", () =>
+        {
+            _outputHelper.WriteLine("Connection1 - GetMessage");
+            return "connection1";
+        });
+        connection2.On("GetMessage", () =>
+        {
+            _outputHelper.WriteLine("Connection2 - GetMessage");
+            return "connection2";
+        });
         
         //invoke in SignalR
         var msg1 = await connection2.InvokeAsync<string>("WaitForMessage", connection1.ConnectionId);
+        _outputHelper.WriteLine("mgs1");
         msg1.Should().Be("connection1");
         
         var msg2 = await connection2.InvokeAsync<string>("WaitForMessage", connection2.ConnectionId);
+        _outputHelper.WriteLine("mgs2");
         msg2.Should().Be("connection2");
         
         await Assert.ThrowsAsync<HubException>(async () => await connection2.InvokeAsync<string>("WaitForMessage", "non-existing"));
         
+        _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();
         await connection2.StopAsync();
     }
@@ -64,24 +75,32 @@ public class InterfaceHubTests
         
         connection1.On("GetMessage", () =>
         {
+            _outputHelper.WriteLine("Connection1 - GetMessage");
             return "connection1";
         });
         
-        connection2.On("GetMessage", () => "connection2");
+        connection2.On("GetMessage", () =>
+        {
+            _outputHelper.WriteLine("Connection2 - GetMessage");
+            return "connection2";
+        });
         
         //invoke in Grain
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
        
         var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
+        _outputHelper.WriteLine("msg1");
+        
         var msg2 = await grain.GetMessage(connection2.ConnectionId);
+        _outputHelper.WriteLine("msg2");
       
         await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
-
+        _outputHelper.WriteLine("throw");
 
         msg1.Should().Be("connection1");
         msg2.Should().Be("connection2");
         
-        
+        _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();
         await connection2.StopAsync();
     }

@@ -204,8 +204,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         subscription.Grains.Remove(groupGrain);
     }
 
-    public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args,
-        CancellationToken cancellationToken)
+    public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args, CancellationToken cancellationToken)
     {
         // send thing
         if (string.IsNullOrEmpty(connectionId))
@@ -249,7 +248,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             // We're sending to a single connection
             // Write message directly to connection without caching it in memory
-            await connection.WriteAsync(invocationMessage, cancellationToken).ConfigureAwait(false);
+            _ = Task.Run(()=> connection.WriteAsync(invocationMessage, cancellationToken), cancellationToken);
         }
 
         try
@@ -267,8 +266,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             foreach (var grain in subscription.Grains)
             {
-                _ = Task.Run(() => grain.RemoveConnection(connection?.ConnectionId, subscription.Reference), cancellationToken)
-                    .ConfigureAwait(false);
+                _ = grain.RemoveConnection(connection?.ConnectionId, subscription.Reference).ConfigureAwait(false);
             }
             subscription.Dispose();
         }
@@ -308,7 +306,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         try
         {
-            await connection.WriteAsync(message, CancellationToken.None).ConfigureAwait(false);
+            await connection.WriteAsync(message).ConfigureAwait(false);
         }
         catch (Exception e)
         {
