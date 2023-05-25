@@ -36,8 +36,6 @@ Install-Package ManagedCode.Orleans.SignalR.Server
 To use Orleans.SignalR on the client, add the following code to your client configuration:
 
 ```csharp
-clientBuilder.AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider);
-
 clientBuilder.Services
     .AddSignalR()
     .AddOrleans();
@@ -49,8 +47,6 @@ To use Orleans.SignalR on the server, add the following code to your server conf
 
 ```csharp
 siloBuilder
-    .AddMemoryGrainStorage("PubSubStore")
-    .AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider)
     .AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
 
 siloBuilder.Services
@@ -76,6 +72,24 @@ public class TestGrain : Grain, ITestGrain
     public Task PushRandom()
     {
         return _hubContext.Clients.All.SendAsync("SendRandom", new Random().Next());
+    }
+}
+```
+
+You can use typed Orleans client, with interface IOrleansHubContext
+```csharp
+public class TestGrain : Grain, ITestGrain
+{
+    private readonly IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> _hubContext;
+
+    public TestGrain(IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> hubContext)
+    {
+        _hubContext = hubContext;
+    }
+
+    public Task PushRandom()
+    {
+        return _hubContext.Clients.All.SendMessage(this.GetPrimaryKeyString());
     }
 }
 ```

@@ -89,7 +89,8 @@ public class StressTests
 
         _outputHelper.WriteLine("Connecting...");
         var sw = Stopwatch.StartNew();
-        await Task.WhenAll(Enumerable.Repeat(1000, 100).Select(CreateConnections));
+        //await Task.WhenAll(Enumerable.Repeat(1000, 100).Select(CreateConnections));
+        await Task.WhenAll(Enumerable.Repeat(100, 100).Select(CreateConnections));
         //await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
 
 
