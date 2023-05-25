@@ -248,18 +248,31 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             // We're sending to a single connection
             // Write message directly to connection without caching it in memory
-            _ = Task.Run(()=> connection.WriteAsync(invocationMessage, cancellationToken), cancellationToken);
+            _ = Task.Run(()=>
+            {
+                try
+                {
+                    return connection.WriteAsync(invocationMessage, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "InvokeConnectionAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
+                    throw;
+                }
+             
+            }, cancellationToken);
         }
 
         try
         {
-            return await tcs.Task.ConfigureAwait(false);
+            return await Task.Run(() => tcs.Task, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
             // ConnectionAborted will trigger a generic "Canceled" exception from the task, let's convert it into a more specific message.
             if (connection?.ConnectionAborted.IsCancellationRequested == true)
                 throw new IOException($"Connection '{connectionId}' disconnected.");
+            
             throw;
         }
         finally
@@ -289,7 +302,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Subscription CreateConnectionObserver(HubConnectionContext connection)
     {
-        var subscription = CreateSubscription(message => OnNextAsync(connection, message));
+        var subscription = CreateSubscription(message =>
+        {
+            _ = Task.Run(() => OnNextAsync(connection, message)).ConfigureAwait(false);
+            return Task.CompletedTask;
+        });
         connection.Features.Set(subscription);
         return subscription;
     }
@@ -308,17 +325,16 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             await connection.WriteAsync(message).ConfigureAwait(false);
         }
-        catch (Exception e)
+        catch (Exception ex)
         {
             if (message is InvocationMessage invocation)
             {
                 if(!string.IsNullOrEmpty(invocation.InvocationId))
-                    await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId).RemoveInvocation().ConfigureAwait(false);
-                //     invocationInfo?.Completion(null!, CompletionMessage.WithError(invocation.InvocationId, "Connection disconnected."));
+                    await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId).TryCompleteResult(connection.ConnectionId,
+                        CompletionMessage.WithError(invocation.InvocationId, $"Connection disconnected. Reason:{ex.Message}")).ConfigureAwait(false);
             }
             
-            // probably we have to remove connection too
-            throw;
+            _logger.LogError(ex, "OnNextAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
         }
     }
     

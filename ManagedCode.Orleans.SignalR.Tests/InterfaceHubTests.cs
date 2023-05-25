@@ -72,6 +72,8 @@ public class InterfaceHubTests
     {
         var connection1 = await CreateHubConnection(_firstApp);
         var connection2 = await CreateHubConnection(_secondApp);
+        var connection3 = await CreateHubConnection(_firstApp);
+        var connection4 = await CreateHubConnection(_secondApp);
         
         connection1.On("GetMessage", () =>
         {
@@ -83,6 +85,20 @@ public class InterfaceHubTests
         {
             _outputHelper.WriteLine("Connection2 - GetMessage");
             return "connection2";
+        });
+        
+        connection3.On("GetMessage", () =>
+        {
+            _outputHelper.WriteLine("Connection3 - GetMessage");
+            throw new Exception("oops3");
+            return string.Empty;
+        });
+        
+        connection4.On("GetMessage", () =>
+        {
+            _outputHelper.WriteLine("Connection4 - GetMessage");
+            throw new Exception("oops4");
+            return string.Empty;
         });
         
         //invoke in Grain
@@ -99,6 +115,13 @@ public class InterfaceHubTests
 
         msg1.Should().Be("connection1");
         msg2.Should().Be("connection2");
+        
+        await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection3.ConnectionId));
+        _outputHelper.WriteLine("msg3-thorw");
+        
+        await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection4.ConnectionId));
+        _outputHelper.WriteLine("msg4-thorw");
+        
         
         _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();

@@ -24,6 +24,7 @@ public class SimpleTestHub : Hub
     public async Task AddToGroup(string groupName)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+        await Task.Delay(TimeSpan.FromSeconds(1));
         await Clients.Group(groupName)
             .SendAsync("SendAll", $"{Context.ConnectionId} has joined the group {groupName}.");
     }

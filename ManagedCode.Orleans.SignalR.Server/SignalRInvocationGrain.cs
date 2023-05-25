@@ -10,13 +10,15 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
+using Orleans.Placement;
 using Orleans.Runtime;
 using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
-//[GrainType($"ManagedCode.{nameof(SignalRInvocationGrain)}")]
+[ActivationCountBasedPlacement]
+[GrainType($"ManagedCode.{nameof(SignalRInvocationGrain)}")]
 public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {
     private readonly ILogger<SignalRInvocationGrain> _logger;

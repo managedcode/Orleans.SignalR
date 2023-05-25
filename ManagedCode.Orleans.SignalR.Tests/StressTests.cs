@@ -51,8 +51,7 @@ public class StressTests
         ConcurrentQueue<HubConnection> connections = new();
         ConcurrentDictionary<string,int> users = new();
         ConcurrentDictionary<string,int> groups = new();
-
-        var sw = Stopwatch.StartNew();
+        
 
         int allCount= 0;
         
@@ -93,8 +92,8 @@ public class StressTests
             }
         }
 
-
-       
+        _outputHelper.WriteLine($"Connecting...");
+        var sw = Stopwatch.StartNew();
         await Task.WhenAll(Enumerable.Repeat(100, 1000).Select(CreateConnections));
         //await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
 

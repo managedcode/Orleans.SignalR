@@ -123,6 +123,7 @@ public class HubTests
             messages2.Add(m);
             _outputHelper.WriteLine(m);
         });
+        
 
         await hubConnection1.InvokeAsync("AddToGroup", "test");
         await hubConnection2.InvokeAsync("AddToGroup", "test");
@@ -132,7 +133,7 @@ public class HubTests
 
 
         messages1.Count.Should().Be(2);
-        messages2.Count.Should().Be(1);
+        messages2.Count.Should().Be(2);
     }
 
     [Fact]
