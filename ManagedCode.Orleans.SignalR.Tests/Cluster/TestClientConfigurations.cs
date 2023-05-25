@@ -12,9 +12,8 @@ public class TestClientConfigurations : IClientBuilderConfigurator
     {
         clientBuilder.AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider);
 
-        clientBuilder.Services.AddSignalR().AddOrleans(options =>
-        {
-            options.StreamProvider = OrleansSignalROptions.DefaultSignalRStreamProvider;
-        });
+        clientBuilder.Services
+            .AddSignalR()
+            .AddOrleans();
     }
 }

@@ -24,7 +24,8 @@ public class HttpHostProgram
         // });
 
         if (builder.Environment.IsProduction())
-            builder.Services.AddSignalR().AddOrleans();
+            builder.Services.AddSignalR()
+                .AddOrleans();
         else
             builder.Services.AddSignalR();
         //.AddStackExchangeRedis();
