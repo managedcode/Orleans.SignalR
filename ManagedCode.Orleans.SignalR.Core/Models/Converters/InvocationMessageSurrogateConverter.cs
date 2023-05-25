@@ -9,11 +9,7 @@ public sealed class InvocationMessageSurrogateConverter : IConverter<InvocationM
 {
     public InvocationMessage ConvertFromSurrogate(in InvocationMessageSurrogate surrogate)
     {
-        return new InvocationMessage(
-            surrogate.InvocationId,
-            surrogate.Target,
-            surrogate.Arguments,
-            surrogate.StreamIds)
+        return new InvocationMessage(surrogate.InvocationId, surrogate.Target, surrogate.Arguments, surrogate.StreamIds)
         {
             Headers = surrogate.Headers
         };
@@ -21,11 +17,7 @@ public sealed class InvocationMessageSurrogateConverter : IConverter<InvocationM
 
     public InvocationMessageSurrogate ConvertToSurrogate(in InvocationMessage value)
     {
-        return new InvocationMessageSurrogate(
-            value.InvocationId,
-            value.Target,
-            value.Arguments,
-            value.StreamIds,
+        return new InvocationMessageSurrogate(value.InvocationId, value.Target, value.Arguments, value.StreamIds,
             value.Headers);
     }
 }

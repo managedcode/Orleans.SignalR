@@ -1,6 +1,5 @@
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
-using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -15,7 +14,7 @@ public class HttpHostProgram
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
-        
+
         builder.Services.AddControllers();
 
         // builder.Host.UseOrleans(builder =>
@@ -25,33 +24,31 @@ public class HttpHostProgram
         // });
 
         if (builder.Environment.IsProduction())
-            builder.Services.AddSignalR()
-                .AddOrleans();
+            builder.Services.AddSignalR().AddOrleans();
         else
             builder.Services.AddSignalR();
         //.AddStackExchangeRedis();
 
-        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
+        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
+        {
+            options.RequireHttpsMetadata = false;
+            options.SaveToken = true;
+            options.TokenValidationParameters = new TokenValidationParameters
             {
-                options.RequireHttpsMetadata = false;
-                options.SaveToken = true;
-                options.TokenValidationParameters = new TokenValidationParameters
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("your_secret_key_here")),
+                ValidateIssuer = false,
+                ValidateAudience = false
+            };
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
                 {
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("your_secret_key_here")),
-                    ValidateIssuer = false,
-                    ValidateAudience = false
-                };
-                options.Events = new JwtBearerEvents
-                {
-                    OnMessageReceived = context =>
-                    {
-                        context.Token = context.Request.Query["access_token"];
-                        return Task.CompletedTask;
-                    }
-                };
-            });
+                    context.Token = context.Request.Query["access_token"];
+                    return Task.CompletedTask;
+                }
+            };
+        });
 
         builder.Services.AddAuthorization(options =>
         {
@@ -67,9 +64,9 @@ public class HttpHostProgram
         app.UseCookiePolicy();
         app.MapControllers();
         app.MapHub<SimpleTestHub>(nameof(SimpleTestHub));
-        app.MapHub<InterfaceTestHub>(nameof(InterfaceTestHub)); 
+        app.MapHub<InterfaceTestHub>(nameof(InterfaceTestHub));
         app.MapHub<StressTestHub>(nameof(StressTestHub));
-        
+
         app.Run();
     }
 }

@@ -1,7 +1,9 @@
 # Orleans.SignalR
 
-Orleans.SignalR is a lightweight, open-source library that enables easy integration of SignalR with Orleans, a distributed virtual actor model framework for building scalable, fault-tolerant systems. 
-The library provides a SignalR backplane, allowing you to effortlessly add real-time communication capabilities to your distributed systems.
+Orleans.SignalR is a lightweight, open-source library that enables easy integration of SignalR with Orleans, a
+distributed virtual actor model framework for building scalable, fault-tolerant systems.
+The library provides a SignalR backplane, allowing you to effortlessly add real-time communication capabilities to your
+distributed systems.
 
 ## Features
 
@@ -16,11 +18,13 @@ Orleans.SignalR offers the following features:
 You can install Orleans.SignalR using Nuget
 
 For Client
+
 ```
 Install-Package ManagedCode.Orleans.SignalR.Client
 ```
 
 For Server
+
 ```
 Install-Package ManagedCode.Orleans.SignalR.Server
 ```
@@ -55,7 +59,10 @@ siloBuilder.Services
 ```
 
 ### Using HubContext in Grain
-In this example, TestGrain defines the interface for the grain, and TestGrain inject the interface for sending messages using SignalR
+
+In this example, TestGrain defines the interface for the grain, and TestGrain inject the interface for sending messages
+using SignalR
+
 ```csharp
 public class TestGrain : Grain, ITestGrain
 {
@@ -73,10 +80,10 @@ public class TestGrain : Grain, ITestGrain
 }
 ```
 
-
 ### Using ClientInvocation
 
-Orleans.SignalR supports all functions from SignalR, including ClientInvocation. However, to avoid blocking tasks, use `Task.Run`. 
+Orleans.SignalR supports all functions from SignalR, including ClientInvocation. However, to avoid blocking tasks,
+use `Task.Run`.
 Here's an example:
 
 ```csharp
@@ -91,7 +98,8 @@ public async Task<string> GetMessage(string connectionId)
 
 ## Contributing
 
-We welcome contributions! If you encounter any bugs or have feature requests, please [open an issue](https://github.com/managedcode/Orleans.SignalR/issues). 
+We welcome contributions! If you encounter any bugs or have feature requests,
+please [open an issue](https://github.com/managedcode/Orleans.SignalR/issues).
 If you want to contribute code, please fork the repository and submit a pull request.
 
 ## License

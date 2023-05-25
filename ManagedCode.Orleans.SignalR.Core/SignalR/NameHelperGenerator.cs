@@ -1,8 +1,5 @@
-using System;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Orleans;
-using Orleans.Runtime;
-using Orleans.Streams;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
@@ -50,5 +47,4 @@ public static class NameHelperGenerator
     //     var streamId = StreamId.Create(ConnectionNamespace<TMessage>(hub), streamName);
     //     return streamProvider.GetStream<TMessage>(streamId);
     // }
-
 }

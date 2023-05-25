@@ -7,10 +7,10 @@ public interface IObserverConnectionManager
 {
     [OneWay]
     Task AddConnection(string connectionId, ISignalRObserver observer);
-    
+
     [OneWay]
     Task RemoveConnection(string connectionId, ISignalRObserver observer);
-    
+
     [OneWay]
     ValueTask Ping(ISignalRObserver observer);
 }

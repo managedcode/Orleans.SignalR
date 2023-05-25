@@ -11,6 +11,7 @@ public class InvocationInfo
     {
         // we need it for TryGetReturnType because of parameterless constructor
     }
+
     public InvocationInfo(string connectionId, string invocationId, Type type)
     {
         ConnectionId = connectionId;
@@ -20,7 +21,7 @@ public class InvocationInfo
 
     [Id(0)]
     public string ConnectionId { get; private set; }
-    
+
     [Id(1)]
     public string InvocationId { get; private set; }
 

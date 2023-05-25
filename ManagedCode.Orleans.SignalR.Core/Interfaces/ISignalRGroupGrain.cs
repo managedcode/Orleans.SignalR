@@ -9,7 +9,7 @@ public interface ISignalRGroupGrain : IGrainWithStringKey, IObserverConnectionMa
 {
     [OneWay]
     Task SendToGroup(HubMessage message);
-    
+
     [OneWay]
     Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds);
 }

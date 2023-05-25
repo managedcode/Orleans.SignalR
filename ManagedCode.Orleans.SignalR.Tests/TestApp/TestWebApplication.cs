@@ -57,11 +57,10 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
         });
         var builder = new HubConnectionBuilder();
         configure?.Invoke(builder);
-        return builder
-            .WithUrl(new Uri(client.BaseAddress, hubUrl), options =>
-            {
-                configureConnection?.Invoke(options);
-                options.HttpMessageHandlerFactory = _ => Server.CreateHandler();
-            }).Build();
+        return builder.WithUrl(new Uri(client.BaseAddress, hubUrl), options =>
+        {
+            configureConnection?.Invoke(options);
+            options.HttpMessageHandlerFactory = _ => Server.CreateHandler();
+        }).Build();
     }
 }

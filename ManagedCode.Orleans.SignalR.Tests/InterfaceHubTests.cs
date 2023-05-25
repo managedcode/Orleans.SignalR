@@ -39,7 +39,7 @@ public class InterfaceHubTests
     {
         var connection1 = await CreateHubConnection(_firstApp);
         var connection2 = await CreateHubConnection(_secondApp);
-        
+
         connection1.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection1 - GetMessage");
@@ -50,23 +50,24 @@ public class InterfaceHubTests
             _outputHelper.WriteLine("Connection2 - GetMessage");
             return "connection2";
         });
-        
+
         //invoke in SignalR
         var msg1 = await connection2.InvokeAsync<string>("WaitForMessage", connection1.ConnectionId);
         _outputHelper.WriteLine("mgs1");
         msg1.Should().Be("connection1");
-        
+
         var msg2 = await connection2.InvokeAsync<string>("WaitForMessage", connection2.ConnectionId);
         _outputHelper.WriteLine("mgs2");
         msg2.Should().Be("connection2");
-        
-        await Assert.ThrowsAsync<HubException>(async () => await connection2.InvokeAsync<string>("WaitForMessage", "non-existing"));
-        
+
+        await Assert.ThrowsAsync<HubException>(async () =>
+            await connection2.InvokeAsync<string>("WaitForMessage", "non-existing"));
+
         _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();
         await connection2.StopAsync();
     }
-    
+
     [Fact]
     public async Task InvokeAsyncGrainTest()
     {
@@ -74,66 +75,66 @@ public class InterfaceHubTests
         var connection2 = await CreateHubConnection(_secondApp);
         var connection3 = await CreateHubConnection(_firstApp);
         var connection4 = await CreateHubConnection(_secondApp);
-        
+
         connection1.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection1 - GetMessage");
             return "connection1";
         });
-        
+
         connection2.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection2 - GetMessage");
             return "connection2";
         });
-        
+
         connection3.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection3 - GetMessage");
             throw new Exception("oops3");
             return string.Empty;
         });
-        
+
         connection4.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection4 - GetMessage");
             throw new Exception("oops4");
             return string.Empty;
         });
-        
+
         //invoke in Grain
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
-       
+
         var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
         _outputHelper.WriteLine("msg1");
-        
+
         var msg2 = await grain.GetMessage(connection2.ConnectionId);
         _outputHelper.WriteLine("msg2");
-      
+
         await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
         _outputHelper.WriteLine("throw");
 
         msg1.Should().Be("connection1");
         msg2.Should().Be("connection2");
-        
+
         await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection3.ConnectionId));
         _outputHelper.WriteLine("msg3-thorw");
-        
+
         await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection4.ConnectionId));
         _outputHelper.WriteLine("msg4-thorw");
-        
-        
+
+
         _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();
         await connection2.StopAsync();
     }
-    
+
     [Fact]
     public async Task InvokeAsyncWithPingConnectionGrainTest()
     {
         var connection1 = await CreateHubConnection(_firstApp);
         var connection2 = await CreateHubConnection(_secondApp);
-        
+
         connection1.On("GetMessage", () => "connection1");
         connection2.On("GetMessage", () => "connection2");
 
@@ -142,43 +143,42 @@ public class InterfaceHubTests
 
         await Task.Delay(TimeSpan.FromMinutes(1));
 
-        for (int i = 0; i < 3; i++)
+        for (var i = 0; i < 3; i++)
         {
             //invoke in Grain
-            var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test"+i);
-       
+            var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test" + i);
+
             var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
             var msg2 = await grain.GetMessage(connection2.ConnectionId);
-      
+
             await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
-            
+
             msg1.Should().Be("connection1");
             msg2.Should().Be("connection2");
         }
-        
-        
+
+
         await Task.Delay(TimeSpan.FromMinutes(1));
 
-        for (int i = 0; i < 4; i++)
+        for (var i = 0; i < 4; i++)
         {
             //invoke in Grain
-            var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test"+i);
-       
+            var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test" + i);
+
             var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
             var msg2 = await grain.GetMessage(connection2.ConnectionId);
-      
+
             await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
-            
+
             msg1.Should().Be("connection1");
             msg2.Should().Be("connection2");
         }
-     
-        
-        
+
+
         await connection1.StopAsync();
         await connection2.StopAsync();
     }
-    
+
     [Fact]
     public async Task SignalRFromGrainTest()
     {
@@ -190,12 +190,12 @@ public class InterfaceHubTests
 
         connection1.On<int>("SendRandom", random => messages1.Add(random.ToString()));
         connection1.On<string>("SendMessage", messages => messages1.Add(messages));
-        
+
         connection2.On<int>("SendRandom", random => messages2.Add(random.ToString()));
         connection2.On<string>("SendMessage", messages => messages2.Add(messages));
-        
+
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
-        
+
         //push random
         await grain.PushRandom();
 

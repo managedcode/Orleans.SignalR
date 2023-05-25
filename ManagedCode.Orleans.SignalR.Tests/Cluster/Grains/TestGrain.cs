@@ -10,12 +10,13 @@ public class TestGrain : Grain, ITestGrain
     private readonly IHubContext<InterfaceTestHub> _hubContext;
     private readonly IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> _orleansHubContext;
 
-    public TestGrain(IHubContext<InterfaceTestHub> hubContext, IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> orleansHubContext)
+    public TestGrain(IHubContext<InterfaceTestHub> hubContext,
+        IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> orleansHubContext)
     {
         _hubContext = hubContext;
         _orleansHubContext = orleansHubContext;
     }
-    
+
     public Task PushRandom()
     {
         return _hubContext.Clients.All.SendAsync("SendRandom", new Random().Next());
@@ -28,16 +29,17 @@ public class TestGrain : Grain, ITestGrain
 
     public async Task<string> GetMessageInvoke(string connectionId)
     {
-        var message = await Task.Run(()=> _hubContext.Clients.Client(connectionId)
+        var localConnection = connectionId;
+        var message = await Task.Run(() => _hubContext.Clients.Client(localConnection)
             .InvokeAsync<string>("GetMessage", CancellationToken.None));
-        
+
         return message;
     }
-    
+
     public async Task<string> GetMessage(string connectionId)
     {
-        var message = await Task.Run(()=> _orleansHubContext.Clients.Client(connectionId).GetMessage());
-        
+        var message = await Task.Run(() => _orleansHubContext.Clients.Client(connectionId).GetMessage());
+
         return message;
     }
 }

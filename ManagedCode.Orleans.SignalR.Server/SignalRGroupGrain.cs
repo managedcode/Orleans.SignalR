@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
-using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -23,29 +22,20 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRGroupGrain : Grain, ISignalRGroupGrain
 {
     private readonly ILogger<SignalRGroupGrain> _logger;
-    private readonly IPersistentState<ConnectionState> _stateStorage;
-    private readonly IOptions<OrleansSignalROptions> _options;
     private readonly ObserverManager<ISignalRObserver> _observerManager;
-    
-    public SignalRGroupGrain(ILogger<SignalRGroupGrain> logger,  
-        [PersistentState(nameof(SignalRGroupGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage,
-        IOptions<OrleansSignalROptions> options)
+    private readonly IOptions<OrleansSignalROptions> _options;
+    private readonly IPersistentState<ConnectionState> _stateStorage;
+
+    public SignalRGroupGrain(ILogger<SignalRGroupGrain> logger,
+        [PersistentState(nameof(SignalRGroupGrain), OrleansSignalROptions.OrleansSignalRStorage)]
+        IPersistentState<ConnectionState> stateStorage, IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
         _stateStorage = stateStorage;
         _options = options;
         _observerManager = new ObserverManager<ISignalRObserver>(
             //_globalHubOptions.Value.KeepAliveInterval.Value, //TODO:
-            TimeSpan.FromMinutes(5), 
-            logger);
-    }
-
-    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
-    {
-        if(_stateStorage.State.ConnectionIds.Count == 0)
-            await _stateStorage.ClearStateAsync();
-        else
-            await _stateStorage.WriteStateAsync();
+            TimeSpan.FromMinutes(5), logger);
     }
 
     public async Task SendToGroup(HubMessage message)
@@ -57,18 +47,14 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
     {
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
-        {
             if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
-            {
                 hashSet.Add(observer);
-            }
-        }
 
-        await _observerManager.Notify(s => s.OnNextAsync(message), 
+        await _observerManager.Notify(s => s.OnNextAsync(message),
             connection => !hashSet.Contains(connection.GetPrimaryKeyString()));
     }
 
-    public Task AddConnection(string connectionId,ISignalRObserver observer)
+    public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
@@ -81,10 +67,18 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
         _stateStorage.State.ConnectionIds.Remove(connectionId);
         return Task.CompletedTask;
     }
-    
+
     public ValueTask Ping(ISignalRObserver observer)
     {
-        _observerManager.Subscribe(observer,observer);
+        _observerManager.Subscribe(observer, observer);
         return ValueTask.CompletedTask;
+    }
+
+    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
+    {
+        if (_stateStorage.State.ConnectionIds.Count == 0)
+            await _stateStorage.ClearStateAsync();
+        else
+            await _stateStorage.WriteStateAsync();
     }
 }

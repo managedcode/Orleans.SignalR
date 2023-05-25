@@ -7,7 +7,6 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 
 public class StressTestHub : Hub
 {
-    
     public async Task AddToGroup(string groupName)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
@@ -25,7 +24,8 @@ public class StressTestHub : Hub
 
     public async Task ManyGroupSendAsync(string[] groupNames, string message)
     {
-        await Clients.Groups(groupNames).SendAsync("ManyGroupSendAsync", $"{Context.ConnectionId} send message: {message}.");
+        await Clients.Groups(groupNames)
+            .SendAsync("ManyGroupSendAsync", $"{Context.ConnectionId} send message: {message}.");
     }
 
     public async Task SendGroupExceptAsync(string groupName, string message, string[] connections)
@@ -34,9 +34,7 @@ public class StressTestHub : Hub
             .SendAsync("SendGroupExceptAsync", $"{Context.ConnectionId} send message: {message}.");
     }
 
-    public async IAsyncEnumerable<int> Counter(
-        int count,
-        int delay,
+    public async IAsyncEnumerable<int> Counter(int count, int delay,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         for (var i = 0; i < count; i++)
@@ -53,10 +51,7 @@ public class StressTestHub : Hub
         }
     }
 
-    public ChannelReader<int> CounterReader(
-        int count,
-        int delay,
-        CancellationToken cancellationToken)
+    public ChannelReader<int> CounterReader(int count, int delay, CancellationToken cancellationToken)
     {
         var channel = Channel.CreateUnbounded<int>();
 
@@ -68,10 +63,7 @@ public class StressTestHub : Hub
         return channel.Reader;
     }
 
-    private async Task WriteItemsAsync(
-        ChannelWriter<int> writer,
-        int count,
-        int delay,
+    private async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
         CancellationToken cancellationToken)
     {
         Exception localException = null;

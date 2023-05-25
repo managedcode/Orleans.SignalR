@@ -9,12 +9,12 @@ public interface ISignalRConnectionHolderGrain : IGrainWithStringKey, IObserverC
 {
     [OneWay]
     Task SendToAll(HubMessage message);
-    
+
     [OneWay]
     Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds);
 
     Task<bool> SendToConnection(HubMessage message, string connectionId);
-    
+
     [OneWay]
     Task SendToConnections(HubMessage message, string[] connectionIds);
 }

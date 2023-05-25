@@ -17,8 +17,9 @@ public static class OrleansDependencyInjectionExtensions
     {
         return AddOrleans(signalrBuilder, o => { });
     }
-    
-    public static ISignalRServerBuilder AddOrleans(this ISignalRServerBuilder signalrBuilder, Action<OrleansSignalROptions> options)
+
+    public static ISignalRServerBuilder AddOrleans(this ISignalRServerBuilder signalrBuilder,
+        Action<OrleansSignalROptions> options)
     {
         signalrBuilder.Services.AddOptions<OrleansSignalROptions>().Configure(options);
         signalrBuilder.Services.AddSingleton(typeof(HubLifetimeManager<>), typeof(OrleansHubLifetimeManager<>));

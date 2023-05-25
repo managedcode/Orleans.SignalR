@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Text.Json;
 using ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans;
@@ -19,18 +18,3 @@ public sealed class RawResultConverter : IConverter<RawResult, RawResultSurrogat
         return new RawResultSurrogate(value.RawSerializedData.ToArray());
     }
 }
-
-[RegisterConverter]
-public sealed class JsonElementConverter : IConverter<JsonElement, JsonElementSurrogate>
-{
-    public JsonElement ConvertFromSurrogate(in JsonElementSurrogate surrogate)
-    {
-        return JsonSerializer.Deserialize<JsonElement>(surrogate.Data);
-    }
-
-    public JsonElementSurrogate ConvertToSurrogate(in JsonElement value)
-    {
-        return new JsonElementSurrogate(value);
-    }
-}
-

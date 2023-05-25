@@ -10,12 +10,12 @@ public interface ISignalRInvocationGrain : IGrainWithStringKey, IObserverConnect
 {
     [OneWay]
     Task TryCompleteResult(string connectionId, HubMessage message);
-    
+
     Task<ReturnType> TryGetReturnType();
-    
+
     [OneWay]
     ValueTask AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo);
-    
+
     [OneWay]
     ValueTask<InvocationInfo?> RemoveInvocation();
 }

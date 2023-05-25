@@ -4,7 +4,6 @@ using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
-using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -22,38 +21,28 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {
     private readonly ILogger<SignalRInvocationGrain> _logger;
-    private readonly IPersistentState<InvocationInfo> _stateStorage;
-    private readonly IOptions<OrleansSignalROptions> _options;
     private readonly ObserverManager<ISignalRObserver> _observerManager;
-    
-    public SignalRInvocationGrain(ILogger<SignalRInvocationGrain> logger,  
-        [PersistentState(nameof(SignalRInvocationGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<InvocationInfo> stateStorage,
-        IOptions<OrleansSignalROptions> options)
+    private readonly IOptions<OrleansSignalROptions> _options;
+    private readonly IPersistentState<InvocationInfo> _stateStorage;
+
+    public SignalRInvocationGrain(ILogger<SignalRInvocationGrain> logger,
+        [PersistentState(nameof(SignalRInvocationGrain), OrleansSignalROptions.OrleansSignalRStorage)]
+        IPersistentState<InvocationInfo> stateStorage, IOptions<OrleansSignalROptions> options)
     {
         _logger = logger;
         _stateStorage = stateStorage;
         _options = options;
         _observerManager = new ObserverManager<ISignalRObserver>(
             //_globalHubOptions.Value.KeepAliveInterval.Value, //TODO:
-            TimeSpan.FromMinutes(5), 
-            logger);
+            TimeSpan.FromMinutes(5), logger);
     }
-    
-    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
-    {
-        if(string.IsNullOrEmpty(_stateStorage.State.ConnectionId) || string.IsNullOrEmpty(_stateStorage.State.InvocationId))
-            await _stateStorage.ClearStateAsync();
-        else
-            await _stateStorage.WriteStateAsync();
-    }
-    
+
     public async Task TryCompleteResult(string connectionId, HubMessage message)
     {
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
             return;
 
         await _observerManager.Notify(s => s.OnNextAsync(message));
-        
     }
 
     public Task<ReturnType> TryGetReturnType()
@@ -74,7 +63,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _stateStorage.State = invocationInfo;
         return ValueTask.CompletedTask;
     }
-    
+
     public async ValueTask<InvocationInfo?> RemoveInvocation()
     {
         _observerManager.Clear();
@@ -83,19 +72,19 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         DeactivateOnIdle();
         return into;
     }
-    
+
     public ValueTask Ping(ISignalRObserver observer)
     {
-        _observerManager.Subscribe(observer,observer);
+        _observerManager.Subscribe(observer, observer);
         return ValueTask.CompletedTask;
     }
-    
+
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         //ignore for this grain
         return Task.CompletedTask;
     }
-    
+
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         //ignore connectionId
@@ -103,5 +92,14 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _observerManager.Clear();
         await _stateStorage.ClearStateAsync();
         DeactivateOnIdle();
+    }
+
+    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(_stateStorage.State.ConnectionId) ||
+            string.IsNullOrEmpty(_stateStorage.State.InvocationId))
+            await _stateStorage.ClearStateAsync();
+        else
+            await _stateStorage.WriteStateAsync();
     }
 }

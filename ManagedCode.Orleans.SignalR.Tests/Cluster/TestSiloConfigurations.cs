@@ -9,16 +9,13 @@ public class TestSiloConfigurations : ISiloConfigurator
 {
     public void Configure(ISiloBuilder siloBuilder)
     {
-        siloBuilder
-            .AddMemoryGrainStorage("PubSubStore")
+        siloBuilder.AddMemoryGrainStorage("PubSubStore")
             .AddMemoryStreams(OrleansSignalROptions.DefaultSignalRStreamProvider)
             .AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
-        
-        siloBuilder.Services
-            .AddSignalR()
-            .AddOrleans(options =>
-            {
-                options.StreamProvider = OrleansSignalROptions.DefaultSignalRStreamProvider;
-            });
+
+        siloBuilder.Services.AddSignalR().AddOrleans(options =>
+        {
+            options.StreamProvider = OrleansSignalROptions.DefaultSignalRStreamProvider;
+        });
     }
 }

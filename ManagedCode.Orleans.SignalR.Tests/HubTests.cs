@@ -85,7 +85,7 @@ public class HubTests
         });
 
         await Task.Delay(TimeSpan.FromSeconds(5));
-        
+
         var u1 = await hubConnection1.InvokeAsync<string>("DoUser");
         var u2 = await hubConnection2.InvokeAsync<string>("DoUser");
 
@@ -118,19 +118,18 @@ public class HubTests
             lock (messages1)
             {
                 messages1.Add(m);
-                _outputHelper.WriteLine("connection1-"+m);
+                _outputHelper.WriteLine("connection1-" + m);
             }
-
         });
         hubConnection2.On("SendAll", (string m) =>
         {
             lock (messages2)
             {
                 messages2.Add(m);
-                _outputHelper.WriteLine("connection2-"+m);
+                _outputHelper.WriteLine("connection2-" + m);
             }
         });
-        
+
 
         await hubConnection1.InvokeAsync("AddToGroup", "testGroup");
         await hubConnection2.InvokeAsync("AddToGroup", "testGroup");
@@ -154,8 +153,7 @@ public class HubTests
         // Call "Cancel" on this CancellationTokenSource to send a cancellation message to
         // the server, which will trigger the corresponding token in the hub method.
         var cancellationTokenSource = new CancellationTokenSource();
-        var stream = hubConnection.StreamAsync<int>(
-            "Counter", iterations, 100, cancellationTokenSource.Token);
+        var stream = hubConnection.StreamAsync<int>("Counter", iterations, 100, cancellationTokenSource.Token);
 
         var count = 0;
         await foreach (var number in stream)
@@ -283,22 +281,19 @@ public class HubTests
     {
         List<HubConnection> connections = new();
         ConcurrentDictionary<string, string> messages = new();
-        int closdCount = 0;
-        
+        var closdCount = 0;
+
         for (var i = 0; i < 10; i++)
         {
             var hubConnection = i % 2 == 0
                 ? _firstApp.CreateSignalRClient(nameof(SimpleTestHub))
                 : _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
-            hubConnection.Closed += (e) =>
+            hubConnection.Closed += e =>
             {
                 closdCount++;
                 return Task.CompletedTask;
             };
-            hubConnection.On("SendAll", (string m) =>
-            {
-                messages[hubConnection.ConnectionId] = m;
-            });
+            hubConnection.On("SendAll", (string m) => { messages[hubConnection.ConnectionId] = m; });
             await hubConnection.StartAsync();
             hubConnection.State.Should().Be(HubConnectionState.Connected);
             connections.Add(hubConnection);

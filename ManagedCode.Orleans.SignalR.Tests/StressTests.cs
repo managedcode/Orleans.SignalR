@@ -2,10 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluentAssertions;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
-using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Xunit;
 using Xunit.Abstractions;
@@ -24,7 +22,7 @@ public class StressTests
     {
         _siloCluster = testApp;
         _outputHelper = outputHelper;
-        _firstApp= new TestWebApplication(_siloCluster, 8081);
+        _firstApp = new TestWebApplication(_siloCluster, 8081);
         _secondApp = new TestWebApplication(_siloCluster, 8082);
     }
 
@@ -32,32 +30,32 @@ public class StressTests
     {
         var hubConnection = app.CreateSignalRClient(nameof(StressTestHub));
         return Task.FromResult(hubConnection);
-    } 
-    
+    }
+
     private async Task<HubConnection> CreateHubConnection(string user, TestWebApplication app)
     {
         var client = app.CreateHttpClient();
-        var responseMessage = await client.GetAsync("/auth?user="+user);
+        var responseMessage = await client.GetAsync("/auth?user=" + user);
         var token = await responseMessage.Content.ReadAsStringAsync();
         var hubConnection = app.CreateSignalRClient(nameof(StressTestHub),
             configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token); });
         return hubConnection;
     }
-    
+
 
     [Fact]
     public async Task InvokeAsyncSignalRTest()
     {
         ConcurrentQueue<HubConnection> connections = new();
-        ConcurrentDictionary<string,int> users = new();
-        ConcurrentDictionary<string,int> groups = new();
-        
+        ConcurrentDictionary<string, int> users = new();
+        ConcurrentDictionary<string, int> groups = new();
 
-        int allCount= 0;
-        
+
+        var allCount = 0;
+
         async Task CreateConnections(int number)
         {
-            for (int i = 0; i < number; i++)
+            for (var i = 0; i < number; i++)
             {
                 var server = Random.Shared.Next(0, 1) == 0 ? _firstApp : _secondApp;
                 var user = Random.Shared.Next(0, 3) == 3 ? null : $"user{i}@email.com";
@@ -74,36 +72,33 @@ public class StressTests
                     connection = await CreateHubConnection(server);
                 }
 
-                connection.On("All", (string m) =>
-                {
-                    Interlocked.Increment(ref allCount);
-                });
-                
+                connection.On("All", (string m) => { Interlocked.Increment(ref allCount); });
+
                 await connection.StartAsync();
                 connection.State.Should().Be(HubConnectionState.Connected);
-                
+
                 if (!string.IsNullOrEmpty(group))
                 {
                     groups[group] = 0;
                     await connection.InvokeAsync("AddToGroup", "test");
                 }
-                
+
                 connections.Enqueue(connection);
             }
         }
 
-        _outputHelper.WriteLine($"Connecting...");
+        _outputHelper.WriteLine("Connecting...");
         var sw = Stopwatch.StartNew();
         await Task.WhenAll(Enumerable.Repeat(1000, 100).Select(CreateConnections));
         //await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
 
 
-
         sw.Stop();
-        _outputHelper.WriteLine($"Init time {sw.Elapsed}; connections {connections.Count}; users {users.Count}; groups {groups.Count}");
+        _outputHelper.WriteLine(
+            $"Init time {sw.Elapsed}; connections {connections.Count}; users {users.Count}; groups {groups.Count}");
         await Task.Delay(TimeSpan.FromSeconds(1));
         sw.Reset();
-        
+
         sw.Start();
         await connections.First().InvokeAsync<int>("All");
 
@@ -112,25 +107,24 @@ public class StressTests
             await Task.Delay(TimeSpan.FromSeconds(5));
             _outputHelper.WriteLine($"All count {allCount}");
         }
+
         _outputHelper.WriteLine($"All count {allCount}");
-        
+
         sw.Stop();
-        _outputHelper.WriteLine($"All connections: {connections.Count}; recived: {allCount} messages; time: {sw.Elapsed}");
-        
+        _outputHelper.WriteLine(
+            $"All connections: {connections.Count}; recived: {allCount} messages; time: {sw.Elapsed}");
+
         //--------------------------------
         //---SignalR
         //Init time 00:01:34.7682547; connections 100_000; users 1000; groups 1000
         //All count 100_000
         //All connections: 100_000; recived: 100_000 messages; time: 00:00:17.5744497
-        
-        
+
+
         //--Obsevers
         //Init time 00:02:12.5033550; connections 100_000; users 1000; groups 1000
         //All count 100_000
         //All connections: 100_000; recived: 100_000 messages; time: 00:00:26.2132306
         //--------------------------------
-
     }
-    
-   
 }

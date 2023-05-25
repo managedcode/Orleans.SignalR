@@ -24,9 +24,9 @@ public class SimpleTestHub : Hub
     public async Task AddToGroup(string groupName)
     {
         await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
-        
+
         await Task.Delay(TimeSpan.FromSeconds(1));
-        
+
         await Clients.Group(groupName)
             .SendAsync("SendAll", $"{Context.ConnectionId} has joined the group {groupName}.");
     }
@@ -52,9 +52,7 @@ public class SimpleTestHub : Hub
             .SendAsync("SendAll", $"{Context.ConnectionId} send message: {message}.");
     }
 
-    public async IAsyncEnumerable<int> Counter(
-        int count,
-        int delay,
+    public async IAsyncEnumerable<int> Counter(int count, int delay,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         for (var i = 0; i < count; i++)
@@ -71,10 +69,7 @@ public class SimpleTestHub : Hub
         }
     }
 
-    public ChannelReader<int> CounterReader(
-        int count,
-        int delay,
-        CancellationToken cancellationToken)
+    public ChannelReader<int> CounterReader(int count, int delay, CancellationToken cancellationToken)
     {
         var channel = Channel.CreateUnbounded<int>();
 
@@ -86,10 +81,7 @@ public class SimpleTestHub : Hub
         return channel.Reader;
     }
 
-    private async Task WriteItemsAsync(
-        ChannelWriter<int> writer,
-        int count,
-        int delay,
+    private async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
         CancellationToken cancellationToken)
     {
         Exception localException = null;

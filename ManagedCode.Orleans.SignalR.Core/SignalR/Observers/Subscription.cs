@@ -8,13 +8,26 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
 public class Subscription : IDisposable
 {
-    private readonly SignalRObserver _observer;
-    private IDisposable _timer;
     private readonly CancellationTokenSource _cts = new();
+    private readonly SignalRObserver _observer;
+    private readonly IDisposable _timer;
+
     public Subscription(SignalRObserver observer, TimeSpan pingTime)
     {
         _observer = observer;
-        _timer = new Timer(Callback, this,pingTime,pingTime);
+        _timer = new Timer(Callback, this, pingTime, pingTime);
+    }
+
+    public ISignalRObserver Reference { get; private set; }
+
+    public HashSet<IObserverConnectionManager> Grains { get; } = new();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _timer.Dispose();
+        _observer.Dispose();
+        Reference = null!;
     }
 
     private void Callback(object? state)
@@ -22,14 +35,14 @@ public class Subscription : IDisposable
         var token = _cts.Token;
         _ = Task.Run(async () =>
         {
-            if(token.IsCancellationRequested)
+            if (token.IsCancellationRequested)
                 return;
-            
+
             foreach (var grain in Grains)
             {
-                if(token.IsCancellationRequested)
+                if (token.IsCancellationRequested)
                     return;
-                
+
                 await grain.Ping(Reference).ConfigureAwait(false);
             }
         }, _cts.Token).ConfigureAwait(false);
@@ -40,17 +53,8 @@ public class Subscription : IDisposable
         Reference = reference;
     }
 
-    public SignalRObserver GetObserver() => _observer;
-
-    public ISignalRObserver Reference { get; private set; }
-    
-    public HashSet<IObserverConnectionManager> Grains { get; } = new();
-
-    public void Dispose()
+    public SignalRObserver GetObserver()
     {
-        _cts.Cancel();
-        _timer.Dispose();
-        _observer.Dispose();
-        Reference = null!;
+        return _observer;
     }
 }
