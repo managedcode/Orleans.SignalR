@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -21,20 +22,26 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {
     private readonly ILogger<SignalRInvocationGrain> _logger;
+    private readonly IOptions<HubOptions>? _globalHubOptions;
     private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<InvocationInfo> _stateStorage;
 
     public SignalRInvocationGrain(ILogger<SignalRInvocationGrain> logger,
+        IOptions<HubOptions>? globalHubOptions, IOptions<OrleansSignalROptions> options,
         [PersistentState(nameof(SignalRInvocationGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<InvocationInfo> stateStorage, IOptions<OrleansSignalROptions> options)
+        IPersistentState<InvocationInfo> stateStorage)
     {
         _logger = logger;
-        _stateStorage = stateStorage;
+        _globalHubOptions = globalHubOptions;
         _options = options;
-        _observerManager = new ObserverManager<ISignalRObserver>(
-            //_globalHubOptions.Value.KeepAliveInterval.Value, //TODO:
-            TimeSpan.FromMinutes(5), logger);
+        _stateStorage = stateStorage;
+        
+        var timeSpan = _globalHubOptions.Value.ClientTimeoutInterval ?? TimeSpan.FromMinutes(1);
+        if (_options.Value.ClientTimeoutInterval > timeSpan)
+            timeSpan = _options.Value.ClientTimeoutInterval.Value;
+
+        _observerManager = new ObserverManager<ISignalRObserver>(timeSpan, _logger);
     }
 
     public async Task TryCompleteResult(string connectionId, HubMessage message)
@@ -96,6 +103,8 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
+        _observerManager.ClearExpired();
+        
         if (string.IsNullOrEmpty(_stateStorage.State.ConnectionId) ||
             string.IsNullOrEmpty(_stateStorage.State.InvocationId))
             await _stateStorage.ClearStateAsync();

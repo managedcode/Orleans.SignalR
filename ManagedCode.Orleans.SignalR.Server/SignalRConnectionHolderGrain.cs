@@ -29,17 +29,20 @@ public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
     private readonly IPersistentState<ConnectionState> _stateStorage;
 
     public SignalRConnectionHolderGrain(ILogger<SignalRConnectionHolderGrain> logger,
-        IOptions<HubOptions>? globalHubOptions,
+        IOptions<HubOptions>? globalHubOptions, IOptions<OrleansSignalROptions> options,
         [PersistentState(nameof(SignalRConnectionHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<ConnectionState> stateStorage, IOptions<OrleansSignalROptions> options)
+        IPersistentState<ConnectionState> stateStorage)
     {
         _logger = logger;
         _globalHubOptions = globalHubOptions;
         _stateStorage = stateStorage;
         _options = options;
-        _observerManager = new ObserverManager<ISignalRObserver>(
-            //_globalHubOptions.Value.KeepAliveInterval.Value, //TODO:
-            TimeSpan.FromMinutes(5), logger);
+        
+        var timeSpan = _globalHubOptions.Value.ClientTimeoutInterval ?? TimeSpan.FromMinutes(1);
+        if (_options.Value.ClientTimeoutInterval > timeSpan)
+            timeSpan = _options.Value.ClientTimeoutInterval.Value;
+
+        _observerManager = new ObserverManager<ISignalRObserver>(timeSpan, _logger);
     }
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)
@@ -104,12 +107,7 @@ public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         _observerManager.ClearExpired();
-
-        //foreach (var observer in _observerManager)
-        //{
-        //connection = _stateStorage.State.ConnectionIds.FirstOrDefault(f=>f.Value == observer.GetPrimaryKeyString())
-        //}
-
+        
         if (_stateStorage.State.ConnectionIds.Count == 0)
             await _stateStorage.ClearStateAsync();
         else

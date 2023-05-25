@@ -20,13 +20,11 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where THub : Hub
 {
+    private readonly ILogger _logger;
     private readonly IClusterClient _clusterClient;
     private readonly HubConnectionStore _connections = new();
     private readonly IOptions<HubOptions>? _globalHubOptions;
     private readonly IOptions<HubOptions<THub>>? _hubOptions;
-    private readonly IHubProtocolResolver _hubProtocolResolver;
-
-    private readonly ILogger _logger;
     private readonly IOptions<OrleansSignalROptions> _options;
 
     public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger,
@@ -36,7 +34,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _logger = logger;
         _options = options;
         _clusterClient = clusterClient;
-        _hubProtocolResolver = hubProtocolResolver;
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
     }
@@ -287,8 +284,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Subscription CreateSubscription(Func<HubMessage, Task>? onNextAction)
     {
-        var subscription = new Subscription(new SignalRObserver(onNextAction),
-            _globalHubOptions.Value.KeepAliveInterval.Value);
+        TimeSpan timeSpan = _globalHubOptions.Value.KeepAliveInterval.Value;
+        if (timeSpan > _hubOptions.Value.KeepAliveInterval)
+        {
+            timeSpan = _hubOptions.Value.KeepAliveInterval.Value;
+        }
+
+        var subscription = new Subscription(new SignalRObserver(onNextAction),timeSpan);
         var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;
