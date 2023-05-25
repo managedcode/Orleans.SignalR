@@ -23,10 +23,10 @@ public static class NameHelperGenerator
         return grainFactory.GetGrain<ISignalRInvocationGrain>(typeof(THub).FullName + "." + invocationId);
     }
 
-    public static ISignalRGroupHolderGrain GetGroupHolderGrain<THub>(IGrainFactory grainFactory)
-    {
-        return grainFactory.GetGrain<ISignalRGroupHolderGrain>(typeof(THub).FullName);
-    }
+    // public static ISignalRGroupHolderGrain GetGroupHolderGrain<THub>(IGrainFactory grainFactory)
+    // {
+    //     return grainFactory.GetGrain<ISignalRGroupHolderGrain>(typeof(THub).FullName);
+    // }
 
     public static ISignalRUserGrain GetSignalRUserGrain<THub>(IGrainFactory grainFactory, string userId)
     {

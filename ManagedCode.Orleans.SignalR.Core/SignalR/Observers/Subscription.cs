@@ -30,7 +30,7 @@ public class Subscription : IDisposable
                 if(token.IsCancellationRequested)
                     return;
                 
-                await grain.Ping(Reference);
+                await grain.Ping(Reference).ConfigureAwait(false);
             }
         }, _cts.Token).ConfigureAwait(false);
     }

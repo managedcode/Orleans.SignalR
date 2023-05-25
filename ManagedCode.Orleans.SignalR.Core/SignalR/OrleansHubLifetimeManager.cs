@@ -174,17 +174,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var subscription = GetSubscription(connectionId);
         if (subscription is null)
             return;
-
-        var groupHolder = NameHelperGenerator.GetGroupHolderGrain<THub>(_clusterClient);
+        
         var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
-
-        await Task.WhenAll(groupHolder.AddConnectionToGroup(connectionId, subscription.Reference, groupName),
-            groupGrain.AddConnection(connectionId, subscription.Reference)).ConfigureAwait(false);
-
-
-        subscription.Grains.Add(groupHolder);
+        await groupGrain.AddConnection(connectionId, subscription.Reference).ConfigureAwait(false);
+        
         subscription.Grains.Add(groupGrain);
-
     }
 
     public override async Task RemoveFromGroupAsync(string connectionId, string groupName,
@@ -194,13 +188,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         if (subscription is null)
             return;
         
-        var groupHolder = NameHelperGenerator.GetGroupHolderGrain<THub>(_clusterClient);
         var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
+        await groupGrain.RemoveConnection(connectionId, subscription.Reference).ConfigureAwait(false);
         
-        await Task.WhenAll(groupHolder.RemoveConnectionFromGroup(connectionId, subscription.Reference, groupName),
-            groupGrain.RemoveConnection(connectionId, subscription.Reference)).ConfigureAwait(false);
-        
-        subscription.Grains.Remove(groupHolder);
         subscription.Grains.Remove(groupGrain);
     }
 
@@ -252,7 +242,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             {
                 try
                 {
-                    return connection.WriteAsync(invocationMessage, cancellationToken);
+                    return connection.WriteAsync(invocationMessage, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -260,7 +250,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                     throw;
                 }
              
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         try
@@ -302,11 +292,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Subscription CreateConnectionObserver(HubConnectionContext connection)
     {
-        var subscription = CreateSubscription(message =>
-        {
-            _ = Task.Run(() => OnNextAsync(connection, message)).ConfigureAwait(false);
-            return Task.CompletedTask;
-        });
+        var subscription = CreateSubscription(message => OnNextAsync(connection, message));
         connection.Features.Set(subscription);
         return subscription;
     }
@@ -333,6 +319,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                     await NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId).TryCompleteResult(connection.ConnectionId,
                         CompletionMessage.WithError(invocation.InvocationId, $"Connection disconnected. Reason:{ex.Message}")).ConfigureAwait(false);
             }
+            
+            //todo: maybe it's good idea to remove the connection?
             
             _logger.LogError(ex, "OnNextAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
         }

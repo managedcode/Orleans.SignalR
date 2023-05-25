@@ -115,13 +115,20 @@ public class HubTests
 
         hubConnection1.On("SendAll", (string m) =>
         {
-            messages1.Add(m);
-            _outputHelper.WriteLine(m);
+            lock (messages1)
+            {
+                messages1.Add(m);
+                _outputHelper.WriteLine(m);
+            }
+
         });
         hubConnection2.On("SendAll", (string m) =>
         {
-            messages2.Add(m);
-            _outputHelper.WriteLine(m);
+            lock (messages2)
+            {
+                messages2.Add(m);
+                _outputHelper.WriteLine(m);
+            }
         });
         
 
