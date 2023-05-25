@@ -23,15 +23,13 @@ public class HttpHostProgram
         //     builder.UseLocalhostClustering();
         //     new TestSiloConfigurations().Configure(builder);
         // });
-        
+
         if (builder.Environment.IsProduction())
-            builder.Services
-                .AddSignalR()
+            builder.Services.AddSignalR()
                 .AddOrleans();
         else
-            builder.Services
-                .AddSignalR()
-                .AddStackExchangeRedis();
+            builder.Services.AddSignalR();
+        //.AddStackExchangeRedis();
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>

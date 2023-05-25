@@ -94,53 +94,42 @@ public class StressTests
 
         _outputHelper.WriteLine($"Connecting...");
         var sw = Stopwatch.StartNew();
-        await Task.WhenAll(Enumerable.Repeat(100, 1000).Select(CreateConnections));
+        await Task.WhenAll(Enumerable.Repeat(1000, 100).Select(CreateConnections));
         //await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
 
 
 
         sw.Stop();
         _outputHelper.WriteLine($"Init time {sw.Elapsed}; connections {connections.Count}; users {users.Count}; groups {groups.Count}");
+        await Task.Delay(TimeSpan.FromSeconds(1));
         sw.Reset();
         
-        // OK, this is bad =(
-        
-        //--------------------------------
-        //---SignalR
-        //Init time 00:01:16.6498487; connections 100000; users 10000; groups 10000
-        //All count 100_000
-        //All connections: 100000; recived: 100_000 messages; time: 00:00:06.6428702
-        
-        //---Orleans
-        //Init time 00:01:38.7127252; connections 100000; users 10000; groups 10000
-        //All count 100_000
-        //All connections: 100000; recived: 100000 messages; time: 00:00:56.9603385
-        
-        
-        //obsevers
-        //---SignalR
-        // Init time 00:00:07.3090994; connections 10_000; users 100; groups 100
-        // All count 10000
-        // All connections: 10_000; recived: 10_000 messages; time: 00:00:00.0300137
-        //---Orleans
-
-        
         sw.Start();
-
-
         await connections.First().InvokeAsync<int>("All");
-
-
 
         while (allCount < connections.Count)
         {
-            await Task.Delay(10000);
+            await Task.Delay(TimeSpan.FromSeconds(5));
             _outputHelper.WriteLine($"All count {allCount}");
         }
         _outputHelper.WriteLine($"All count {allCount}");
         
         sw.Stop();
         _outputHelper.WriteLine($"All connections: {connections.Count}; recived: {allCount} messages; time: {sw.Elapsed}");
+        
+        //--------------------------------
+        //---SignalR
+        //Init time 00:01:34.7682547; connections 100_000; users 1000; groups 1000
+        //All count 100_000
+        //All connections: 100_000; recived: 100_000 messages; time: 00:00:17.5744497
+        
+        
+        //--Obsevers
+        //Init time 00:02:12.5033550; connections 100_000; users 1000; groups 1000
+        //All count 100_000
+        //All connections: 100_000; recived: 100_000 messages; time: 00:00:26.2132306
+        //--------------------------------
+
     }
     
    
