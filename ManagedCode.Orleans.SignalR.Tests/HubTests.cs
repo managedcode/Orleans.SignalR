@@ -27,6 +27,40 @@ public class HubTests
     }
 
     [Fact]
+    public async Task ClientInvokeAndGetResult()
+    {
+        var connections = new List<HubConnection>();
+
+        for (var i = 0; i < 500; i++)
+        {
+            var hubConnection1 = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));
+            await hubConnection1.StartAsync();
+            hubConnection1.State.Should().Be(HubConnectionState.Connected);
+
+            var hubConnection2 = _secondApp.CreateSignalRClient(nameof(SimpleTestHub));
+            await hubConnection2.StartAsync();
+            hubConnection2.State.Should().Be(HubConnectionState.Connected);
+
+            var result1 = await hubConnection1.InvokeAsync<int>("Plus", i, 5);
+            var result2 = await hubConnection2.InvokeAsync<int>("Plus", 10, i);
+
+            result1.Should().Be(i + 5);
+            result2.Should().Be(10 + i);
+
+            connections.Add(hubConnection1);
+            connections.Add(hubConnection2);
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(35));
+
+        await Parallel.ForEachAsync(connections, async (connection, token) =>
+        {
+            var result = await connection.InvokeAsync<int>("Plus", 50, 50, token);
+            result.Should().Be(100);
+        });
+    }
+
+    [Fact]
     public async Task InvokeAsyncAndOnTest()
     {
         var hubConnection = _firstApp.CreateSignalRClient(nameof(SimpleTestHub));

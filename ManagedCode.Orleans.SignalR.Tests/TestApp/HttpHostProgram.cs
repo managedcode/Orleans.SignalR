@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -14,6 +15,12 @@ public class HttpHostProgram
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        builder.Services.AddLogging(config =>
+        {
+            config.AddConsole();
+            config.AddDebug();
+        });
 
         builder.Services.AddControllers();
 
@@ -26,7 +33,7 @@ public class HttpHostProgram
         if (builder.Environment.IsProduction())
             builder.Services.AddSignalR().AddOrleans();
         else
-            builder.Services.AddSignalR();//.AddStackExchangeRedis();
+            builder.Services.AddSignalR(); //.AddStackExchangeRedis();
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
         {

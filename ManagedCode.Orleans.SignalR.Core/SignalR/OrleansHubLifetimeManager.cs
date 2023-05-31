@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
@@ -20,40 +21,41 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where THub : Hub
 {
-    private readonly ILogger _logger;
     private readonly IClusterClient _clusterClient;
     private readonly HubConnectionStore _connections = new();
-    private readonly IOptions<HubOptions>? _globalHubOptions;
-    private readonly IOptions<HubOptions<THub>>? _hubOptions;
-    private readonly IOptions<OrleansSignalROptions> _options;
+    private readonly IOptions<HubOptions> _globalHubOptions;
+    private readonly IOptions<HubOptions<THub>> _hubOptions;
+    private readonly ILogger _logger;
+    private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions;
 
-    public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger,
-        IOptions<OrleansSignalROptions> options, IClusterClient clusterClient, IHubProtocolResolver hubProtocolResolver,
-        IOptions<HubOptions>? globalHubOptions, IOptions<HubOptions<THub>>? hubOptions)
+    public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger, IClusterClient clusterClient,
+        IHubProtocolResolver hubProtocolResolver, IOptions<OrleansSignalROptions> orleansSignalOptions,
+        IOptions<HubOptions> globalHubOptions, IOptions<HubOptions<THub>> hubOptions)
     {
         _logger = logger;
-        _options = options;
-        _clusterClient = clusterClient;
+        _orleansSignalOptions = orleansSignalOptions;
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
+        _clusterClient = clusterClient;
     }
 
     public override async Task OnConnectedAsync(HubConnectionContext connection)
     {
-        var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
-
         var subscription = CreateConnectionObserver(connection);
 
-        //Subscribe the instance to receive messages.
-        await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference)
-            .ConfigureAwait(false);
-        subscription.Grains.Add(connectionHolderGrain);
+        if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
+        {
+            var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
+            await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference)
+                .ConfigureAwait(false);
+            subscription.AddGrain(connectionHolderGrain);
+        }
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
         {
             var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!);
             await userGrain.AddConnection(connection.ConnectionId, subscription.Reference).ConfigureAwait(false);
-            subscription.Grains.Add(userGrain);
+            subscription.AddGrain(userGrain);
         }
 
         _connections.Add(connection);
@@ -162,7 +164,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
         await groupGrain.AddConnection(connectionId, subscription.Reference).ConfigureAwait(false);
 
-        subscription.Grains.Add(groupGrain);
+        subscription.AddGrain(groupGrain);
     }
 
     public override async Task RemoveFromGroupAsync(string connectionId, string groupName,
@@ -175,7 +177,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
         await groupGrain.RemoveConnection(connectionId, subscription.Reference).ConfigureAwait(false);
 
-        subscription.Grains.Remove(groupGrain);
+        subscription.RemoveGrain(groupGrain);
     }
 
     public override async Task<T> InvokeConnectionAsync<T>(string connectionId, string methodName, object?[] args,
@@ -206,7 +208,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         });
 
         var invocationGrain = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId);
-        subscription.Grains.Add(invocationGrain);
+        subscription.AddGrain(invocationGrain);
         await invocationGrain.AddInvocation(subscription.Reference,
             new InvocationInfo(connectionId, invocationId, typeof(T)));
 
@@ -268,11 +270,20 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     public override bool TryGetReturnType(string invocationId, [NotNullWhen(true)] out Type? type)
     {
-        var result = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).TryGetReturnType()
-            .Result;
+        var returnType = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).TryGetReturnType();
 
-        type = result.GetReturnType();
-        return result.Result;
+        var timeSpan =
+            TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
+        Task.WaitAny(returnType, Task.Delay(timeSpan * 0.8));
+
+        if (returnType.IsCompleted)
+        {
+            type = returnType.Result.GetReturnType();
+            return returnType.Result.Result;
+        }
+
+        type = null;
+        return false;
     }
 
     private Subscription CreateConnectionObserver(HubConnectionContext connection)
@@ -282,15 +293,12 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return subscription;
     }
 
+
     private Subscription CreateSubscription(Func<HubMessage, Task>? onNextAction)
     {
-        TimeSpan timeSpan = _globalHubOptions.Value.KeepAliveInterval.Value;
-        if (timeSpan > _hubOptions.Value.KeepAliveInterval)
-        {
-            timeSpan = _hubOptions.Value.KeepAliveInterval.Value;
-        }
-
-        var subscription = new Subscription(new SignalRObserver(onNextAction),timeSpan);
+        var timeSpan =
+            TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
+        var subscription = new Subscription(new SignalRObserver(onNextAction), timeSpan * 0.8);
         var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;

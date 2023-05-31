@@ -162,4 +162,10 @@ public class SimpleTestHub : Hub
     {
         await Clients.Users(userIds).SendAsync("SendAll", message);
     }
+
+    public async Task<int> Plus(int a, int b)
+    {
+        await Task.Delay(200);
+        return a + b;
+    }
 }

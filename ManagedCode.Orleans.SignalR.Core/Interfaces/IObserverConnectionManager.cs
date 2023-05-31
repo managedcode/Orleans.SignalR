@@ -12,5 +12,5 @@ public interface IObserverConnectionManager
     Task RemoveConnection(string connectionId, ISignalRObserver observer);
 
     [OneWay]
-    ValueTask Ping(ISignalRObserver observer);
+    Task Ping(ISignalRObserver observer);
 }

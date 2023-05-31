@@ -77,6 +77,7 @@ public class TestGrain : Grain, ITestGrain
 ```
 
 You can use typed Orleans client, with interface IOrleansHubContext
+
 ```csharp
 public class TestGrain : Grain, ITestGrain
 {
