@@ -296,8 +296,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Subscription CreateSubscription(Func<HubMessage, Task>? onNextAction)
     {
-        var timeSpan =
-            TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
+        var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
         var subscription = new Subscription(new SignalRObserver(onNextAction), timeSpan * 0.8);
         var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
         subscription.SetReference(reference);

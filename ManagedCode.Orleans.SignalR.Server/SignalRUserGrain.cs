@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -20,16 +22,22 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRUserGrain : Grain, ISignalRUserGrain
 {
     private readonly ILogger<SignalRUserGrain> _logger;
+    private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions;
     private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IPersistentState<ConnectionState> _stateStorage;
+    private readonly IPersistentState<HubMessageState> _messagesStorage;
 
-    public SignalRUserGrain(ILogger<SignalRUserGrain> logger, IOptions<OrleansSignalROptions> orleansSignalOptions,
-        IOptions<HubOptions> hubOptions,
+    public SignalRUserGrain(ILogger<SignalRUserGrain> logger, 
+        IOptions<OrleansSignalROptions> orleansSignalOptions, IOptions<HubOptions> hubOptions,
         [PersistentState(nameof(SignalRUserGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<ConnectionState> stateStorage)
+        IPersistentState<ConnectionState> stateStorage,
+        [PersistentState(nameof(SignalRUserGrain)+nameof(HubMessageState), OrleansSignalROptions.OrleansSignalRStorage)]
+        IPersistentState<HubMessageState> messagesStorage)
     {
         _logger = logger;
+        _orleansSignalOptions = orleansSignalOptions;
         _stateStorage = stateStorage;
+        _messagesStorage = messagesStorage;
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
         _observerManager = new ObserverManager<ISignalRObserver>(timeSpan * 1.2, _logger);
@@ -42,6 +50,17 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
             connectionId);
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
+
+        if (_messagesStorage.State.Messages.Count > 0)
+        {
+            var currentDateTime = DateTime.UtcNow;
+            foreach (var message in _messagesStorage.State.Messages.ToArray())
+            {
+                _messagesStorage.State.Messages.Remove(message.Key);
+                if(message.Value >= currentDateTime)
+                    await SendToUser(message.Key);
+            }
+        }
     }
 
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
@@ -56,6 +75,12 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
     public async Task SendToUser(HubMessage message)
     {
         await Task.Yield();
+        if (_observerManager.Count == 0)
+        {
+            _messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
+            return;
+        }
+        
         _logger.LogInformation("Hub: {PrimaryKeyString}; SendToUser", this.GetPrimaryKeyString());
         await _observerManager.Notify(s => s.OnNextAsync(message));
     }
@@ -74,5 +99,18 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
             await _stateStorage.ClearStateAsync();
         else
             await _stateStorage.WriteStateAsync();
+        
+        var currentDateTime = DateTime.UtcNow;
+        foreach (var message in _messagesStorage.State.Messages.ToArray())
+        {
+            if (message.Value <= currentDateTime)
+                _messagesStorage.State.Messages.Remove(message.Key);
+        }
+        
+        if(_messagesStorage.State.Messages.Count == 0)
+            await _stateStorage.ClearStateAsync();
+        else
+            await _stateStorage.WriteStateAsync();
+
     }
 }

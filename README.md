@@ -46,10 +46,9 @@ clientBuilder.Services
 To use Orleans.SignalR on the server, add the following code to your server configuration:
 
 ```csharp
-siloBuilder
-    .AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
-
-siloBuilder.Services
+siloBuilder.ConfigureOrleansSignalR();
+siloBuilder.AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
+siloBuilder.Services            
     .AddSignalR()
     .AddOrleans();
 ```

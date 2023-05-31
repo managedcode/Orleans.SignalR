@@ -42,4 +42,9 @@ public class TestGrain : Grain, ITestGrain
 
         return message;
     }
+    
+    public Task SendToUser(string userName, string message)
+    {
+        return _hubContext.Clients.User(userName).SendAsync("SendMessage", message);
+    }
 }

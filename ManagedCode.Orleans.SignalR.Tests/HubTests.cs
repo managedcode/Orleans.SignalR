@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using FluentAssertions;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -511,5 +512,87 @@ public class HubTests
         messages.Clear();
 
         await Task.WhenAll(connections.Select(f => f.StopAsync()));
+    }
+    
+    [Fact]
+    public async Task UsersDeliveryMessagesTest()
+    {
+        string messages1 = string.Empty;
+        string messages2 = string.Empty;
+        int connection1 = 0;
+        int connection2 = 0;
+        
+        var token1 = await (await _firstApp.CreateHttpClient().GetAsync("/auth?user=TestUser1")).Content.ReadAsStringAsync();
+        var token2 = await (await _secondApp.CreateHttpClient().GetAsync("/auth?user=TestUser2")).Content.ReadAsStringAsync();
+        
+        var hubConnection1 = _firstApp.CreateSignalRClient(nameof(InterfaceTestHub),
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token1); });
+        var hubConnection2 = _secondApp.CreateSignalRClient(nameof(InterfaceTestHub),
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token2); });
+        
+ 
+        hubConnection1.On("SendMessage", (string m) =>
+        {
+            connection1++;
+            messages1 = m;
+        });
+        hubConnection2.On("SendMessage", (string m) =>
+        {
+            connection2++;
+            messages2 = m;
+        });
+        
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random1").SendToUser("TestUser1", "1");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2").SendToUser("TestUser2", "2");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2").SendToUser("TestUser2", "2");
+
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        await hubConnection1.StartAsync();
+        await hubConnection2.StartAsync();
+        
+        
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        
+        messages1.Should().Be("1");
+        messages2.Should().Be("2");
+        connection1.Should().Be(1);
+        connection2.Should().Be(2);
+
+    }
+    
+    [Fact]
+    public async Task UsersDeliveryTimeoutMessagesTest()
+    {
+        string messages1 = string.Empty;
+        string messages2 = string.Empty;
+        
+        var token1 = await (await _firstApp.CreateHttpClient().GetAsync("/auth?user=TestUser1")).Content.ReadAsStringAsync();
+        var token2 = await (await _secondApp.CreateHttpClient().GetAsync("/auth?user=TestUser2")).Content.ReadAsStringAsync();
+        
+        var hubConnection1 = _firstApp.CreateSignalRClient(nameof(InterfaceTestHub),
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token1); });
+        var hubConnection2 = _secondApp.CreateSignalRClient(nameof(InterfaceTestHub),
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token2); });
+        
+ 
+        hubConnection1.On("SendMessage", (string m) => { messages1 = m; });
+        hubConnection2.On("SendMessage", (string m) => { messages2 = m; });
+        
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random1").SendToUser("TestUser1", "1");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2").SendToUser("TestUser2", "2");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2").SendToUser("TestUser2", "2");
+
+        await Task.Delay(TimeSpan.FromMinutes(1.5));
+
+        await hubConnection1.StartAsync();
+        await hubConnection2.StartAsync();
+        
+        
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        
+        messages1.Should().Be(string.Empty);
+        messages2.Should().Be(string.Empty);
+
     }
 }

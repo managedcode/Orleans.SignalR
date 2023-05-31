@@ -6,4 +6,5 @@ public interface ITestGrain : IGrainWithStringKey
     Task PushMessage(string message);
     Task<string> GetMessage(string connectionId);
     Task<string> GetMessageInvoke(string connectionId);
+    Task SendToUser(string userName, string message);
 }

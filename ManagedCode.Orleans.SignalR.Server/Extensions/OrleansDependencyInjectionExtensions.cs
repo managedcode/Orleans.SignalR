@@ -1,9 +1,14 @@
 using System;
+using System.Reflection;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.HubContext;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Orleans;
+using Orleans.Configuration;
+using Orleans.Hosting;
+using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server.Extensions;
 
@@ -26,5 +31,28 @@ public static class OrleansDependencyInjectionExtensions
         signalrBuilder.Services.AddSingleton(typeof(IOrleansHubContext<,>), typeof(OrleansHubContext<,>));
 
         return signalrBuilder;
+    }
+    
+    public static ISiloBuilder ConfigureOrleansSignalR(this ISiloBuilder siloBuilder)
+    {
+        var timeSpan = TimeSpan.FromMinutes(5);
+        
+        void SetSpecificCollectionAge<T>(GrainCollectionOptions options)
+        {
+            var attribute = typeof(T).GetCustomAttribute<GrainTypeAttribute>();
+            if (attribute is not null)
+            {
+                var grainType = attribute.GetGrainType(null, null).ToString();
+                options.ClassSpecificCollectionAge[grainType!] = timeSpan;
+            }
+        }
+
+        return siloBuilder.Configure<GrainCollectionOptions>(options =>
+        {
+            SetSpecificCollectionAge<SignalRConnectionHolderGrain>(options);
+            SetSpecificCollectionAge<SignalRGroupGrain>(options);
+            SetSpecificCollectionAge<SignalRInvocationGrain>(options);
+            SetSpecificCollectionAge<SignalRUserGrain>(options);
+        });
     }
 }
