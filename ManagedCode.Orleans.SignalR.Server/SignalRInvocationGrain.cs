@@ -32,12 +32,13 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _stateStorage = stateStorage;
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        _observerManager = new ObserverManager<ISignalRObserver>(timeSpan * 1.2, _logger);
+        _observerManager = new ObserverManager<ISignalRObserver>(TimeIntervalHelper.AddExpirationIntervalBuffer(timeSpan), _logger);
     }
 
     public async Task TryCompleteResult(string connectionId, HubMessage message)
     {
         await Task.Yield();
+        Logs.TryCompleteResult(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), connectionId);
         _logger.LogInformation("Hub: {PrimaryKeyString}; TryCompleteResult: {ConnectionId}", this.GetPrimaryKeyString(),
             connectionId);
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
@@ -49,6 +50,8 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     public async Task<ReturnType> TryGetReturnType()
     {
         await Task.Yield();
+        
+        Logs.TryGetReturnType(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
         if (_stateStorage.State == null)
             return new ReturnType();
 
@@ -62,7 +65,11 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     public async Task AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; AddInvocation", this.GetPrimaryKeyString());
+        Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
+
+        if(invocationInfo?.InvocationId is null || invocationInfo?.ConnectionId is null)
+            return;
+        
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State = invocationInfo;
     }
@@ -70,7 +77,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     public async Task<InvocationInfo?> RemoveInvocation()
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; RemoveInvocation", this.GetPrimaryKeyString());
+        Logs.RemoveInvocation(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
         _observerManager.Clear();
         var into = _stateStorage.State;
         await _stateStorage.ClearStateAsync();
@@ -81,23 +88,21 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     public async Task Ping(ISignalRObserver observer)
     {
         await Task.Yield();
+        Logs.Ping(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
         _observerManager.Subscribe(observer, observer);
     }
 
-    public async Task AddConnection(string connectionId, ISignalRObserver observer)
+    public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        await Task.Yield();
         //ignore for this grain
-        _logger.LogInformation("Hub: {PrimaryKeyString}; AddConnection: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
+        Logs.AddConnection(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), connectionId);
+        return Task.CompletedTask;
     }
 
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         await Task.Yield();
-        //ignore connectionId
-        _logger.LogInformation("Hub: {PrimaryKeyString}; RemoveConnection: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
+        Logs.RemoveConnection(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _observerManager.Clear();
         await _stateStorage.ClearStateAsync();
@@ -106,6 +111,8 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
+        Logs.OnDeactivateAsync(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
+        
         _observerManager.ClearExpired();
 
         if (string.IsNullOrEmpty(_stateStorage.State.ConnectionId) ||

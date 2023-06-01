@@ -61,4 +61,9 @@ public static class TimeIntervalHelper
 
         return timeSpan;
     }
+    
+    public static TimeSpan AddExpirationIntervalBuffer(TimeSpan timeSpan)
+    {
+        return timeSpan * 1.2;
+    }
 }

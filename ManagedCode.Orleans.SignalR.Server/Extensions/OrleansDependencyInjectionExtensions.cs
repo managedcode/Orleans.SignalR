@@ -8,13 +8,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Orleans;
 using Orleans.Configuration;
 using Orleans.Hosting;
-using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server.Extensions;
 
 /// <summary>
 ///     Extension methods for configuring Orleans-based scale-out for a SignalR Server in an
-///     <see cref="ISignalRServerBuilder" />.
 /// </summary>
 public static class OrleansDependencyInjectionExtensions
 {
@@ -35,7 +33,7 @@ public static class OrleansDependencyInjectionExtensions
     
     public static ISiloBuilder ConfigureOrleansSignalR(this ISiloBuilder siloBuilder)
     {
-        var timeSpan = TimeSpan.FromMinutes(5);
+        var timeSpan = TimeSpan.FromMinutes(7);
         
         void SetSpecificCollectionAge<T>(GrainCollectionOptions options)
         {

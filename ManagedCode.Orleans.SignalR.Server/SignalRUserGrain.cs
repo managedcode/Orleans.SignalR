@@ -40,14 +40,13 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
         _messagesStorage = messagesStorage;
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        _observerManager = new ObserverManager<ISignalRObserver>(timeSpan * 1.2, _logger);
+        _observerManager = new ObserverManager<ISignalRObserver>(TimeIntervalHelper.AddExpirationIntervalBuffer(timeSpan), _logger);
     }
 
     public async Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; AddConnection: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
+        Logs.AddConnection(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
 
@@ -66,8 +65,7 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; RemoveConnection: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
+        Logs.RemoveConnection(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
     }
@@ -75,24 +73,26 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
     public async Task SendToUser(HubMessage message)
     {
         await Task.Yield();
+        Logs.SendToUser(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString());
         if (_observerManager.Count == 0)
         {
             _messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
             return;
         }
         
-        _logger.LogInformation("Hub: {PrimaryKeyString}; SendToUser", this.GetPrimaryKeyString());
         await _observerManager.Notify(s => s.OnNextAsync(message));
     }
 
     public async Task Ping(ISignalRObserver observer)
     {
         await Task.Yield();
+        Logs.Ping(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString());
         _observerManager.Subscribe(observer, observer);
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
+        Logs.OnDeactivateAsync(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString());
         _observerManager.ClearExpired();
         
         if (_observerManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)

@@ -33,21 +33,20 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
         _stateStorage = stateStorage;
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        _observerManager = new ObserverManager<ISignalRObserver>(timeSpan * 1.2, _logger);
+        _observerManager = new ObserverManager<ISignalRObserver>(TimeIntervalHelper.AddExpirationIntervalBuffer(timeSpan), _logger);
     }
 
     public async Task SendToGroup(HubMessage message)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; SendToGroup", this.GetPrimaryKeyString());
+        Logs.SendToGroup(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString());
         await _observerManager.Notify(s => s.OnNextAsync(message));
     }
 
     public async Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; SendToGroupExcept: {ConnectionId}", this.GetPrimaryKeyString(),
-            excludedConnectionIds);
+        Logs.SendToGroupExcept(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString(), excludedConnectionIds);
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
             if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
@@ -60,8 +59,7 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
     public async Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; AddConnection: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
+        Logs.AddConnection(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
     }
@@ -69,8 +67,7 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         await Task.Yield();
-        _logger.LogInformation("Hub: {PrimaryKeyString}; RemoveConnection: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
+        Logs.RemoveConnection(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
     }
@@ -78,11 +75,13 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
     public async Task Ping(ISignalRObserver observer)
     {
         await Task.Yield();
+        Logs.Ping(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString());
         _observerManager.Subscribe(observer, observer);
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
+        Logs.OnDeactivateAsync(_logger, nameof(DeactivationReason),this.GetPrimaryKeyString());
         _observerManager.ClearExpired();
         
         if (_observerManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
