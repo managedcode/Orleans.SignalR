@@ -12,12 +12,12 @@ public static class NameHelperGenerator
 
     public static ISignalRConnectionHolderGrain GetConnectionHolderGrain<THub>(IGrainFactory grainFactory)
     {
-        return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(Base64Encode(typeof(THub).FullName!));
+        return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(typeof(THub).FullName!));
     }
 
     public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory, string invocationId)
     {
-        return grainFactory.GetGrain<ISignalRInvocationGrain>(Base64Encode(typeof(THub).FullName + ":" + invocationId));
+        return grainFactory.GetGrain<ISignalRInvocationGrain>(CleanString(typeof(THub).FullName + "::" + invocationId));
     }
 
     // public static ISignalRGroupHolderGrain GetGroupHolderGrain<THub>(IGrainFactory grainFactory)
@@ -27,24 +27,29 @@ public static class NameHelperGenerator
 
     public static ISignalRUserGrain GetSignalRUserGrain<THub>(IGrainFactory grainFactory, string userId)
     {
-        return grainFactory.GetGrain<ISignalRUserGrain>(Base64Encode(typeof(THub).FullName + ":" + userId));
+        return grainFactory.GetGrain<ISignalRUserGrain>(CleanString(typeof(THub).FullName + "::" + userId));
     }
 
     public static ISignalRGroupGrain GetSignalRGroupGrain<THub>(IGrainFactory grainFactory, string groupId)
     {
-        return grainFactory.GetGrain<ISignalRGroupGrain>(Base64Encode(typeof(THub).FullName + ":" + groupId));
+        return grainFactory.GetGrain<ISignalRGroupGrain>(CleanString(typeof(THub).FullName + "::" + groupId));
     }
 
-    public static string Base64Encode(string plainText) 
+    public static string CleanString(string input)
     {
-        var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(plainText);
-        return System.Convert.ToBase64String(plainTextBytes);
-    }
-
-    public static string Base64Decode(string base64EncodedData) 
-    {
-        var base64EncodedBytes = System.Convert.FromBase64String(base64EncodedData);
-        return System.Text.Encoding.UTF8.GetString(base64EncodedBytes);
+        var builder = new System.Text.StringBuilder();
+        foreach (char c in input)
+        {
+            if (char.IsLetterOrDigit(c) || c == '-' || c == ':' || c == '.')
+            {
+                builder.Append(c);
+            }
+            else
+            {
+                builder.Append(":");
+            }
+        }
+        return builder.ToString();
     }
     
     // public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,

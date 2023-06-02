@@ -31,8 +31,8 @@ public class HubTests
     [Fact]
     public void Base64Test()
     {
-        var name = NameHelperGenerator.Base64Encode(typeof(SimpleTestHub).FullName);
-        name.Should().Be("TWFuYWdlZENvZGUuT3JsZWFucy5TaWduYWxSLlRlc3RzLlRlc3RBcHAuSHVicy5TaW1wbGVUZXN0SHVi");
+        var name = NameHelperGenerator.CleanString(typeof(SimpleTestHub).FullName+"\\"+"//@!234");
+        name.Should().Be("ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs.SimpleTestHub:::::234");
     }
     
     [Fact]
