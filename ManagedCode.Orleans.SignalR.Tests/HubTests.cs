@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using FluentAssertions;
+using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -27,6 +28,13 @@ public class HubTests
         _secondApp = new TestWebApplication(_siloCluster, 8082);
     }
 
+    [Fact]
+    public void Base64Test()
+    {
+        var name = NameHelperGenerator.Base64Encode(typeof(SimpleTestHub).FullName);
+        name.Should().Be("TWFuYWdlZENvZGUuT3JsZWFucy5TaWduYWxSLlRlc3RzLlRlc3RBcHAuSHVicy5TaW1wbGVUZXN0SHVi");
+    }
+    
     [Fact]
     public async Task ClientInvokeAndGetResult()
     {
@@ -92,7 +100,7 @@ public class HubTests
     public async Task AuthInvokeAsyncAndOnTest()
     {
         var client = _firstApp.CreateHttpClient();
-        var responseMessage = await client.GetAsync("/auth?user=TestUser");
+        var responseMessage = await client.GetAsync("/auth?user=TestUser@gmail.com");
         var token = await responseMessage.Content.ReadAsStringAsync();
         var hubConnection1 = _firstApp.CreateSignalRClient(nameof(SimpleTestHub),
             configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token); });
