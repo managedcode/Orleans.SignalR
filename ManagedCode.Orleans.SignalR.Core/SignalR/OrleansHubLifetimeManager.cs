@@ -61,22 +61,21 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _connections.Add(connection);
     }
 
-    public override Task OnDisconnectedAsync(HubConnectionContext connection)
+    public override async Task OnDisconnectedAsync(HubConnectionContext connection)
     {
         _connections.Remove(connection);
+        
+        using var subscription = connection.Features.Get<Subscription>();
 
-        var subscription = connection.Features.Get<Subscription>();
-
-        // If the bus is null then the Redis connection failed to be established and none of the other connection setup ran
         if (subscription is null)
-            return Task.CompletedTask;
+            return;
 
         var tasks = new List<Task>(subscription.Grains.Count);
 
         foreach (var grain in subscription.Grains)
             tasks.Add(grain.RemoveConnection(connection.ConnectionId, subscription.Reference));
-
-        return Task.WhenAll(tasks);
+        
+        await Task.WhenAll(tasks);
     }
 
     public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = new())
@@ -194,7 +193,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         var tcs = new TaskCompletionSource<T>();
 
-        var subscription = CreateSubscription(message =>
+        using var subscription = CreateSubscription(message =>
         {
             if (message is CompletionMessage completionMessage)
             {
@@ -258,7 +257,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             foreach (var grain in subscription.Grains)
                 _ = grain.RemoveConnection(connection?.ConnectionId, subscription.Reference).ConfigureAwait(false);
-            subscription.Dispose();
         }
     }
 
@@ -288,23 +286,28 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Subscription CreateConnectionObserver(HubConnectionContext connection)
     {
-        var subscription = CreateSubscription(message => OnNextAsync(connection, message));
+        WeakReference<HubConnectionContext> weakConnection = new(connection);
+        var subscription = CreateSubscription(message => OnNextAsync(weakConnection, message));
         connection.Features.Set(subscription);
         return subscription;
     }
 
 
-    private Subscription CreateSubscription(Func<HubMessage, Task>? onNextAction)
+    private Subscription CreateSubscription(Func<HubMessage, Task> onNextAction)
     {
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
-        var subscription = new Subscription(new SignalRObserver(onNextAction), timeSpan);
+        var subscription = new Subscription(new SignalRObserver(new WeakReference<Func<HubMessage, Task>>(onNextAction)), timeSpan);
         var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;
     }
 
-    private async Task OnNextAsync(HubConnectionContext connection, HubMessage message)
+    private async Task OnNextAsync(WeakReference<HubConnectionContext> connectionReference, HubMessage message)
     {
+        if (!connectionReference.TryGetTarget(out var connection))
+        {
+            return;
+        }
         try
         {
             await connection.WriteAsync(message).ConfigureAwait(false);

@@ -17,8 +17,8 @@
         <RepositoryUrl>https://github.com/managedcode/Orleans.SignalR</RepositoryUrl>
         <PackageProjectUrl>https://github.com/managedcode/Orleans.SignalR</PackageProjectUrl>
         <Product>Managed Code - Orleans SignalR</Product>
-        <Version>7.1.5</Version>
-        <PackageVersion>7.1.5</PackageVersion>
+        <Version>7.1.6</Version>
+        <PackageVersion>7.1.6</PackageVersion>
 
     </PropertyGroup>
     <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
