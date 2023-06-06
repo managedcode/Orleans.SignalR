@@ -18,6 +18,11 @@ public class Subscription : IDisposable
         _observer = observer;
         _timer = new Timer(Callback, this, pingTime, pingTime);
     }
+    
+    ~Subscription()
+    {
+        Dispose();
+    }
 
     public ISignalRObserver Reference { get; private set; }
 
@@ -25,11 +30,11 @@ public class Subscription : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _timer.Dispose();
-        _observer.Dispose();
+        _cts?.Cancel();
+        _timer?.Dispose();
+        _observer?.Dispose();
+        _grains?.Clear();
         Reference = null!;
-        _grains.Clear();
     }
 
     public void AddGrain(IObserverConnectionManager grain)
@@ -45,22 +50,27 @@ public class Subscription : IDisposable
     private void Callback(object? state)
     {
         var token = _cts.Token;
-        _ = Task.Run(async () =>
+        _ = Task.Run(() => Callback(token), _cts.Token).ConfigureAwait(false);
+    }
+
+    private async Task Callback(CancellationToken token)
+    {
+        if (!_observer.IsExist || token.IsCancellationRequested)
+        {
+            Dispose();
+            return;
+        }
+        
+        foreach (var grain in _grains)
         {
             if (token.IsCancellationRequested)
                 return;
 
-            foreach (var grain in _grains)
-            {
-                if (token.IsCancellationRequested)
-                    return;
+            await grain.Ping(Reference).ConfigureAwait(false);
 
-                await grain.Ping(Reference).ConfigureAwait(false);
-
-                if (token.IsCancellationRequested)
-                    return;
-            }
-        }, _cts.Token).ConfigureAwait(false);
+            if (token.IsCancellationRequested)
+                return;
+        }
     }
 
     public void SetReference(ISignalRObserver reference)
