@@ -15,21 +15,9 @@ public class HttpHostProgram
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
-
-        builder.Services.AddLogging(config =>
-        {
-            config.AddConsole();
-            config.AddDebug();
-        });
-
         builder.Services.AddControllers();
-
-        // builder.Host.UseOrleans(builder =>
-        // {
-        //     builder.UseLocalhostClustering();
-        //     new TestSiloConfigurations().Configure(builder);
-        // });
-
+        
+        
         if (builder.Environment.IsProduction())
             builder.Services.AddSignalR().AddOrleans();
         else

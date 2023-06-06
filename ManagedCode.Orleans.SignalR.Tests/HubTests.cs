@@ -2,11 +2,13 @@ using System.Collections.Concurrent;
 using System.Threading.Channels;
 using FluentAssertions;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
+using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Orleans.Runtime;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -91,7 +93,7 @@ public class HubTests
         message.Should().Be("test");
         result.Should().BeGreaterThan(0);
         result.Should().BeLessOrEqualTo(100);
-
+        
         await hubConnection.StopAsync();
         hubConnection.State.Should().Be(HubConnectionState.Disconnected);
     }

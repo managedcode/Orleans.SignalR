@@ -168,4 +168,10 @@ public class SimpleTestHub : Hub
         await Task.Delay(200);
         return a + b;
     }
+    
+    public async Task<string> WaitForMessage(string connectionId)
+    {
+        var message = await Clients.Client(connectionId).InvokeAsync<string>("GetMessage", CancellationToken.None);
+        return message;
+    }
 }
