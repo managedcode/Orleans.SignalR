@@ -208,8 +208,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         var invocationGrain = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId);
         subscription.AddGrain(invocationGrain);
-        await invocationGrain.AddInvocation(subscription.Reference,
-            new InvocationInfo(connectionId, invocationId, typeof(T)));
+        await invocationGrain.AddInvocation(subscription.Reference, new InvocationInfo(connectionId, invocationId, typeof(T)));
 
         var invocationMessage = new InvocationMessage(invocationId, methodName, args);
 
@@ -224,21 +223,17 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         }
         else
         {
-            // We're sending to a single connection
-            // Write message directly to connection without caching it in memory
-            _ = Task.Run(() =>
+
+            try
             {
-                try
-                {
-                    return connection.WriteAsync(invocationMessage, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "InvokeConnectionAsync connection {ConnectionConnectionId} failed",
-                        connection.ConnectionId);
-                    throw;
-                }
-            }, cancellationToken).ConfigureAwait(false);
+                await connection.WriteAsync(invocationMessage, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "InvokeConnectionAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
+                throw;
+            }
+            
         }
 
         try
@@ -255,8 +250,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         }
         finally
         {
-            foreach (var grain in subscription.Grains)
-                _ = grain.RemoveConnection(connection?.ConnectionId, subscription.Reference).ConfigureAwait(false);
+            if (connection is not null)
+            {
+                foreach (var grain in subscription.Grains)
+                    _ = grain.RemoveConnection(connection.ConnectionId, subscription.Reference).ConfigureAwait(false);
+            }
         }
     }
 

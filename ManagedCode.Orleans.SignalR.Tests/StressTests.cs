@@ -107,7 +107,7 @@ public class StressTests
 
         while (allCount < connections.Count)
         {
-            await Task.Delay(TimeSpan.FromSeconds(5));
+            await Task.Delay(TimeSpan.FromSeconds(1));
             _outputHelper.WriteLine($"All count {allCount}");
         }
 
