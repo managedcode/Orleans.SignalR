@@ -77,7 +77,7 @@ public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
         if (!_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
             return false;
 
-        await Task.Run(() =>   _observerManager.Notify(s => s.OnNextAsync(message),
+        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
             connection => connection.GetPrimaryKeyString() == observer));
 
         return true;
@@ -92,7 +92,7 @@ public class SignalRConnectionHolderGrain : Grain, ISignalRConnectionHolderGrain
             if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
                 hashSet.Add(observer);
 
-        await Task.Run(() =>   _observerManager.Notify(s => s.OnNextAsync(message),
+        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
             connection => hashSet.Contains(connection.GetPrimaryKeyString())));
     }
 
