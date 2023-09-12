@@ -62,7 +62,7 @@ public class HubTests
             connections.Add(hubConnection2);
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(35));
+        await Task.Delay(TimeSpan.FromSeconds(5));
 
         await Parallel.ForEachAsync(connections, async (connection, token) =>
         {
@@ -527,8 +527,8 @@ public class HubTests
     [Fact]
     public async Task UsersDeliveryMessagesTest()
     {
-        string messages1 = string.Empty;
-        string messages2 = string.Empty;
+        string messages1 = "empty";
+        string messages2 = "empty";
         int connection1 = 0;
         int connection2 = 0;
         
@@ -562,7 +562,8 @@ public class HubTests
         await hubConnection2.StartAsync();
         
         
-        await Task.Delay(TimeSpan.FromSeconds(1));
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromSeconds(5));
         
         messages1.Should().Be("1");
         messages2.Should().Be("2");
@@ -577,8 +578,8 @@ public class HubTests
         string messages1 = string.Empty;
         string messages2 = string.Empty;
         
-        var token1 = await (await _firstApp.CreateHttpClient().GetAsync("/auth?user=TestUser1")).Content.ReadAsStringAsync();
-        var token2 = await (await _secondApp.CreateHttpClient().GetAsync("/auth?user=TestUser2")).Content.ReadAsStringAsync();
+        var token1 = await (await _firstApp.CreateHttpClient().GetAsync("/auth?user=TestUser1-t")).Content.ReadAsStringAsync();
+        var token2 = await (await _secondApp.CreateHttpClient().GetAsync("/auth?user=TestUser2-t")).Content.ReadAsStringAsync();
         
         var hubConnection1 = _firstApp.CreateSignalRClient(nameof(InterfaceTestHub),
             configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token1); });
@@ -589,9 +590,9 @@ public class HubTests
         hubConnection1.On("SendMessage", (string m) => { messages1 = m; });
         hubConnection2.On("SendMessage", (string m) => { messages2 = m; });
         
-        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random1").SendToUser("TestUser1", "1");
-        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2").SendToUser("TestUser2", "2");
-        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2").SendToUser("TestUser2", "2");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random1-t").SendToUser("TestUser1-t", "1");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2-t").SendToUser("TestUser2-t", "2");
+        await _siloCluster.Cluster.Client.GetGrain<ITestGrain>("random2-t").SendToUser("TestUser2-t", "2");
 
         await Task.Delay(TimeSpan.FromMinutes(1.5));
 

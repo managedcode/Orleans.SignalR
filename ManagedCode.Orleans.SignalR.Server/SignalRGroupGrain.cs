@@ -38,45 +38,43 @@ public class SignalRGroupGrain : Grain, ISignalRGroupGrain
 
     public async Task SendToGroup(HubMessage message)
     {
-        await Task.Yield();
         Logs.SendToGroup(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString());
-        await _observerManager.Notify(s => s.OnNextAsync(message));
+        await Task.Run(() =>   _observerManager.Notify(s => s.OnNextAsync(message)));
     }
 
     public async Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds)
     {
-        await Task.Yield();
         Logs.SendToGroupExcept(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString(), excludedConnectionIds);
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
             if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
                 hashSet.Add(observer);
 
-        await _observerManager.Notify(s => s.OnNextAsync(message),
-            connection => !hashSet.Contains(connection.GetPrimaryKeyString()));
+        await Task.Run(() =>   _observerManager.Notify(s => s.OnNextAsync(message),
+            connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
     }
 
-    public async Task AddConnection(string connectionId, ISignalRObserver observer)
+    public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.AddConnection(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
+        return Task.CompletedTask;
     }
 
-    public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
+    public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.RemoveConnection(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
+        return Task.CompletedTask;
     }
 
-    public async Task Ping(ISignalRObserver observer)
+    public Task Ping(ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.Ping(_logger, nameof(SignalRGroupGrain),this.GetPrimaryKeyString());
         _observerManager.Subscribe(observer, observer);
+        return Task.CompletedTask;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)

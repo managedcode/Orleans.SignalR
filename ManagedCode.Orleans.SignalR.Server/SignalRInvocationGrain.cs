@@ -37,46 +37,43 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
     public async Task TryCompleteResult(string connectionId, HubMessage message)
     {
-        await Task.Yield();
         Logs.TryCompleteResult(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), connectionId);
         _logger.LogInformation("Hub: {PrimaryKeyString}; TryCompleteResult: {ConnectionId}", this.GetPrimaryKeyString(),
             connectionId);
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
             return;
 
-        await _observerManager.Notify(s => s.OnNextAsync(message));
+        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
     }
 
-    public async Task<ReturnType> TryGetReturnType()
+    public Task<ReturnType> TryGetReturnType()
     {
-        await Task.Yield();
-        
         Logs.TryGetReturnType(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
         if (_stateStorage.State == null)
-            return new ReturnType();
+            return Task.FromResult(new ReturnType());
 
-        return new ReturnType
+        return Task.FromResult(new ReturnType
         {
             Result = true,
             Type = _stateStorage.State.Type
-        };
+        });
     }
 
-    public async Task AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo)
+    public Task AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo)
     {
-        await Task.Yield();
         Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
 
         if(invocationInfo?.InvocationId is null || invocationInfo?.ConnectionId is null)
-            return;
+            return Task.CompletedTask;
         
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State = invocationInfo;
+        
+        return Task.CompletedTask;
     }
 
     public async Task<InvocationInfo?> RemoveInvocation()
     {
-        await Task.Yield();
         Logs.RemoveInvocation(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
         _observerManager.Clear();
         var into = _stateStorage.State;
@@ -85,11 +82,11 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         return into;
     }
 
-    public async Task Ping(ISignalRObserver observer)
+    public Task Ping(ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.Ping(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString());
         _observerManager.Subscribe(observer, observer);
+        return Task.CompletedTask;
     }
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)
@@ -101,7 +98,6 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.RemoveConnection(_logger, nameof(SignalRInvocationGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _observerManager.Clear();

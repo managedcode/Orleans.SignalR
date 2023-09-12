@@ -7,9 +7,9 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
 public class SignalRObserver : ISignalRObserver, IDisposable
 {
-    private WeakReference<Func<HubMessage, Task>> _onNextAction;
+    private Func<HubMessage, Task>? _onNextAction;
 
-    public SignalRObserver(WeakReference<Func<HubMessage, Task>> onNextAction)
+    public SignalRObserver(Func<HubMessage, Task> onNextAction)
     {
         _onNextAction = onNextAction;
     }
@@ -21,11 +21,11 @@ public class SignalRObserver : ISignalRObserver, IDisposable
 
     public async Task OnNextAsync(HubMessage message)
     {
-        if (_onNextAction.TryGetTarget(out var action))
+        if (_onNextAction != null)
         {
-            await action.Invoke(message);
+            await _onNextAction.Invoke(message);
         }
     }
     
-    public bool IsExist => _onNextAction != null && _onNextAction.TryGetTarget(out _);
+    public bool IsExist => _onNextAction != null;
 }

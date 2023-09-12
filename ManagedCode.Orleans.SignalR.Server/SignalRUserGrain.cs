@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,36 +44,24 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
         _observerManager = new ObserverManager<ISignalRObserver>(TimeIntervalHelper.AddExpirationIntervalBuffer(timeSpan), _logger);
     }
 
-    public async Task AddConnection(string connectionId, ISignalRObserver observer)
+    public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.AddConnection(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Subscribe(observer, observer);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
-
-        if (_messagesStorage.State.Messages.Count > 0)
-        {
-            var currentDateTime = DateTime.UtcNow;
-            foreach (var message in _messagesStorage.State.Messages.ToArray())
-            {
-                _messagesStorage.State.Messages.Remove(message.Key);
-                if(message.Value >= currentDateTime)
-                    await SendToUser(message.Key);
-            }
-        }
+        return Task.CompletedTask;
     }
 
-    public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
+    public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        await Task.Yield();
         Logs.RemoveConnection(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
+        return Task.CompletedTask;
     }
 
     public async Task SendToUser(HubMessage message)
     {
-        await Task.Yield();
         Logs.SendToUser(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString());
         if (_observerManager.Count == 0)
         {
@@ -80,14 +69,30 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
             return;
         }
         
-        await _observerManager.Notify(s => s.OnNextAsync(message));
+        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
     }
 
-    public async Task Ping(ISignalRObserver observer)
+    public async Task RequestMessage()
     {
-        await Task.Yield();
+        if (_messagesStorage.State.Messages.Count > 0)
+        {
+            var currentDateTime = DateTime.UtcNow;
+            foreach (var message in _messagesStorage.State.Messages.ToArray())
+            {
+                if (message.Value >= currentDateTime)
+                {
+                    await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message.Key)));
+                }
+                _messagesStorage.State.Messages.Remove(message.Key);
+            }
+        }
+    }
+
+    public Task Ping(ISignalRObserver observer)
+    {
         Logs.Ping(_logger, nameof(SignalRUserGrain),this.GetPrimaryKeyString());
         _observerManager.Subscribe(observer, observer);
+        return Task.CompletedTask;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)

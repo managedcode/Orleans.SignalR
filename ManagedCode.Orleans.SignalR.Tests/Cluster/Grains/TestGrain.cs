@@ -29,7 +29,6 @@ public class TestGrain : Grain, ITestGrain
 
     public async Task<string> GetMessageInvoke(string connectionId)
     {
-        await Task.Yield();
         var localConnection = connectionId;
         var message = await Task.Run(() => _hubContext.Clients.Client(localConnection)
             .InvokeAsync<string>("GetMessage", CancellationToken.None));
@@ -39,14 +38,12 @@ public class TestGrain : Grain, ITestGrain
 
     public async Task<string> GetMessage(string connectionId)
     {
-        await Task.Yield();
         var message = await Task.Run(() => _orleansHubContext.Clients.Client(connectionId).GetMessage());
-
         return message;
     }
     
     public Task SendToUser(string userName, string message)
     {
-        return _hubContext.Clients.User(userName).SendAsync("SendMessage", message);
+        return Task.Run(() => _hubContext.Clients.User(userName).SendAsync("SendMessage", message));
     }
 }

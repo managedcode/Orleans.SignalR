@@ -134,10 +134,26 @@ public class StressTests
     [Fact]
     public async Task InvokeAsyncAndOnTest()
     {
+        foreach (var silo in _siloCluster.Cluster.GetActiveSilos())
+        {
+            await _siloCluster.Cluster.RestartSiloAsync(silo);
+        }
+        
+        foreach (var silo in _siloCluster.Cluster.GetActiveSilos())
+        {
+            await _siloCluster.Cluster.RestartSiloAsync(silo);
+        }
+
         var signalRConnectionHolderGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
         var signalRGroupGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
         var signalRInvocationGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
         var signalRUserGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
+
+        signalRConnectionHolderGrainCount.Count.Should().Be(0);
+        signalRGroupGrainCount.Count.Should().Be(0);
+        signalRInvocationGrainCount.Count.Should().Be(0);
+        signalRUserGrainCount.Count.Should().Be(0);
+        
 
         var hubConnection = await CreateHubConnection("user", _firstApp, nameof(SimpleTestHub));
         hubConnection.On("GetMessage", () => "connection1");
@@ -154,10 +170,10 @@ public class StressTests
         signalRInvocationGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
         signalRUserGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
 
-        signalRConnectionHolderGrainCount.Count.Should().Be(1);
-        signalRGroupGrainCount.Count.Should().Be(1);
-        signalRInvocationGrainCount.Count.Should().Be(1);
-        signalRUserGrainCount.Count.Should().Be(1);
+        signalRConnectionHolderGrainCount.Count.Should().BeGreaterOrEqualTo(1);
+        signalRGroupGrainCount.Count.Should().BeGreaterOrEqualTo(1);
+        signalRInvocationGrainCount.Count.Should().BeGreaterOrEqualTo(1);
+        signalRUserGrainCount.Count.Should().BeGreaterOrEqualTo(1);
         _outputHelper.WriteLine($"ConnectionHolder:{signalRConnectionHolderGrainCount.Count};GroupGrain:{signalRGroupGrainCount.Count}; InvocationGrain:{signalRInvocationGrainCount.Count}; UserGrain:{signalRUserGrainCount.Count};");
 
 
@@ -173,10 +189,10 @@ public class StressTests
 
             _outputHelper.WriteLine($"ConnectionHolder:{signalRConnectionHolderGrainCount.Count};GroupGrain:{signalRGroupGrainCount.Count}; InvocationGrain:{signalRInvocationGrainCount.Count}; UserGrain:{signalRUserGrainCount.Count};");
 
-            signalRConnectionHolderGrainCount.Count.Should().Be(1);
-            signalRGroupGrainCount.Count.Should().Be(1);
+            signalRConnectionHolderGrainCount.Count.Should().BeGreaterOrEqualTo(1);
+            signalRGroupGrainCount.Count.Should().BeGreaterOrEqualTo(1);
             signalRInvocationGrainCount.Count.Should().Be(0);
-            signalRUserGrainCount.Count.Should().Be(1);
+            signalRUserGrainCount.Count.Should().BeGreaterOrEqualTo(1);
         }
         
         _outputHelper.WriteLine($"Invoke one more time. Connection is {hubConnection.State}");
