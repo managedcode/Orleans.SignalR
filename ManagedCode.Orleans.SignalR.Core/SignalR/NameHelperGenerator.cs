@@ -15,9 +15,9 @@ public static class NameHelperGenerator
         return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(typeof(THub).FullName!));
     }
 
-    public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory, string invocationId)
+    public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory, string? invocationId)
     {
-        return grainFactory.GetGrain<ISignalRInvocationGrain>(CleanString(typeof(THub).FullName + "::" + invocationId));
+        return grainFactory.GetGrain<ISignalRInvocationGrain>(CleanString(typeof(THub).FullName + "::" + invocationId ?? "unknown"));
     }
 
     // public static ISignalRGroupHolderGrain GetGroupHolderGrain<THub>(IGrainFactory grainFactory)
