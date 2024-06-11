@@ -13,6 +13,7 @@ using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
@@ -29,7 +30,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions;
 
     public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger, IClusterClient clusterClient,
-        IHubProtocolResolver hubProtocolResolver, IOptions<OrleansSignalROptions> orleansSignalOptions,
+        IHostApplicationLifetime hostLifetime, IOptions<OrleansSignalROptions> orleansSignalOptions,
         IOptions<HubOptions> globalHubOptions, IOptions<HubOptions<THub>> hubOptions)
     {
         _logger = logger;
@@ -37,6 +38,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
         _clusterClient = clusterClient;
+
+        hostLifetime.ApplicationStopping.Register(OnApplicationStopping);
     }
 
     public override async Task OnConnectedAsync(HubConnectionContext connection)
@@ -49,7 +52,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
             subscription.AddGrain(connectionHolderGrain);
             await Task.Run(() => connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference));
-
         }
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
@@ -269,8 +271,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var returnType = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).TryGetReturnType();
 
-        var timeSpan =
-            TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
+        var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
         Task.WaitAny(returnType, Task.Delay(timeSpan * 0.8));
 
         if (returnType.IsCompleted)
@@ -345,5 +346,23 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var connection = _connections[connectionId];
         return connection?.Features.Get<Subscription>();
+    }
+    
+    private void OnApplicationStopping()
+    {
+        var tasks = new List<Task>(_connections.Count);
+        
+        foreach (var connection in _connections)
+        {
+            var subscription = connection.Features.Get<Subscription>();
+
+            if (subscription is null)
+                return;
+
+            foreach (var grain in subscription.Grains)
+                tasks.Add(grain.RemoveConnection(connection.ConnectionId, subscription.Reference));
+        }
+        
+        _ = Task.Run(() => Task.WhenAll(tasks));
     }
 }

@@ -10,46 +10,34 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Controllers;
 [Route("/[controller]")]
 [ApiController]
 [AllowAnonymous]
-public class AuthController : ControllerBase
+public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<string>> OkAction([FromQuery] string user = null)
+    public async Task<ActionResult<string>> OkAction([FromQuery] string? user = null)
     {
-        // create a secret key for signing the token
-        var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("your_secret_key_here"));
-
-        // create the signing credentials using the secret key
-        var signingCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
         if (string.IsNullOrEmpty(user))
-            user = Guid.NewGuid().ToString();
+            user = Guid.NewGuid().ToString("N");
 
-        // create a list of claims for the token
-        var claims = new[]
+        var claims = new ClaimsIdentity(new[]
         {
             new Claim(ClaimTypes.Name, user),
             new Claim(ClaimTypes.Email, user),
             new Claim(ClaimTypes.NameIdentifier, user)
-        };
-
-        // create the token descriptor with the claims, expiration time, and signing credentials
+        });
+        
+        
+        SignIn(new ClaimsPrincipal(claims));
+        
         var tokenDescriptor = new SecurityTokenDescriptor
         {
-            Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddHours(1),
-            SigningCredentials = signingCredentials
+            Subject = claims,
+            Expires = DateTime.UtcNow.AddDays(7),
+            Issuer = "YourIssuer",
+            Audience = "YourAudience",
+            SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(HttpHostProgram.GetEncryptionKey()), SecurityAlgorithms.HmacSha256Signature)
         };
-
-        // create the JWT token handler
-        var tokenHandler = new JwtSecurityTokenHandler();
-
-        // create the JWT token
-        var token = tokenHandler.CreateJwtSecurityToken(tokenDescriptor);
-
-        // write the token as a string
-        var jwtToken = tokenHandler.WriteToken(token);
-
-        // return the token to the client
-        return Ok(jwtToken);
+        var token = tokenHandler.CreateToken(tokenDescriptor);
+        
+        return tokenHandler.WriteToken(token);
     }
 }

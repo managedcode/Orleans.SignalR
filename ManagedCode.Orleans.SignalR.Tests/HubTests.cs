@@ -582,9 +582,9 @@ public class HubTests
         var token2 = await (await _secondApp.CreateHttpClient().GetAsync("/auth?user=TestUser2-t")).Content.ReadAsStringAsync();
         
         var hubConnection1 = _firstApp.CreateSignalRClient(nameof(InterfaceTestHub),
-            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token1); });
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token1)!; });
         var hubConnection2 = _secondApp.CreateSignalRClient(nameof(InterfaceTestHub),
-            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token2); });
+            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token2)!; });
         
  
         hubConnection1.On("SendMessage", (string m) => { messages1 = m; });

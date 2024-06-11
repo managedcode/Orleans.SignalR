@@ -4,6 +4,12 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 
 public class InterfaceTestHub : Hub<IClientInterfaceHub>, IServerInterfaceHub
 {
+    public override Task OnConnectedAsync()
+    {
+        var user = Context.User;
+        return base.OnConnectedAsync();
+    }
+
     public Task PushRandom()
     {
         return Clients.All.SendRandom(new Random().Next());

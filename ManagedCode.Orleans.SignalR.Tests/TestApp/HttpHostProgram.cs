@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
@@ -12,6 +14,11 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp;
 
 public class HttpHostProgram
 {
+    public static byte[] GetEncryptionKey()
+    {
+        return Encoding.ASCII.GetBytes("your_secret_key_here_your_secret_key_here");
+    }
+
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
@@ -19,10 +26,19 @@ public class HttpHostProgram
         
         
         if (builder.Environment.IsProduction())
-            builder.Services.AddSignalR().AddOrleans();
+            builder.Services.AddSignalR()
+                .AddOrleans();
         else
             builder.Services.AddSignalR(); //.AddStackExchangeRedis();
-
+        
+        
+        builder.Services.AddSingleton<JwtSecurityTokenHandler>();
+        builder.Services.AddAuthentication(options =>
+        {
+            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        });
+        
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
         {
             options.RequireHttpsMetadata = false;
@@ -30,17 +46,11 @@ public class HttpHostProgram
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("your_secret_key_here")),
-                ValidateIssuer = false,
-                ValidateAudience = false
-            };
-            options.Events = new JwtBearerEvents
-            {
-                OnMessageReceived = context =>
-                {
-                    context.Token = context.Request.Query["access_token"];
-                    return Task.CompletedTask;
-                }
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidIssuer = "YourIssuer",
+                ValidAudience = "YourAudience",
+                IssuerSigningKey = new SymmetricSecurityKey(GetEncryptionKey())
             };
         });
 
