@@ -191,19 +191,10 @@ public class StressTests
         await hubConnection.DisposeAsync();
         _outputHelper.WriteLine("Connection is stopped.");
         _outputHelper.WriteLine($"wait a minute");
-        await Task.Delay(TimeSpan.FromMinutes(1));
+        await Task.Delay(TimeSpan.FromSeconds(10));
         
-        signalRConnectionHolderGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
-        signalRGroupGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
-        signalRInvocationGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
-        signalRUserGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
-
-        _outputHelper.WriteLine($"ConnectionHolder:{signalRConnectionHolderGrainCount.Count};GroupGrain:{signalRGroupGrainCount.Count}; InvocationGrain:{signalRInvocationGrainCount.Count}; UserGrain:{signalRUserGrainCount.Count};");
-
-    
-        _outputHelper.WriteLine($"check...");
-
-        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.FromSeconds(10));
+        
+        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.FromSeconds(5));
 
         signalRConnectionHolderGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
         signalRGroupGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
