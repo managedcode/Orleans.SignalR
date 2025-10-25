@@ -1,4 +1,6 @@
-using FluentAssertions;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Shouldly;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -10,15 +12,17 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-[Collection(nameof(SiloCluster))]
+[Collection(nameof(SmokeCluster))]
 public class InterfaceHubTests
 {
     private readonly TestWebApplication _firstApp;
     private readonly ITestOutputHelper _outputHelper;
     private readonly TestWebApplication _secondApp;
-    private readonly SiloCluster _siloCluster;
+    private readonly SmokeClusterFixture _siloCluster;
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
 
-    public InterfaceHubTests(SiloCluster testApp, ITestOutputHelper outputHelper)
+    public InterfaceHubTests(SmokeClusterFixture testApp, ITestOutputHelper outputHelper)
     {
         _siloCluster = testApp;
         _outputHelper = outputHelper;
@@ -26,12 +30,53 @@ public class InterfaceHubTests
         _secondApp = new TestWebApplication(_siloCluster, 8082);
     }
 
-    private async Task<HubConnection> CreateHubConnection(TestWebApplication app)
+    private async Task<HubConnection> CreateHubConnection(TestWebApplication app, string hubName = nameof(InterfaceTestHub))
     {
-        var hubConnection = _firstApp.CreateSignalRClient(nameof(InterfaceTestHub));
+        var hubConnection = app.CreateSignalRClient(hubName);
+        hubConnection.Closed += error =>
+        {
+            if (error is not null)
+            {
+                _outputHelper.WriteLine($"[{hubName}] connection closed with error: {error.Message}");
+            }
+            else
+            {
+                _outputHelper.WriteLine($"[{hubName}] connection closed gracefully.");
+            }
+
+            return Task.CompletedTask;
+        };
+
         await hubConnection.StartAsync();
-        hubConnection.State.Should().Be(HubConnectionState.Connected);
+        await WaitUntilAsync(
+            () => hubConnection.State == HubConnectionState.Connected && !string.IsNullOrEmpty(hubConnection.ConnectionId),
+            description: $"connection to {hubName} to reach Connected state");
+
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        _outputHelper.WriteLine($"[{hubName}] connection established with id {hubConnection.ConnectionId}.");
+
         return hubConnection;
+    }
+
+    [Fact]
+    public async Task BasicMessageFlowAcrossApps()
+    {
+        var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var connection1 = await CreateHubConnection(_firstApp, nameof(SimpleTestHub));
+        var connection2 = await CreateHubConnection(_secondApp, nameof(SimpleTestHub));
+
+        connection2.On<string>("SendAll", payload => received.TrySetResult(payload));
+
+        await connection1.InvokeAsync<int>("All");
+
+        var completed = await Task.WhenAny(received.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        completed.ShouldBe(received.Task, "Timed out waiting for broadcast to reach the second connection.");
+
+        var message = await received.Task;
+        message.ShouldBe("test");
+
+        await DisposeAsync(new[] { connection1, connection2 });
     }
 
     [Fact]
@@ -54,11 +99,11 @@ public class InterfaceHubTests
         //invoke in SignalR
         var msg1 = await connection2.InvokeAsync<string>("WaitForMessage", connection1.ConnectionId);
         _outputHelper.WriteLine("mgs1");
-        msg1.Should().Be("connection1");
+        msg1.ShouldBe("connection1");
 
         var msg2 = await connection2.InvokeAsync<string>("WaitForMessage", connection2.ConnectionId);
         _outputHelper.WriteLine("mgs2");
-        msg2.Should().Be("connection2");
+        msg2.ShouldBe("connection2");
 
         await Assert.ThrowsAsync<HubException>(async () =>
             await connection2.InvokeAsync<string>("WaitForMessage", "non-existing"));
@@ -66,6 +111,24 @@ public class InterfaceHubTests
         _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();
         await connection2.StopAsync();
+    }
+
+    private static async Task DisposeAsync(IEnumerable<HubConnection> connections)
+    {
+        foreach (var connection in connections)
+        {
+            if (connection is null)
+                continue;
+
+            try
+            {
+                await connection.StopAsync();
+            }
+            finally
+            {
+                await connection.DisposeAsync();
+            }
+        }
     }
 
     [Fact]
@@ -114,8 +177,8 @@ public class InterfaceHubTests
         await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
         _outputHelper.WriteLine("throw");
 
-        msg1.Should().Be("connection1");
-        msg2.Should().Be("connection2");
+        msg1.ShouldBe("connection1");
+        msg2.ShouldBe("connection2");
 
         await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection3.ConnectionId));
         _outputHelper.WriteLine("msg3-thorw");
@@ -138,10 +201,11 @@ public class InterfaceHubTests
         connection1.On("GetMessage", () => "connection1");
         connection2.On("GetMessage", () => "connection2");
 
-        connection1.State.Should().Be(HubConnectionState.Connected);
-        connection2.State.Should().Be(HubConnectionState.Connected);
+        connection1.State.ShouldBe(HubConnectionState.Connected);
+        connection2.State.ShouldBe(HubConnectionState.Connected);
 
-        await Task.Delay(TimeSpan.FromMinutes(1));
+        var resilienceDelay = TestDefaults.KeepAliveInterval + TestDefaults.ClientTimeout;
+        await Task.Delay(resilienceDelay);
 
         for (var i = 0; i < 3; i++)
         {
@@ -153,12 +217,12 @@ public class InterfaceHubTests
 
             await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
 
-            msg1.Should().Be("connection1");
-            msg2.Should().Be("connection2");
+            msg1.ShouldBe("connection1");
+            msg2.ShouldBe("connection2");
         }
 
 
-        await Task.Delay(TimeSpan.FromMinutes(1));
+        await Task.Delay(resilienceDelay);
 
         for (var i = 0; i < 4; i++)
         {
@@ -170,8 +234,8 @@ public class InterfaceHubTests
 
             await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
 
-            msg1.Should().Be("connection1");
-            msg2.Should().Be("connection2");
+            msg1.ShouldBe("connection1");
+            msg2.ShouldBe("connection2");
         }
 
 
@@ -199,10 +263,10 @@ public class InterfaceHubTests
         //push random
         await grain.PushRandom();
 
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        await WaitUntilAsync(() => messages1.Count == 1 && messages2.Count == 1);
 
-        messages1.Should().HaveCount(1);
-        messages2.Should().HaveCount(1);
+        messages1.Count.ShouldBe(1);
+        messages2.Count.ShouldBe(1);
 
         messages1.Clear();
         messages2.Clear();
@@ -210,15 +274,60 @@ public class InterfaceHubTests
         //push message
         await grain.PushMessage("test");
 
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        await WaitUntilAsync(() => messages1.Count == 1 && messages2.Count == 1);
 
-        messages1.Should().HaveCount(1);
-        messages2.Should().HaveCount(1);
+        messages1.Count.ShouldBe(1);
+        messages2.Count.ShouldBe(1);
 
         messages1.Clear();
         messages2.Clear();
 
         await connection1.StopAsync();
         await connection2.StopAsync();
+    }
+
+    private async Task WaitUntilAsync(
+        Func<bool> condition,
+        TimeSpan? timeout = null,
+        TimeSpan? pollInterval = null,
+        string? description = null)
+    {
+        var limit = timeout ?? DefaultTimeout;
+        var delay = pollInterval ?? PollInterval;
+        var start = DateTime.UtcNow;
+        var lastLog = TimeSpan.Zero;
+
+        while (DateTime.UtcNow - start < limit)
+        {
+            if (condition())
+            {
+                if (description is not null)
+                {
+                    _outputHelper.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                }
+
+                return;
+            }
+
+            var elapsed = DateTime.UtcNow - start;
+            if (description is not null && elapsed - lastLog >= TimeSpan.FromSeconds(1))
+            {
+                _outputHelper.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");
+                lastLog = elapsed;
+            }
+
+            await Task.Delay(delay);
+        }
+
+        if (description is not null)
+        {
+            _outputHelper.WriteLine($"Timed out waiting for {description} after {limit.TotalSeconds} seconds.");
+        }
+
+        var message = description is null
+            ? $"Condition was not met within {limit.TotalSeconds} seconds."
+            : $"Condition '{description}' was not met within {limit.TotalSeconds} seconds.";
+
+        condition().ShouldBeTrue(message);
     }
 }

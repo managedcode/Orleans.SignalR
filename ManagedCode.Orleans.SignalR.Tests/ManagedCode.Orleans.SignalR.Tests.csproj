@@ -1,55 +1,51 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
-        <LangVersion>12</LangVersion>
-        <EnableNETAnalyzers>true</EnableNETAnalyzers>
         <IsPackable>false</IsPackable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
         <GenerateProgramFile>false</GenerateProgramFile>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="FluentAssertions" Version="6.12.0" />
-        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.6" />
-        <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="8.0.6" />
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
-        <PackageReference Include="Microsoft.Orleans.Analyzers" Version="8.1.0">
+        <PackageReference Include="Shouldly" />
+        <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+        <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" />
+        <PackageReference Include="Microsoft.Orleans.Analyzers">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.Orleans.Serialization" Version="8.1.0" />
-        <PackageReference Include="Microsoft.Orleans.Server" Version="8.1.0" />
-        <PackageReference Include="Microsoft.Orleans.TestingHost" Version="8.1.0" />
-        <PackageReference Include="System.Linq.Async" Version="6.0.1"/>
-        <PackageReference Include="xunit" Version="2.8.1" />
-        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.1">
+        <PackageReference Include="Microsoft.Orleans.Serialization" />
+        <PackageReference Include="Microsoft.Orleans.Server" />
+        <PackageReference Include="Microsoft.Orleans.TestingHost" />
+        <PackageReference Include="System.Linq.Async" />
+        <PackageReference Include="xunit" />
+        <PackageReference Include="xunit.runner.visualstudio">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="xunit.runner.console" Version="2.8.1">
+        <PackageReference Include="xunit.runner.console">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="coverlet.collector" Version="6.0.2">
+        <PackageReference Include="coverlet.collector">
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
             <PrivateAssets>all</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="coverlet.msbuild" Version="6.0.2">
+        <PackageReference Include="coverlet.msbuild">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.6" />
-        <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.6" />
-        <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="8.0.6" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.1" />
-        <PackageReference Include="Microsoft.Orleans.Sdk" Version="8.1.0" />
-        <PackageReference Include="Microsoft.Orleans.Serialization.SystemTextJson" Version="8.1.0" />
-        <PackageReference Include="Microsoft.Orleans.Serialization.TestKit" Version="8.1.0" />
-        <PackageReference Include="ManagedCode.Communication" Version="8.0.1" />
-        <PackageReference Include="ManagedCode.Communication.Orleans" Version="8.0.1" />
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+        <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+        <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+        <PackageReference Include="Microsoft.Orleans.Sdk" />
+        <PackageReference Include="Microsoft.Orleans.Serialization.SystemTextJson" />
+        <PackageReference Include="Microsoft.Orleans.Serialization.TestKit" />
+        <PackageReference Include="ManagedCode.Communication" />
+        <PackageReference Include="ManagedCode.Communication.Orleans" />
     </ItemGroup>
 
     <ItemGroup>

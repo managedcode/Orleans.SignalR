@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="ManagedCode.Orleans.SignalR.Client/ManagedCode.Orleans.SignalR.Client.csproj" />
+  <Project Path="ManagedCode.Orleans.SignalR.Core/ManagedCode.Orleans.SignalR.Core.csproj" />
+  <Project Path="ManagedCode.Orleans.SignalR.Server/ManagedCode.Orleans.SignalR.Server.csproj" />
+  <Project Path="ManagedCode.Orleans.SignalR.Tests/ManagedCode.Orleans.SignalR.Tests.csproj" />
+</Solution>

@@ -25,4 +25,20 @@ public class OrleansSignalROptions
     ///     The default timeout is 1.1 minute.
     /// </summary>
     public TimeSpan KeepMessageInterval { get; set; } = TimeSpan.FromMinutes(1.1);
+    
+    /// <summary>
+    ///     Number of partitions to use for connection distribution.
+    ///     Set to 1 to disable partitioning.
+    ///     Increase this value for better scalability with millions of connections.
+    ///     The default value is 4.
+    /// </summary>
+    public uint ConnectionPartitionCount { get; set; } = 4;
+    
+    /// <summary>
+    ///     Number of partitions to use for group distribution.
+    ///     Set to 1 to disable partitioning.
+    ///     Increase this value for better scalability with millions of groups.
+    ///     The default value is 4.
+    /// </summary>
+    public uint GroupPartitionCount { get; set; } = 4;
 }

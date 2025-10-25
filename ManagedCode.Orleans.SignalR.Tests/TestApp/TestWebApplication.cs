@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Http.Connections.Client;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -16,7 +17,7 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
     private readonly int _port;
     private readonly bool _useOrleans;
 
-    public TestWebApplication(SiloCluster cluster, int port = 80, bool useOrleans = true)
+    public TestWebApplication(ClusterFixtureBase cluster, int port = 80, bool useOrleans = true)
     {
         _port = port;
         _useOrleans = useOrleans;
@@ -48,16 +49,19 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
     }
 
 
-    public HubConnection CreateSignalRClient(string hubUrl, Action<HubConnectionBuilder>? configure = null,
+    public HubConnection CreateSignalRClient(string hubPath, Action<HubConnectionBuilder>? configure = null,
         Action<HttpConnectionOptions>? configureConnection = null)
     {
-        var client = CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri($"http://localhost:{_port}")
-        });
+        using var client = Server.CreateClient();
+        var baseUri = client.BaseAddress ?? new Uri($"http://localhost:{_port}");
+        if (!hubPath.StartsWith('/'))
+            hubPath = "/" + hubPath;
+
         var builder = new HubConnectionBuilder();
+        builder.WithAutomaticReconnect();
         configure?.Invoke(builder);
-        return builder.WithUrl(new Uri(client.BaseAddress, hubUrl), options =>
+
+        return builder.WithUrl(new Uri(baseUri, hubPath), HttpTransportType.LongPolling, options =>
         {
             configureConnection?.Invoke(options);
             options.HttpMessageHandlerFactory = _ => Server.CreateHandler();

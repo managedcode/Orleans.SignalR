@@ -1,4 +1,12 @@
 <Project>
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <LangVersion>13</LangVersion>
+        <EnableNETAnalyzers>true</EnableNETAnalyzers>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+    
     <!--NuGet-->
     <PropertyGroup>
         <Authors>ManagedCode</Authors>
@@ -29,7 +37,7 @@
         <None Include="$(SolutionDir)\README.md" Pack="true" Visible="false" PackagePath="\"/>
     </ItemGroup>
     <ItemGroup>
-        <PackageReference Include="DotNet.ReproducibleBuilds" Version="1.1.1">
+        <PackageReference Include="DotNet.ReproducibleBuilds">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>

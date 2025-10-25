@@ -2,9 +2,12 @@ using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
+using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Tests;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,6 +26,19 @@ public class HttpHostProgram
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.Services.AddControllers();
+
+        builder.Services.Configure<OrleansSignalROptions>(options =>
+        {
+            options.ClientTimeoutInterval = TestDefaults.ClientTimeout;
+            options.KeepMessageInterval = TestDefaults.MessageRetention;
+            options.ConnectionPartitionCount = TestDefaults.ConnectionPartitions;
+            options.GroupPartitionCount = TestDefaults.GroupPartitions;
+        });
+        builder.Services.Configure<HubOptions>(options =>
+        {
+            options.ClientTimeoutInterval = TestDefaults.ClientTimeout;
+            options.KeepAliveInterval = TestDefaults.KeepAliveInterval;
+        });
         
         
         if (builder.Environment.IsProduction())

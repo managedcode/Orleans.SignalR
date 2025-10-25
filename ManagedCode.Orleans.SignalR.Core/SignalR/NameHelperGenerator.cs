@@ -1,5 +1,8 @@
+using System;
+using System.Text;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Orleans;
+using System.IO.Hashing;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
@@ -13,6 +16,23 @@ public static class NameHelperGenerator
     public static ISignalRConnectionHolderGrain GetConnectionHolderGrain<THub>(IGrainFactory grainFactory)
     {
         return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(typeof(THub).FullName!));
+    }
+    
+    public static ISignalRConnectionCoordinatorGrain GetConnectionCoordinatorGrain<THub>(IGrainFactory grainFactory)
+    {
+        return grainFactory.GetGrain<ISignalRConnectionCoordinatorGrain>(CleanString(typeof(THub).FullName!));
+    }
+    
+    public static ISignalRConnectionPartitionGrain GetConnectionPartitionGrain<THub>(IGrainFactory grainFactory, int partitionId)
+    {
+        var key = GetPartitionGrainKey(typeof(THub).FullName!, partitionId, alreadyCleaned: false);
+        return grainFactory.GetGrain<ISignalRConnectionPartitionGrain>(key);
+    }
+
+    public static ISignalRConnectionPartitionGrain GetConnectionPartitionGrain(IGrainFactory grainFactory, string hubKey, int partitionId)
+    {
+        var key = GetPartitionGrainKey(hubKey, partitionId, alreadyCleaned: true);
+        return grainFactory.GetGrain<ISignalRConnectionPartitionGrain>(key);
     }
 
     public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory, string? invocationId)
@@ -34,6 +54,23 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRGroupGrain>(CleanString(typeof(THub).FullName + "::" + groupId));
     }
+    
+    public static ISignalRGroupCoordinatorGrain GetGroupCoordinatorGrain<THub>(IGrainFactory grainFactory)
+    {
+        return grainFactory.GetGrain<ISignalRGroupCoordinatorGrain>(CleanString(typeof(THub).FullName!));
+    }
+    
+    public static ISignalRGroupPartitionGrain GetGroupPartitionGrain<THub>(IGrainFactory grainFactory, int partitionId)
+    {
+        var key = GetPartitionGrainKey(typeof(THub).FullName!, partitionId, alreadyCleaned: false);
+        return grainFactory.GetGrain<ISignalRGroupPartitionGrain>(key);
+    }
+
+    public static ISignalRGroupPartitionGrain GetGroupPartitionGrain(IGrainFactory grainFactory, string hubKey, int partitionId)
+    {
+        var key = GetPartitionGrainKey(hubKey, partitionId, alreadyCleaned: true);
+        return grainFactory.GetGrain<ISignalRGroupPartitionGrain>(key);
+    }
 
     public static string CleanString(string input)
     {
@@ -51,7 +88,16 @@ public static class NameHelperGenerator
         }
         return builder.ToString();
     }
-    
+
+    private static long GetPartitionGrainKey(string hubIdentity, int partitionId, bool alreadyCleaned)
+    {
+        var normalized = alreadyCleaned ? hubIdentity : CleanString(hubIdentity);
+        var hubBytes = Encoding.UTF8.GetBytes(normalized);
+        var hash = XxHash64.HashToUInt64(hubBytes);
+        var composite = (hash << 16) ^ (uint)partitionId;
+        return unchecked((long)composite);
+    }
+
     // public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,
     //     string streamProviderName, string streamName)
     // {

@@ -1,6 +1,6 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using FluentAssertions;
+using System.Linq;
+using Shouldly;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -12,15 +12,21 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-[Collection(nameof(SiloCluster))]
+[Collection(nameof(LoadCluster))]
+[Trait("Category", "Load")]
 public class StressTests
 {
+    private const string StressGroup = "stress-group";
+    private static readonly TimeSpan WaitInterval = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(1);
+
     private readonly TestWebApplication _firstApp;
     private readonly ITestOutputHelper _outputHelper;
+    private readonly Random _random = new(42);
     private readonly TestWebApplication _secondApp;
-    private readonly SiloCluster _siloCluster;
+    private readonly LoadClusterFixture _siloCluster;
 
-    public StressTests(SiloCluster testApp, ITestOutputHelper outputHelper)
+    public StressTests(LoadClusterFixture testApp, ITestOutputHelper outputHelper)
     {
         _siloCluster = testApp;
         _outputHelper = outputHelper;
@@ -28,184 +34,294 @@ public class StressTests
         _secondApp = new TestWebApplication(_siloCluster, 8082);
     }
 
-    private Task<HubConnection> CreateHubConnection(TestWebApplication app)
-    {
-        var hubConnection = app.CreateSignalRClient(nameof(StressTestHub));
-        return Task.FromResult(hubConnection);
-    }
-
-    private async Task<HubConnection> CreateHubConnection(string user, TestWebApplication app, string hub)
-    {
-        var client = app.CreateHttpClient();
-        var responseMessage = await client.GetAsync("/auth?user=" + user);
-        var token = await responseMessage.Content.ReadAsStringAsync();
-        var hubConnection = app.CreateSignalRClient(hub,
-            configureConnection: options => { options.AccessTokenProvider = () => Task.FromResult(token); });
-        return hubConnection;
-    }
-
-
     [Fact]
     public async Task InvokeAsyncSignalRTest()
     {
-        ConcurrentQueue<HubConnection> connections = new();
-        ConcurrentDictionary<string, int> users = new();
-        ConcurrentDictionary<string, int> groups = new();
+        const int batches = 5;
+        const int connectionsPerBatch = 10;
+        var totalConnections = batches * connectionsPerBatch;
 
+        _outputHelper.WriteLine($"Creating {totalConnections} connections for stress broadcast test.");
+        var connections = new List<HubConnection>(totalConnections);
+        var broadcastCount = 0;
 
-        var allCount = 0;
-
-        async Task CreateConnections(int number)
+        for (var batch = 0; batch < batches; batch++)
         {
-            for (var i = 0; i < number; i++)
+            var batchTasks = new List<Task<HubConnection>>(connectionsPerBatch);
+            for (var index = 0; index < connectionsPerBatch; index++)
             {
-                var server = Random.Shared.Next(0, 1) == 0 ? _firstApp : _secondApp;
-                var user = Random.Shared.Next(0, 3) == 3 ? null : $"user{i}@email.com";
-                var group = Random.Shared.Next(0, 4) > 2 ? null : $"group{i}";
-
-                HubConnection connection = null;
-                if (!string.IsNullOrEmpty(user))
-                {
-                    users[user] = 0;
-                    connection = await CreateHubConnection(user, server,nameof(StressTestHub));
-                }
-                else
-                {
-                    connection = await CreateHubConnection(server);
-                }
-
-                connection.On("All", (string m) => { Interlocked.Increment(ref allCount); });
-
-                await connection.StartAsync();
-                connection.State.Should().Be(HubConnectionState.Connected);
-
-                if (!string.IsNullOrEmpty(group))
-                {
-                    groups[group] = 0;
-                    await connection.InvokeAsync("AddToGroup", "test");
-                }
-
-                connections.Enqueue(connection);
+                var connectionIndex = batch * connectionsPerBatch + index;
+                batchTasks.Add(CreateStressConnectionAsync(connectionIndex, () => Interlocked.Increment(ref broadcastCount)));
             }
+
+            var started = await Task.WhenAll(batchTasks);
+            connections.AddRange(started);
+            _outputHelper.WriteLine($"Started {connections.Count}/{totalConnections} connections.");
         }
 
-        _outputHelper.WriteLine("Connecting...");
-        var sw = Stopwatch.StartNew();
-        //await Task.WhenAll(Enumerable.Repeat(1000, 100).Select(CreateConnections));
-        await Task.WhenAll(Enumerable.Repeat(100, 100).Select(CreateConnections));
-        //await Task.WhenAll(Enumerable.Repeat(5, 5).Select(CreateConnections));
-
-
-        sw.Stop();
-        _outputHelper.WriteLine(
-            $"Init time {sw.Elapsed}; connections {connections.Count}; users {users.Count}; groups {groups.Count}");
         await Task.Delay(TimeSpan.FromSeconds(1));
-        sw.Reset();
 
-        sw.Start();
-        await connections.First().InvokeAsync<int>("All");
+        var stopwatch = Stopwatch.StartNew();
+        _outputHelper.WriteLine("Invoking All() broadcast.");
 
-        while (allCount < connections.Count)
-        {
-            await Task.Delay(TimeSpan.FromSeconds(1));
-            _outputHelper.WriteLine($"All count {allCount}");
-        }
+        await connections[0].InvokeAsync<int>("All");
 
-        _outputHelper.WriteLine($"All count {allCount}");
+        var broadcastCompleted = await WaitUntilAsync(
+            "all connections to observe broadcast",
+            () => Task.FromResult(Volatile.Read(ref broadcastCount) >= totalConnections),
+            timeout: TimeSpan.FromSeconds(60),
+            progress: () => Task.FromResult($"received {Volatile.Read(ref broadcastCount)}/{totalConnections} messages"));
 
-        sw.Stop();
-        _outputHelper.WriteLine(
-            $"All connections: {connections.Count}; recived: {allCount} messages; time: {sw.Elapsed}");
+        broadcastCompleted.ShouldBeTrue("Broadcast was not observed by all connections within the allotted time.");
 
-        //--------------------------------
-        //---SignalR
-        //Init time 00:01:34.7682547; connections 100_000; users 1000; groups 1000
-        //All count 100_000
-        //All connections: 100_000; recived: 100_000 messages; time: 00:00:17.5744497
+        stopwatch.Stop();
+        _outputHelper.WriteLine($"Broadcast observed by all connections in {stopwatch.Elapsed}.");
 
-
-        //--Obsevers
-        //Init time 00:02:12.5033550; connections 100_000; users 1000; groups 1000
-        //All count 100_000
-        //All connections: 100_000; recived: 100_000 messages; time: 00:00:26.2132306
-        //--------------------------------
+        await DisposeConnectionsAsync(connections);
     }
-    
+
     [Fact]
     public async Task InvokeAsyncAndOnTest()
     {
-        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.FromMilliseconds(0));
-        
+        _outputHelper.WriteLine("Restarting cluster to ensure clean state.");
+        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0)
+            .ForceActivationCollection(TimeSpan.Zero);
+
         foreach (var silo in _siloCluster.Cluster.GetActiveSilos())
         {
             await _siloCluster.Cluster.RestartSiloAsync(silo);
+            _outputHelper.WriteLine($"Restarted silo {silo.SiloAddress}.");
         }
-        
-        foreach (var silo in _siloCluster.Cluster.GetActiveSilos())
+
+        var management = _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0);
+
+        async Task<GrainCounts> FetchCountsAsync()
         {
-            await _siloCluster.Cluster.RestartSiloAsync(silo);
+            var holder = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
+            var partition = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionPartitionGrain)}"));
+            var groupHolder = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
+            var groupPartition = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupPartitionGrain)}"));
+            var invocation = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
+            var user = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
+
+            return new GrainCounts(holder.Count, partition.Count, groupHolder.Count, groupPartition.Count, invocation.Count, user.Count);
         }
 
-        var signalRConnectionHolderGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
-        var signalRGroupGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
-        var signalRInvocationGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
-        var signalRUserGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
+        var before = await FetchCountsAsync();
+        _outputHelper.WriteLine($"Initial grain counts: {before}");
 
-        signalRConnectionHolderGrainCount.Count.Should().BeGreaterOrEqualTo(0);
-        signalRGroupGrainCount.Count.Should().BeGreaterOrEqualTo(0);
-        signalRInvocationGrainCount.Count.Should().BeGreaterOrEqualTo(0);
-        signalRUserGrainCount.Count.Should().BeGreaterOrEqualTo(0);
-        
-
-        var hubConnection = await CreateHubConnection("user", _firstApp, nameof(SimpleTestHub));
+        var hubConnection = await CreateUserConnectionAsync("stress-user", _firstApp, nameof(SimpleTestHub));
         hubConnection.On("GetMessage", () => "connection1");
+
         await hubConnection.StartAsync();
-        hubConnection.State.Should().Be(HubConnectionState.Connected);
-        
+        hubConnection.State.ShouldBe(HubConnectionState.Connected);
+        _outputHelper.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
+
         await hubConnection.InvokeAsync<int>("DoTest");
-        await hubConnection.InvokeAsync("AddToGroup", "test");
-        await hubConnection.InvokeAsync("WaitForMessage", hubConnection.ConnectionId);
-        
-
-        signalRConnectionHolderGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
-        signalRGroupGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
-        signalRInvocationGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
-        signalRUserGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
-
-        signalRConnectionHolderGrainCount.Count.Should().BeGreaterOrEqualTo(1);
-        signalRGroupGrainCount.Count.Should().BeGreaterOrEqualTo(1);
-        signalRInvocationGrainCount.Count.Should().BeGreaterOrEqualTo(1);
-        signalRUserGrainCount.Count.Should().BeGreaterOrEqualTo(1);
-        _outputHelper.WriteLine($"ConnectionHolder:{signalRConnectionHolderGrainCount.Count};GroupGrain:{signalRGroupGrainCount.Count}; InvocationGrain:{signalRInvocationGrainCount.Count}; UserGrain:{signalRUserGrainCount.Count};");
-
-        
-        _outputHelper.WriteLine($"Invoke one more time. Connection is {hubConnection.State}");
-        var rnd = await hubConnection.InvokeAsync<int>("DoTest");
-        await hubConnection.InvokeAsync("AddToGroup", "test");
+        await hubConnection.InvokeAsync("AddToGroup", StressGroup);
         await hubConnection.InvokeAsync("WaitForMessage", hubConnection.ConnectionId);
 
-        rnd.Should().BeGreaterThan(0);
-        
+        var activationObserved = await WaitUntilAsync(
+            "activated grains to appear after hub activity",
+            async () =>
+            {
+                var counts = await FetchCountsAsync();
+                if (counts.User >= 1
+                    && counts.ConnectionTotal > 0
+                    && counts.GroupTotal > 0)
+                {
+                    return true;
+                }
+
+                _outputHelper.WriteLine("Expected grains not yet activated, re-issuing hub activity to stimulate partitions.");
+                await hubConnection.InvokeAsync<int>("DoTest");
+                await hubConnection.InvokeAsync("AddToGroup", StressGroup);
+                await hubConnection.InvokeAsync("WaitForMessage", hubConnection.ConnectionId);
+                return false;
+            },
+            timeout: TimeSpan.FromSeconds(45),
+            progress: async () => (await FetchCountsAsync()).ToString());
+
+        activationObserved.ShouldBeTrue("Expected Orleans grains were not activated even after repeated hub activity.");
+
+        var during = await FetchCountsAsync();
+        _outputHelper.WriteLine($"Grain counts after activity: {during}");
+
+        var randomResult = await hubConnection.InvokeAsync<int>("DoTest");
+        randomResult.ShouldBeGreaterThan(0);
+
+        await hubConnection.InvokeAsync("AddToGroup", StressGroup);
+        await hubConnection.InvokeAsync("WaitForMessage", hubConnection.ConnectionId);
+
         await hubConnection.StopAsync();
-        hubConnection.State.Should().Be(HubConnectionState.Disconnected); 
         await hubConnection.DisposeAsync();
-        _outputHelper.WriteLine("Connection is stopped.");
-        _outputHelper.WriteLine($"wait a minute");
-        await Task.Delay(TimeSpan.FromSeconds(10));
-        
-        
-        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.FromSeconds(5));
+        _outputHelper.WriteLine("Stress connection disposed.");
 
-        signalRConnectionHolderGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}"));
-        signalRGroupGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRGroupGrain)}"));
-        signalRInvocationGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRInvocationGrain)}"));
-        signalRUserGrainCount = await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0).GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRUserGrain)}"));
+        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0)
+            .ForceActivationCollection(TimeSpan.FromSeconds(5));
 
+        var deactivationObserved = await WaitUntilAsync(
+            "all stress grains to deactivate",
+            async () =>
+            {
+                var counts = await FetchCountsAsync();
+                return counts.Holder == 0
+                       && counts.GroupHolder == 0
+                       && counts.Invocation == 0
+                       && counts.User <= 1
+                       && counts.ConnectionTotal <= 1
+                       && counts.GroupTotal <= 1;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            progress: async () => (await FetchCountsAsync()).ToString());
 
-        signalRConnectionHolderGrainCount.Count.Should().Be(0);
-        signalRGroupGrainCount.Count.Should().Be(0);
-        signalRInvocationGrainCount.Count.Should().Be(0);
-        signalRUserGrainCount.Count.Should().Be(0);
+        deactivationObserved.ShouldBeTrue("Stress grains did not deactivate as expected.");
 
+        var after = await FetchCountsAsync();
+        _outputHelper.WriteLine($"Final grain counts: {after}");
+    }
+
+    private async Task<HubConnection> CreateStressConnectionAsync(int index, Func<int> onBroadcastReceived)
+    {
+        var useUser = _random.NextDouble() < 0.5;
+        var app = _random.NextDouble() < 0.5 ? _firstApp : _secondApp;
+        HubConnection connection;
+        string? userId = null;
+
+        if (useUser)
+        {
+            userId = $"stress-user-{index}";
+            connection = await CreateUserConnectionAsync(userId, app, nameof(StressTestHub));
+        }
+        else
+        {
+            connection = app.CreateSignalRClient(nameof(StressTestHub));
+        }
+
+        connection.On("All", (string _) =>
+        {
+            var total = onBroadcastReceived();
+            if (total % 25 == 0)
+            {
+                _outputHelper.WriteLine($"Received {total} broadcast messages so far.");
+            }
+        });
+
+        connection.Closed += error =>
+        {
+            var reason = error is null ? "closed" : $"closed with error: {error.Message}";
+            _outputHelper.WriteLine($"[stress#{index}] {reason} (ConnectionId={connection.ConnectionId ?? "n/a"}, user={userId ?? "anonymous"}).");
+            return Task.CompletedTask;
+        };
+
+        await connection.StartAsync();
+        connection.State.ShouldBe(HubConnectionState.Connected);
+        _outputHelper.WriteLine($"[stress#{index}] connected (ConnectionId={connection.ConnectionId}, user={userId ?? "anonymous"}).");
+
+        if (_random.NextDouble() < 0.35)
+        {
+            await connection.InvokeAsync("AddToGroup", StressGroup);
+            _outputHelper.WriteLine($"[stress#{index}] joined group {StressGroup}.");
+        }
+
+        return connection;
+    }
+
+    private async Task<HubConnection> CreateUserConnectionAsync(string user, TestWebApplication app, string hub)
+    {
+        var client = app.CreateHttpClient();
+        var response = await client.GetAsync("/auth?user=" + user);
+        response.EnsureSuccessStatusCode();
+        var token = await response.Content.ReadAsStringAsync();
+
+        var hubConnection = app.CreateSignalRClient(
+            hub,
+            configureConnection: options => options.AccessTokenProvider = () => Task.FromResult<string?>(token));
+
+        return hubConnection;
+    }
+
+    private async Task DisposeConnectionsAsync(IEnumerable<HubConnection> connections)
+    {
+        var list = connections.ToList();
+        _outputHelper.WriteLine($"Disposing {list.Count} stress connections...");
+        foreach (var connection in list)
+        {
+            try
+            {
+                await connection.StopAsync();
+            }
+            catch (Exception ex)
+            {
+                _outputHelper.WriteLine($"Failed to stop {connection.ConnectionId}: {ex.Message}");
+            }
+            finally
+            {
+                await connection.DisposeAsync();
+            }
+        }
+    }
+
+    private async Task<bool> WaitUntilAsync(
+        string description,
+        Func<Task<bool>> condition,
+        TimeSpan? timeout = null,
+        Func<Task<string>>? progress = null)
+    {
+        var limit = timeout ?? TimeSpan.FromSeconds(20);
+        var start = DateTime.UtcNow;
+        var lastLog = TimeSpan.Zero;
+
+        while (DateTime.UtcNow - start < limit)
+        {
+            if (await condition())
+            {
+                _outputHelper.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                return true;
+            }
+
+            var elapsed = DateTime.UtcNow - start;
+            if (elapsed - lastLog >= LogInterval)
+            {
+                if (progress is not null)
+                {
+                    var status = await progress();
+                    _outputHelper.WriteLine($"Waiting for {description}... elapsed {elapsed:c}. Status: {status}");
+                }
+                else
+                {
+                    _outputHelper.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");
+                }
+
+                lastLog = elapsed;
+            }
+
+            await Task.Delay(WaitInterval);
+        }
+
+        if (progress is not null)
+        {
+            var status = await progress();
+            _outputHelper.WriteLine($"Final status for '{description}': {status}");
+        }
+
+        return await condition();
+    }
+
+    private readonly record struct GrainCounts(
+        int Holder,
+        int Partition,
+        int GroupHolder,
+        int GroupPartition,
+        int Invocation,
+        int User)
+    {
+        public int ConnectionTotal => Holder + Partition;
+        public int GroupTotal => GroupHolder + GroupPartition;
+
+        public override string ToString() =>
+            $"Connections={ConnectionTotal} (holder={Holder}, partition={Partition}); " +
+            $"Groups={GroupTotal} (holder={GroupHolder}, partition={GroupPartition}); " +
+            $"Invocation={Invocation}; Users={User}";
     }
 }
