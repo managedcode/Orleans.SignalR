@@ -91,6 +91,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         // For small number of grains (typical case), await all tasks
         // This ensures proper cleanup on disconnect
         await Task.Run(() => Task.WhenAll(tasks));
+
+        await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
+            .NotifyConnectionRemoved(connection.ConnectionId));
     }
 
     public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = new())
@@ -231,6 +234,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             var coordinatorGrain = NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient);
             var partitionId = await Task.Run(() => coordinatorGrain.GetPartitionForGroup(groupName), cancellationToken);
             var partitionGrain = NameHelperGenerator.GetGroupPartitionGrain<THub>(_clusterClient, partitionId);
+            var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
+
+            await Task.Run(() => partitionGrain.EnsureInitialized(hubKey), cancellationToken);
 
             subscription.AddGrain(partitionGrain);
             await Task.Run(() => partitionGrain.AddConnection(connectionId, subscription.Reference), cancellationToken);
@@ -256,6 +262,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             var coordinatorGrain = NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient);
             var partitionId = await Task.Run(() => coordinatorGrain.GetPartitionForGroup(groupName), cancellationToken);
             var partitionGrain = NameHelperGenerator.GetGroupPartitionGrain<THub>(_clusterClient, partitionId);
+            var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
+
+            await Task.Run(() => partitionGrain.EnsureInitialized(hubKey), cancellationToken);
 
             await Task.Run(() => coordinatorGrain.RemoveConnectionFromGroup(groupName, connectionId, subscription.Reference), cancellationToken);
 

@@ -35,10 +35,23 @@ public class OrleansSignalROptions
     public uint ConnectionPartitionCount { get; set; } = 4;
     
     /// <summary>
+    ///     Target number of concurrent connections per partition.
+    ///     Used as a hint when determining how many partitions to allocate dynamically.
+    ///     Lower values result in more partitions.
+    /// </summary>
+    public int ConnectionsPerPartitionHint { get; set; } = 10_000;
+    
+    /// <summary>
     ///     Number of partitions to use for group distribution.
     ///     Set to 1 to disable partitioning.
     ///     Increase this value for better scalability with millions of groups.
     ///     The default value is 4.
     /// </summary>
     public uint GroupPartitionCount { get; set; } = 4;
+
+    /// <summary>
+    ///     Target number of groups per partition.
+    ///     Used as a hint when determining how many partitions to allocate dynamically.
+    /// </summary>
+    public int GroupsPerPartitionHint { get; set; } = 1_000;
 }

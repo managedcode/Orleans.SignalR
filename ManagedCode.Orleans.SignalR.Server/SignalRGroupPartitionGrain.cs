@@ -6,6 +6,7 @@ using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,7 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
     private readonly ILogger<SignalRGroupPartitionGrain> _logger;
     private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IPersistentState<GroupPartitionState> _state;
+    private string? _hubKey;
 
     public SignalRGroupPartitionGrain(
         ILogger<SignalRGroupPartitionGrain> logger,
@@ -39,6 +41,12 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         var timeout = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
         var expiration = TimeIntervalHelper.AddExpirationIntervalBuffer(timeout);
         _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
+    }
+
+    public override Task OnActivateAsync(CancellationToken cancellationToken)
+    {
+        _hubKey = _state.State.HubKey;
+        return base.OnActivateAsync(cancellationToken);
     }
 
     public async Task SendToGroups(HubMessage message, string[] groupNames)
@@ -128,6 +136,7 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
             if (members.Count == 0)
             {
                 _state.State.Groups.Remove(groupName);
+                NotifyCoordinatorGroupRemoved(groupName);
             }
         }
 
@@ -192,6 +201,7 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
     private void RemoveConnectionInternal(string connectionId, ISignalRObserver observer)
     {
         _observerManager.Unsubscribe(observer);
+        List<string>? emptiedGroups = null;
 
         if (_state.State.ConnectionGroups.TryGetValue(connectionId, out var groups))
         {
@@ -204,6 +214,8 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
                     if (members.Count == 0)
                     {
                         _state.State.Groups.Remove(group);
+                        emptiedGroups ??= new List<string>();
+                        emptiedGroups.Add(group);
                     }
                 }
             }
@@ -212,5 +224,41 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         }
 
         _state.State.ConnectionObservers.Remove(connectionId);
+
+        if (emptiedGroups is not null)
+        {
+            foreach (var group in emptiedGroups)
+            {
+                NotifyCoordinatorGroupRemoved(group);
+            }
+        }
+    }
+
+    public Task EnsureInitialized(string hubKey)
+    {
+        if (string.IsNullOrEmpty(_hubKey) || !string.Equals(_hubKey, hubKey, StringComparison.Ordinal))
+        {
+            _hubKey = hubKey;
+            _state.State.HubKey = hubKey;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void NotifyCoordinatorGroupRemoved(string groupName)
+    {
+        if (string.IsNullOrEmpty(_hubKey))
+        {
+            return;
+        }
+
+        var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain(GrainFactory, _hubKey);
+        _ = coordinator.NotifyGroupRemoved(groupName).ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                _logger.LogError(t.Exception, "Failed to notify coordinator about group {GroupName} removal.", groupName);
+            }
+        }, TaskContinuationOptions.OnlyOnFaulted);
     }
 }

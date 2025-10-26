@@ -19,4 +19,6 @@ public interface ISignalRGroupPartitionGrain : IGrainWithIntegerKey, IObserverCo
 
     [ReadOnly]
     Task<bool> HasConnection(string connectionId);
+
+    Task EnsureInitialized(string hubKey);
 }

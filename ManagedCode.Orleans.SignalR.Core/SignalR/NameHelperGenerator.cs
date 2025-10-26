@@ -60,6 +60,11 @@ public static class NameHelperGenerator
         return grainFactory.GetGrain<ISignalRGroupCoordinatorGrain>(CleanString(typeof(THub).FullName!));
     }
     
+    public static ISignalRGroupCoordinatorGrain GetGroupCoordinatorGrain(IGrainFactory grainFactory, string hubKey)
+    {
+        return grainFactory.GetGrain<ISignalRGroupCoordinatorGrain>(CleanString(hubKey));
+    }
+    
     public static ISignalRGroupPartitionGrain GetGroupPartitionGrain<THub>(IGrainFactory grainFactory, int partitionId)
     {
         var key = GetPartitionGrainKey(typeof(THub).FullName!, partitionId, alreadyCleaned: false);

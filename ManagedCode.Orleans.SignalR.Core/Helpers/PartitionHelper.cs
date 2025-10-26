@@ -28,22 +28,37 @@ public static class PartitionHelper
 
     public static int GetOptimalPartitionCount(int expectedConnections)
     {
-        // Rule of thumb: ~10,000 connections per partition
-        const int connectionsPerPartition = 10000;
-        var partitions = Math.Max(1, (expectedConnections + connectionsPerPartition - 1) / connectionsPerPartition);
-        
-        // Round to nearest power of 2 for better hash distribution
-        return (int)Math.Pow(2, Math.Ceiling(Math.Log(partitions, 2)));
+        return GetOptimalPartitionCount(expectedConnections, 10_000);
+    }
+    
+    public static int GetOptimalPartitionCount(int expectedConnections, int connectionsPerPartition)
+    {
+        var perPartition = Math.Max(1, connectionsPerPartition);
+        var partitions = Math.Max(1, (expectedConnections + perPartition - 1) / perPartition);
+        return ToPowerOfTwo(partitions);
     }
     
     public static int GetOptimalGroupPartitionCount(int expectedGroups)
     {
-        // Rule of thumb: ~1,000 groups per partition
-        const int groupsPerPartition = 1000;
-        var partitions = Math.Max(1, (expectedGroups + groupsPerPartition - 1) / groupsPerPartition);
-        
-        // Round to nearest power of 2 for better hash distribution
-        return (int)Math.Pow(2, Math.Ceiling(Math.Log(partitions, 2)));
+        return GetOptimalGroupPartitionCount(expectedGroups, 1_000);
+    }
+
+    public static int GetOptimalGroupPartitionCount(int expectedGroups, int groupsPerPartition)
+    {
+        var perPartition = Math.Max(1, groupsPerPartition);
+        var partitions = Math.Max(1, (expectedGroups + perPartition - 1) / perPartition);
+        return ToPowerOfTwo(partitions);
+    }
+
+    private static int ToPowerOfTwo(int value)
+    {
+        if (value <= 1)
+        {
+            return 1;
+        }
+
+        var power = (int)Math.Ceiling(Math.Log(value, 2));
+        return (int)Math.Pow(2, power);
     }
 
     private readonly record struct RingCacheKey(int PartitionCount, int VirtualNodes);

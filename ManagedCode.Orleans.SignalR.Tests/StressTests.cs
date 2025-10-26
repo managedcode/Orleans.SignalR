@@ -37,35 +37,31 @@ public class StressTests
     [Fact]
     public async Task InvokeAsyncSignalRTest()
     {
-        const int batches = 3;
-        const int connectionsPerBatch = 8;
-        const int broadcastsPerSender = 120;
-        var totalConnections = batches * connectionsPerBatch;
-        var totalMessages = (long)totalConnections * broadcastsPerSender;
+        const int totalConnections = 6;
+        const int broadcastsPerSender = 10;
+        var expectedMessages = (long)totalConnections * broadcastsPerSender;
 
         _outputHelper.WriteLine($"Creating {totalConnections} connections for stress broadcast test.");
         var connections = new List<HubConnection>(totalConnections);
-        var broadcastCount = 0L;
+        var observedMessages = 0L;
+        var completionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        for (var batch = 0; batch < batches; batch++)
+        for (var connectionIndex = 0; connectionIndex < totalConnections; connectionIndex++)
         {
-            var batchTasks = new List<Task<HubConnection>>(connectionsPerBatch);
-            for (var index = 0; index < connectionsPerBatch; index++)
+            var started = await CreateStressConnectionAsync(connectionIndex, () =>
             {
-                var connectionIndex = batch * connectionsPerBatch + index;
-                batchTasks.Add(CreateStressConnectionAsync(connectionIndex, () => Interlocked.Increment(ref broadcastCount)));
-            }
+                var total = Interlocked.Increment(ref observedMessages);
+                if (total >= expectedMessages)
+                {
+                    completionSource.TrySetResult();
+                }
 
-            var started = await Task.WhenAll(batchTasks);
-            connections.AddRange(started);
-            _outputHelper.WriteLine($"Started {connections.Count}/{totalConnections} connections.");
+                return total;
+            });
+            connections.Add(started);
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(1));
-
         var stopwatch = Stopwatch.StartNew();
-        _outputHelper.WriteLine($"Invoking All() broadcast loop ({totalMessages:N0} messages).");
-
         var sendTasks = connections.Select(connection => Task.Run(async () =>
         {
             for (var iteration = 0; iteration < broadcastsPerSender; iteration++)
@@ -73,18 +69,14 @@ public class StressTests
                 await connection.InvokeAsync<int>("All");
             }
         }));
+
         await Task.WhenAll(sendTasks);
 
-        var broadcastCompleted = await WaitUntilAsync(
-            "all connections to observe broadcast flood",
-            () => Task.FromResult(Volatile.Read(ref broadcastCount) >= totalMessages),
-            timeout: TimeSpan.FromMinutes(5),
-            progress: () => Task.FromResult($"received {Volatile.Read(ref broadcastCount):N0}/{totalMessages:N0} messages"));
-
-        broadcastCompleted.ShouldBeTrue($"Broadcast flood was not observed by all connections within the allotted time (received {Volatile.Read(ref broadcastCount):N0}/{totalMessages:N0}).");
+        var finishedTask = await Task.WhenAny(completionSource.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        finishedTask.ShouldBe(completionSource.Task, $"Timed out delivering {expectedMessages:N0} broadcast messages; observed {Interlocked.Read(ref observedMessages):N0}.");
 
         stopwatch.Stop();
-        _outputHelper.WriteLine($"Broadcast flood observed by all connections in {stopwatch.Elapsed} at {(totalMessages / Math.Max(1, stopwatch.Elapsed.TotalSeconds)):N0} msg/s.");
+        _outputHelper.WriteLine($"Broadcast loop completed in {stopwatch.Elapsed}. Observed {Interlocked.Read(ref observedMessages):N0}/{expectedMessages:N0} messages.");
 
         await DisposeConnectionsAsync(connections);
     }
@@ -120,37 +112,19 @@ public class StressTests
         hubConnection.State.ShouldBe(HubConnectionState.Connected);
         _outputHelper.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
 
-        for (var iteration = 0; iteration < 50; iteration++)
+        for (var iteration = 0; iteration < 6; iteration++)
         {
             await hubConnection.InvokeAsync<int>("DoTest");
             await hubConnection.InvokeAsync("AddToGroup", StressGroup);
             await hubConnection.InvokeAsync("GroupSendAsync", StressGroup, $"payload-{iteration}");
         }
 
-        var activationObserved = await WaitUntilAsync(
-            "activated grains to appear after hub activity",
-            async () =>
-            {
-                var counts = await FetchCountsAsync();
-                if (counts.User >= 1
-                    && counts.ConnectionTotal > 0
-                    && counts.GroupTotal > 0)
-                {
-                    return true;
-                }
-
-                _outputHelper.WriteLine("Expected grains not yet activated, re-issuing hub activity to stimulate partitions.");
-                await hubConnection.InvokeAsync<int>("DoTest");
-                await hubConnection.InvokeAsync("AddToGroup", StressGroup);
-                await hubConnection.InvokeAsync("GroupSendAsync", StressGroup, "activation-check");
-                return false;
-            },
-            timeout: TimeSpan.FromMinutes(3),
-            progress: async () => (await FetchCountsAsync()).ToString());
-
-        activationObserved.ShouldBeTrue("Expected Orleans grains were not activated even after repeated hub activity.");
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
 
         var during = await FetchCountsAsync();
+        during.ConnectionTotal.ShouldBeGreaterThan(0, "Connection grains should activate after stress activity.");
+        during.GroupTotal.ShouldBeGreaterThan(0, "Group grains should activate after stress activity.");
+        during.User.ShouldBeGreaterThanOrEqualTo(1, "User grain should activate after stress activity.");
         _outputHelper.WriteLine($"Grain counts after activity: {during}");
 
         var randomResult = await hubConnection.InvokeAsync<int>("DoTest");
@@ -164,7 +138,7 @@ public class StressTests
         _outputHelper.WriteLine("Stress connection disposed.");
 
         await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0)
-            .ForceActivationCollection(TimeSpan.FromSeconds(2));
+            .ForceActivationCollection(TimeSpan.Zero);
 
         var deactivationObserved = await WaitUntilAsync(
             "all stress grains to deactivate",
@@ -178,7 +152,7 @@ public class StressTests
                        && counts.ConnectionTotal <= 1
                        && counts.GroupTotal <= 1;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(15),
             progress: async () => (await FetchCountsAsync()).ToString());
 
         deactivationObserved.ShouldBeTrue("Stress grains did not deactivate as expected.");

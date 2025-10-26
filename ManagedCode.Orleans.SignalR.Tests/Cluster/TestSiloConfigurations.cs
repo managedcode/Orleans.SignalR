@@ -27,6 +27,8 @@ public class TestSiloConfigurations : ISiloConfigurator
             options.KeepMessageInterval = TestDefaults.MessageRetention;
             options.ConnectionPartitionCount = TestDefaults.ConnectionPartitions;
             options.GroupPartitionCount = TestDefaults.GroupPartitions;
+            options.ConnectionsPerPartitionHint = TestDefaults.ConnectionsPerPartitionHint;
+            options.GroupsPerPartitionHint = TestDefaults.GroupsPerPartitionHint;
         });
     }
 }

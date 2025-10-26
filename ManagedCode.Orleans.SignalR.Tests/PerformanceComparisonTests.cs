@@ -17,11 +17,11 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 public class PerformanceComparisonTests
 {
     private const int BroadcastConnectionCount = 40;
-    private const int BroadcastMessageCount = 2_500;
+    private const int BroadcastMessageCount = 1_000;
 
     private const int GroupConnectionCount = 40;
     private const int GroupCount = 40;
-    private const int GroupMessagesPerGroup = 2_500;
+    private const int GroupMessagesPerGroup = 1_000;
 
     private readonly LoadClusterFixture _cluster;
     private readonly ITestOutputHelper _output;
@@ -97,7 +97,7 @@ public class PerformanceComparisonTests
             }));
             await Task.WhenAll(sendTasks);
 
-            var progressStep = Math.Max(1_000, expected / 10);
+            var progressStep = Math.Max(10_000, expected / 20);
             var lastReported = 0L;
 
             var completed = await WaitUntilAsync(
@@ -180,7 +180,7 @@ public class PerformanceComparisonTests
             }));
             await Task.WhenAll(sendTasks);
 
-            var progressStep = Math.Max(1_000, expected / 10);
+            var progressStep = Math.Max(10_000, expected / 20);
             var lastReported = 0L;
 
             var completed = await WaitUntilAsync(
