@@ -15,58 +15,58 @@ public static partial class Logs
     public static partial void Ping(ILogger logger, string grainType, string grainId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} AddConnection `{connectionId}`")]
     public static partial void AddConnection(ILogger logger, string grainType, string grainId, string connectionId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} RemoveConnection `{connectionId}`")]
     public static partial void RemoveConnection(ILogger logger, string grainType, string grainId, string connectionId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToAll")]
     public static partial void SendToAll(ILogger logger, string grainType, string grainId);    
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToAllExcept")]
     public static partial void SendToAllExcept(ILogger logger, string grainType, string grainId, string[] expectedConnectionIds);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToConnection")]
     public static partial void SendToConnection(ILogger logger, string grainType, string grainId, string connectionId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToConnections")]
     public static partial void SendToConnections(ILogger logger, string grainType, string grainId, string[] expectedConnectionIds);
     
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToGroup")]
     public static partial void SendToGroup(ILogger logger, string grainType, string grainId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToGroupExcept")]
     public static partial void SendToGroupExcept(ILogger logger, string grainType, string grainId, string[] expectedConnectionIds);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} TryCompleteResult")]
     public static partial void TryCompleteResult(ILogger logger, string grainType, string grainId, string connectionId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} TryGetReturnType")]
     public static partial void TryGetReturnType(ILogger logger, string grainType, string grainId);
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} AddInvocation")]
     public static partial void AddInvocation(ILogger logger, string grainType, string grainId, string invocationId, string connectionId);
         
@@ -76,7 +76,7 @@ public static partial class Logs
     public static partial void RemoveInvocation(ILogger logger, string grainType, string grainId);     
     
     [LoggerMessage(
-        Level = LogLevel.Information,
+        Level = LogLevel.Debug,
         Message = "{grainType}:{grainId} SendToUser")]
     public static partial void SendToUser(ILogger logger, string grainType, string grainId);  
         

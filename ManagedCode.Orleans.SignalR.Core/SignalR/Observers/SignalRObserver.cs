@@ -5,14 +5,9 @@ using Microsoft.AspNetCore.SignalR.Protocol;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
-public class SignalRObserver : ISignalRObserver, IDisposable
+public class SignalRObserver(Func<HubMessage, Task> onNextAction) : ISignalRObserver, IDisposable
 {
-    private Func<HubMessage, Task>? _onNextAction;
-
-    public SignalRObserver(Func<HubMessage, Task> onNextAction)
-    {
-        _onNextAction = onNextAction;
-    }
+    private Func<HubMessage, Task>? _onNextAction = onNextAction;
 
     public void Dispose()
     {

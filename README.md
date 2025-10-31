@@ -206,7 +206,7 @@ services.AddSignalR()
 
 - Request the `IOrleansHubContext<THub>` or `IOrleansHubContext<THub, TClient>` via DI in any grain.
 - You can still inject the classic `IHubContext<THub>` if you prefer manual access to `Clients`, `Groups`, etc.
-- Client invocations (`Clients.Client(connectionId).InvokeAsync(...)`) are supported. Wrap them in `Task.Run` or use asynchronous continuations to avoid blocking the Orleans scheduler.
+- Client invocations (`Clients.Client(connectionId).InvokeAsync(...)`) are supported. Run them via `Task.Run` (or another scheduler hop) so the Orleans scheduler is never blocked.
 
 ```csharp
 public class LiveScoreGrain : Grain, ILiveScoreGrain

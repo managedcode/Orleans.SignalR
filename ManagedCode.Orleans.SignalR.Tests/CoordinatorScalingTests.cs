@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Shouldly;
@@ -48,7 +49,7 @@ public class CoordinatorScalingTests
             await coordinator.NotifyConnectionRemoved(id);
         }
 
-        var reset = await coordinator.GetPartitionCount();
+        var reset = await WaitForPartitionCountAsync(() => coordinator.GetPartitionCount(), baseline, _output);
         reset.ShouldBe(baseline);
     }
 
@@ -78,7 +79,28 @@ public class CoordinatorScalingTests
             await coordinator.NotifyGroupRemoved(group);
         }
 
-        var reset = await coordinator.GetPartitionCount();
+        var reset = await WaitForPartitionCountAsync(() => coordinator.GetPartitionCount(), baseline, _output);
         reset.ShouldBe(baseline);
+    }
+
+    private static async Task<int> WaitForPartitionCountAsync(Func<Task<int>> accessor, int expected, ITestOutputHelper output)
+    {
+        var timeout = TimeSpan.FromSeconds(5);
+        var poll = TimeSpan.FromMilliseconds(100);
+        var stopwatch = Stopwatch.StartNew();
+        int current = await accessor();
+
+        while (current != expected && stopwatch.Elapsed < timeout)
+        {
+            await Task.Delay(poll);
+            current = await accessor();
+        }
+
+        if (current != expected)
+        {
+            output.WriteLine($"Partition count not reset to {expected} within {timeout.TotalSeconds}s. Current={current}.");
+        }
+
+        return current;
     }
 }

@@ -2,9 +2,11 @@ using ManagedCode.Orleans.SignalR.Core.HubContext;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR;
+using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Cluster.Grains;
 
+[Reentrant]
 public class TestGrain : Grain, ITestGrain
 {
     private readonly IHubContext<InterfaceTestHub> _hubContext;

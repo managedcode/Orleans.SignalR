@@ -24,5 +24,6 @@ public interface ISignalRConnectionCoordinatorGrain : IGrainWithStringKey
     [OneWay]
     Task SendToConnections(HubMessage message, string[] connectionIds);
 
+    [OneWay]
     Task NotifyConnectionRemoved(string connectionId);
 }

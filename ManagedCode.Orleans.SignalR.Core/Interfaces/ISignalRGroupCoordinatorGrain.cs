@@ -22,9 +22,12 @@ public interface ISignalRGroupCoordinatorGrain : IGrainWithStringKey
     [OneWay]
     Task SendToGroups(string[] groupNames, HubMessage message);
     
+    [OneWay]
     Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer);
     
+    [OneWay]
     Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer);
 
+    [OneWay]
     Task NotifyGroupRemoved(string groupName);
 }

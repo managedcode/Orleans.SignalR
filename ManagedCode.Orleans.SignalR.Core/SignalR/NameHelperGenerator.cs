@@ -91,7 +91,7 @@ public static class NameHelperGenerator
 
     public static string CleanString(string input)
     {
-        var builder = new System.Text.StringBuilder();
+        var builder = new StringBuilder();
         foreach (char c in input)
         {
             if (char.IsLetterOrDigit(c) || c == '-' || c == ':' || c == '.')

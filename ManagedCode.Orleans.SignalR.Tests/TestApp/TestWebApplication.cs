@@ -91,7 +91,7 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
         builder.WithAutomaticReconnect();
         configure?.Invoke(builder);
 
-        return builder.WithUrl(new Uri(baseUri, hubPath), HttpTransportType.LongPolling, options =>
+        return builder.WithUrl(new Uri(baseUri, hubPath), options =>
         {
             configureConnection?.Invoke(options);
             options.HttpMessageHandlerFactory = _ => Server.CreateHandler();

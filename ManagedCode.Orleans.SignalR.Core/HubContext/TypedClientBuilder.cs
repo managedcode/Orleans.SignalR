@@ -14,14 +14,14 @@ internal static class TypedClientBuilder<T>
     private const string ClientModuleName = "Microsoft.AspNetCore.SignalR.TypedClientBuilder";
 
     // There is one static instance of _builder per T
-    private static readonly Lazy<Func<IClientProxy, T>> _builder = new(() => GenerateClientBuilder());
+    private static readonly Lazy<Func<IClientProxy, T>> _builder = new(GenerateClientBuilder);
 
     private static readonly PropertyInfo CancellationTokenNoneProperty =
         typeof(CancellationToken).GetProperty("None", BindingFlags.Public | BindingFlags.Static)!;
 
     private static readonly ConstructorInfo ObjectConstructor = typeof(object).GetConstructors().Single();
 
-    private static readonly Type[] ParameterTypes = { typeof(IClientProxy) };
+    private static readonly Type[] ParameterTypes = [typeof(IClientProxy)];
 
     public static T Build(IClientProxy proxy)
     {

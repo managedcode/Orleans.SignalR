@@ -4,17 +4,11 @@ using ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
-public class Subscription : IDisposable
+public class Subscription(SignalRObserver observer) : IDisposable
 {
     private readonly HashSet<IObserverConnectionManager> _grains = new();
-    private readonly SignalRObserver _observer;
     private bool _disposed;
 
-    public Subscription(SignalRObserver observer)
-    {
-        _observer = observer;
-    }
-    
     ~Subscription()
     {
         Dispose();
@@ -32,7 +26,7 @@ public class Subscription : IDisposable
         }
 
         _disposed = true;
-        _observer?.Dispose();
+        observer?.Dispose();
         _grains?.Clear();
         Reference = null!;
     }
@@ -54,6 +48,6 @@ public class Subscription : IDisposable
 
     public SignalRObserver GetObserver()
     {
-        return _observer;
+        return observer;
     }
 }
