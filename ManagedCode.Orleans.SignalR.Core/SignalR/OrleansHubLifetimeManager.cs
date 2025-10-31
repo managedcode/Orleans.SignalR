@@ -47,22 +47,36 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _connections.Add(connection);
         var subscription = CreateConnectionObserver(connection);
 
+        var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
+        var usePartitions = _orleansSignalOptions.Value.ConnectionPartitionCount > 1;
+        var partitionId = 0;
+
+        if (usePartitions)
+        {
+            var coordinatorGrain = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
+            partitionId = await coordinatorGrain.GetPartitionForConnection(connection.ConnectionId);
+            var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain<THub>(_clusterClient, partitionId);
+            subscription.AddGrain(partitionGrain);
+            await Task.Run(() => partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference));
+        }
+        else
+        {
+            var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
+            subscription.AddGrain(connectionHolderGrain);
+            await Task.Run(() => connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference));
+        }
+
         if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
         {
-            if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
-            {
-                var coordinatorGrain = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
-                var partitionId = await coordinatorGrain.GetPartitionForConnection(connection.ConnectionId);
-                var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain<THub>(_clusterClient, partitionId);
-                subscription.AddGrain(partitionGrain);
-                await Task.Run(() => partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference));
-            }
-            else
-            {
-                var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
-                subscription.AddGrain(connectionHolderGrain);
-                await Task.Run(() => connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference));
-            }
+            var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
+            var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connection.ConnectionId);
+            var registration = new ConnectionHeartbeatRegistration(
+                hubKey,
+                usePartitions,
+                partitionId,
+                subscription.Reference,
+                heartbeatInterval);
+            await Task.Run(() => heartbeatGrain.Start(registration));
         }
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
@@ -94,6 +108,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
             .NotifyConnectionRemoved(connection.ConnectionId));
+
+        if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
+        {
+            var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
+            var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connection.ConnectionId);
+            await Task.Run(() => heartbeatGrain.Stop());
+        }
     }
 
     public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = new())
@@ -399,8 +420,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Subscription CreateSubscription(Func<HubMessage, Task> onNextAction)
     {
-        var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
-        var subscription = new Subscription(new SignalRObserver(onNextAction), timeSpan);
+        var subscription = new Subscription(new SignalRObserver(onNextAction));
         var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;

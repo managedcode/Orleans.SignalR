@@ -17,6 +17,7 @@ using Orleans;
 using Orleans.TestingHost;
 using Xunit;
 using Xunit.Abstractions;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
@@ -30,16 +31,18 @@ public class PartitioningTests
     private readonly ITestOutputHelper _testOutputHelper;
     private readonly SmokeClusterFixture _siloCluster;
     private readonly IReadOnlyList<TestWebApplication> _apps;
+    private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     public PartitioningTests(SmokeClusterFixture siloCluster, ITestOutputHelper testOutputHelper)
     {
         _testOutputHelper = testOutputHelper;
         _siloCluster = siloCluster;
+        _loggerAccessor.Output = testOutputHelper;
         _apps = Enumerable.Range(0, ApplicationInstances)
             .Select(index =>
             {
                 var port = 8083 + index;
-                var app = new TestWebApplication(_siloCluster, port);
+                var app = new TestWebApplication(_siloCluster, port, loggerAccessor: _loggerAccessor);
                 _testOutputHelper.WriteLine($"Provisioned TestWebApplication #{index} at http://localhost:{port}.");
                 return app;
             })

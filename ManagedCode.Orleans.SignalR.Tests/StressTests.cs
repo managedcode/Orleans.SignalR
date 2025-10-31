@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.Linq;
-using Shouldly;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
 using Orleans.Runtime;
+using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -25,13 +26,15 @@ public class StressTests
     private readonly Random _random = new(42);
     private readonly TestWebApplication _secondApp;
     private readonly LoadClusterFixture _siloCluster;
+    private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     public StressTests(LoadClusterFixture testApp, ITestOutputHelper outputHelper)
     {
         _siloCluster = testApp;
         _outputHelper = outputHelper;
-        _firstApp = new TestWebApplication(_siloCluster, 8081);
-        _secondApp = new TestWebApplication(_siloCluster, 8082);
+        _loggerAccessor.Output = outputHelper;
+        _firstApp = new TestWebApplication(_siloCluster, 8081, loggerAccessor: _loggerAccessor);
+        _secondApp = new TestWebApplication(_siloCluster, 8082, loggerAccessor: _loggerAccessor);
     }
 
     [Fact]

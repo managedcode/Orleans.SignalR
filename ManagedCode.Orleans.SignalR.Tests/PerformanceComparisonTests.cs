@@ -3,11 +3,12 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Shouldly;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -25,11 +26,13 @@ public class PerformanceComparisonTests
 
     private readonly LoadClusterFixture _cluster;
     private readonly ITestOutputHelper _output;
+    private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     public PerformanceComparisonTests(LoadClusterFixture cluster, ITestOutputHelper output)
     {
         _cluster = cluster;
         _output = output;
+        _loggerAccessor.Output = output;
     }
 
     [Fact]
@@ -225,7 +228,7 @@ public class PerformanceComparisonTests
         var apps = new List<TestWebApplication>(4);
         for (var i = 0; i < 4; i++)
         {
-            var app = new TestWebApplication(_cluster, basePort + i, useOrleans);
+            var app = new TestWebApplication(_cluster, basePort + i, useOrleans, _loggerAccessor);
             apps.Add(app);
         }
 

@@ -1,10 +1,11 @@
 using System.Collections.Concurrent;
-using Shouldly;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.Http.Connections.Client;
 using Microsoft.AspNetCore.SignalR.Client;
+using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -18,6 +19,7 @@ public class HubSmokeTests
     private readonly TestWebApplication _secondApp;
     private readonly SmokeClusterFixture _cluster;
     private readonly ITestOutputHelper _output;
+    private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
@@ -26,8 +28,9 @@ public class HubSmokeTests
     {
         _cluster = cluster;
         _output = output;
-        _firstApp = new TestWebApplication(_cluster, 8081);
-        _secondApp = new TestWebApplication(_cluster, 8082);
+        _loggerAccessor.Output = output;
+        _firstApp = new TestWebApplication(_cluster, 8081, loggerAccessor: _loggerAccessor);
+        _secondApp = new TestWebApplication(_cluster, 8082, loggerAccessor: _loggerAccessor);
     }
 
     [Fact]

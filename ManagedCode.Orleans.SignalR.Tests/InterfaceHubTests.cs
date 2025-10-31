@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Xunit;
 using Xunit.Abstractions;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
@@ -21,13 +22,15 @@ public class InterfaceHubTests
     private readonly SmokeClusterFixture _siloCluster;
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
+    private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     public InterfaceHubTests(SmokeClusterFixture testApp, ITestOutputHelper outputHelper)
     {
         _siloCluster = testApp;
         _outputHelper = outputHelper;
-        _firstApp = new TestWebApplication(_siloCluster, 8081);
-        _secondApp = new TestWebApplication(_siloCluster, 8082);
+        _loggerAccessor.Output = outputHelper;
+        _firstApp = new TestWebApplication(_siloCluster, 8081, loggerAccessor: _loggerAccessor);
+        _secondApp = new TestWebApplication(_siloCluster, 8082, loggerAccessor: _loggerAccessor);
     }
 
     private async Task<HubConnection> CreateHubConnection(TestWebApplication app, string hubName = nameof(InterfaceTestHub))

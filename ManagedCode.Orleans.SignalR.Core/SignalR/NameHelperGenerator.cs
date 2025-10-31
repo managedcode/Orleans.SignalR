@@ -17,6 +17,11 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(typeof(THub).FullName!));
     }
+
+    public static ISignalRConnectionHolderGrain GetConnectionHolderGrain(IGrainFactory grainFactory, string hubKey)
+    {
+        return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(hubKey));
+    }
     
     public static ISignalRConnectionCoordinatorGrain GetConnectionCoordinatorGrain<THub>(IGrainFactory grainFactory)
     {
@@ -75,6 +80,13 @@ public static class NameHelperGenerator
     {
         var key = GetPartitionGrainKey(hubKey, partitionId, alreadyCleaned: true);
         return grainFactory.GetGrain<ISignalRGroupPartitionGrain>(key);
+    }
+
+    public static ISignalRConnectionHeartbeatGrain GetConnectionHeartbeatGrain(IGrainFactory grainFactory, string hubKey, string connectionId)
+    {
+        var normalizedConnection = CleanString(connectionId);
+        var key = $"{CleanString(hubKey)}::{normalizedConnection}";
+        return grainFactory.GetGrain<ISignalRConnectionHeartbeatGrain>(key);
     }
 
     public static string CleanString(string input)
