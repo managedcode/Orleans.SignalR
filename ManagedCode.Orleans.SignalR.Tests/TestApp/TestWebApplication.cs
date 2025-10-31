@@ -50,7 +50,7 @@ public class TestWebApplication : WebApplicationFactory<HttpHostProgram>
             builder.ConfigureLogging(logging =>
             {
                 logging.ClearProviders();
-                logging.SetMinimumLevel(LogLevel.Debug);
+                logging.SetMinimumLevel(LogLevel.Warning);
                 logging.AddProvider(new XunitLoggerProvider(_loggerAccessor));
             });
         }

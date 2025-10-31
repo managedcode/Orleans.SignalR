@@ -17,12 +17,12 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 [Collection(nameof(LoadCluster))]
 public class PerformanceComparisonTests
 {
-    private const int BroadcastConnectionCount = 40;
-    private const int BroadcastMessageCount = 1_000;
+    private const int BroadcastConnectionCount = 211;
+    private const int BroadcastMessageCount = 1_001;
 
-    private const int GroupConnectionCount = 40;
-    private const int GroupCount = 40;
-    private const int GroupMessagesPerGroup = 1_000;
+    private const int GroupConnectionCount = 127;
+    private const int GroupCount = 113;
+    private const int GroupMessagesPerGroup = 257;
 
     private readonly LoadClusterFixture _cluster;
     private readonly ITestOutputHelper _output;
@@ -64,7 +64,7 @@ public class PerformanceComparisonTests
     private async Task<TimeSpan> RunBroadcastScenarioAsync(bool useOrleans, int basePort)
     {
         var apps = CreateApplications(basePort, useOrleans);
-        var (connections, perAppCounts) = await CreateConnectionsAsync(apps, BroadcastConnectionCount);
+        var (connections, perAppCounts, _) = await CreateConnectionsAsync(apps, BroadcastConnectionCount);
 
         try
         {
@@ -143,7 +143,7 @@ public class PerformanceComparisonTests
     private async Task<TimeSpan> RunGroupScenarioAsync(bool useOrleans, int basePort)
     {
         var apps = CreateApplications(basePort, useOrleans);
-        var (connections, _) = await CreateConnectionsAsync(apps, GroupConnectionCount);
+        var (connections, _, connectionAppIndices) = await CreateConnectionsAsync(apps, GroupConnectionCount);
 
         try
         {
@@ -152,18 +152,42 @@ public class PerformanceComparisonTests
 
             long received = 0;
 
+            var subscriptionTasks = new List<Task>(connections.Count);
+
             for (var index = 0; index < connections.Count; index++)
             {
                 var connection = connections[index];
                 var groupName = groupNames[index % groupNames.Length];
                 groupMembers[groupName].Add(connection);
-
                 connection.On<string>("SendAll", _ => Interlocked.Increment(ref received));
-                await connection.InvokeAsync("AddToGroup", groupName);
+                subscriptionTasks.Add(connection.InvokeAsync("AddToGroup", groupName));
             }
 
+            await Task.WhenAll(subscriptionTasks);
+
             var activeGroups = groupMembers.Where(kvp => kvp.Value.Count > 0).ToArray();
-            var expected = activeGroups.Sum(kvp => (long)kvp.Value.Count) * GroupMessagesPerGroup;
+            var appIndexByConnection = connections
+                .Select((connection, idx) => (connection, idx))
+                .ToDictionary(tuple => tuple.connection, tuple => connectionAppIndices[tuple.idx]);
+
+            long expected;
+            if (useOrleans)
+            {
+                expected = activeGroups.Sum(kvp => (long)kvp.Value.Count * kvp.Value.Count) * GroupMessagesPerGroup;
+            }
+            else
+            {
+                expected = activeGroups.Sum(kvp =>
+                {
+                    var members = kvp.Value;
+                    return members.Sum(sender =>
+                    {
+                        var senderApp = appIndexByConnection[sender];
+                        var recipients = members.Count(connection => appIndexByConnection[connection] == senderApp);
+                        return (long)recipients;
+                    }) * GroupMessagesPerGroup;
+                });
+            }
             expected.ShouldBeGreaterThan(0, "At least one connection must belong to a group.");
 
             await Task.Delay(TimeSpan.FromMilliseconds(250));
@@ -175,11 +199,14 @@ public class PerformanceComparisonTests
             var sendTasks = activeGroups.Select(tuple => Task.Run(async () =>
             {
                 var (group, members) = tuple;
-                var sender = members[0];
-                for (var message = 0; message < GroupMessagesPerGroup; message++)
+                var perSender = members.Select(sender => Task.Run(async () =>
                 {
-                    await sender.InvokeAsync("GroupSendAsync", group, $"payload-{message}");
-                }
+                    for (var message = 0; message < GroupMessagesPerGroup; message++)
+                    {
+                        await sender.InvokeAsync("GroupSendAsync", group, $"payload-{message}");
+                    }
+                }));
+                await Task.WhenAll(perSender);
             }));
             await Task.WhenAll(sendTasks);
 
@@ -235,12 +262,13 @@ public class PerformanceComparisonTests
         return apps;
     }
 
-    private static async Task<(List<HubConnection> Connections, int[] PerAppCounts)> CreateConnectionsAsync(
+    private static async Task<(List<HubConnection> Connections, int[] PerAppCounts, int[] ConnectionAppIndices)> CreateConnectionsAsync(
         IReadOnlyList<TestWebApplication> apps,
         int count)
     {
         var connections = new List<HubConnection>(count);
         var perAppCounts = new int[apps.Count];
+        var connectionAppIndices = new int[count];
 
         for (var index = 0; index < count; index++)
         {
@@ -250,9 +278,10 @@ public class PerformanceComparisonTests
             await connection.StartAsync();
             connections.Add(connection);
             perAppCounts[appIndex]++;
+            connectionAppIndices[index] = appIndex;
         }
 
-        return (connections, perAppCounts);
+        return (connections, perAppCounts, connectionAppIndices);
     }
 
     private static async Task DisposeAsync(IEnumerable<HubConnection> connections)

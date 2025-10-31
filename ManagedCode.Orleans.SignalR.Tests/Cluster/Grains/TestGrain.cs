@@ -27,23 +27,19 @@ public class TestGrain : Grain, ITestGrain
         return _orleansHubContext.Clients.All.SendMessage(this.GetPrimaryKeyString());
     }
 
-    public async Task<string> GetMessageInvoke(string connectionId)
+    public Task<string> GetMessageInvoke(string connectionId)
     {
-        var localConnection = connectionId;
-        var message = await Task.Run(() => _hubContext.Clients.Client(localConnection)
-            .InvokeAsync<string>("GetMessage", CancellationToken.None));
-
-        return message;
+        return _hubContext.Clients.Client(connectionId)
+            .InvokeAsync<string>("GetMessage", CancellationToken.None);
     }
 
-    public async Task<string> GetMessage(string connectionId)
+    public Task<string> GetMessage(string connectionId)
     {
-        var message = await Task.Run(() => _orleansHubContext.Clients.Client(connectionId).GetMessage());
-        return message;
+        return _orleansHubContext.Clients.Client(connectionId).GetMessage();
     }
     
     public Task SendToUser(string userName, string message)
     {
-        return Task.Run(() => _hubContext.Clients.User(userName).SendAsync("SendMessage", message));
+        return _hubContext.Clients.User(userName).SendAsync("SendMessage", message);
     }
 }

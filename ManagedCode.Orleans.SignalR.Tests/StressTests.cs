@@ -18,13 +18,14 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 public class StressTests
 {
     private const string StressGroup = "stress-group";
+    private const int StressConnectionCount = 211;
+    private const int BroadcastsPerConnection = 233;
+    private const int GroupWorkflowIterations = 29;
     private static readonly TimeSpan WaitInterval = TimeSpan.FromMilliseconds(200);
     private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(1);
 
-    private readonly TestWebApplication _firstApp;
+    private readonly IReadOnlyList<TestWebApplication> _apps;
     private readonly ITestOutputHelper _outputHelper;
-    private readonly Random _random = new(42);
-    private readonly TestWebApplication _secondApp;
     private readonly LoadClusterFixture _siloCluster;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
@@ -33,25 +34,24 @@ public class StressTests
         _siloCluster = testApp;
         _outputHelper = outputHelper;
         _loggerAccessor.Output = outputHelper;
-        _firstApp = new TestWebApplication(_siloCluster, 8081, loggerAccessor: _loggerAccessor);
-        _secondApp = new TestWebApplication(_siloCluster, 8082, loggerAccessor: _loggerAccessor);
+        _apps = Enumerable.Range(0, 4)
+            .Select(index => new TestWebApplication(_siloCluster, 8081 + index, loggerAccessor: _loggerAccessor))
+            .ToArray();
     }
 
     [Fact]
     public async Task InvokeAsyncSignalRTest()
     {
-        const int totalConnections = 6;
-        const int broadcastsPerSender = 10;
-        var expectedMessages = (long)totalConnections * broadcastsPerSender;
+        var expectedMessages = (long)StressConnectionCount * BroadcastsPerConnection;
 
-        _outputHelper.WriteLine($"Creating {totalConnections} connections for stress broadcast test.");
-        var connections = new List<HubConnection>(totalConnections);
+        _outputHelper.WriteLine($"Creating {StressConnectionCount} connections for stress broadcast test.");
+        var connections = new List<HubConnection>(StressConnectionCount);
         var observedMessages = 0L;
         var completionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        for (var connectionIndex = 0; connectionIndex < totalConnections; connectionIndex++)
+        async Task<HubConnection> CreateAsync(int connectionIndex)
         {
-            var started = await CreateStressConnectionAsync(connectionIndex, () =>
+            return await CreateStressConnectionAsync(connectionIndex, () =>
             {
                 var total = Interlocked.Increment(ref observedMessages);
                 if (total >= expectedMessages)
@@ -61,13 +61,17 @@ public class StressTests
 
                 return total;
             });
-            connections.Add(started);
         }
+
+        var connectionTasks = Enumerable.Range(0, StressConnectionCount)
+            .Select(CreateAsync)
+            .ToArray();
+        connections.AddRange(await Task.WhenAll(connectionTasks));
 
         var stopwatch = Stopwatch.StartNew();
         var sendTasks = connections.Select(connection => Task.Run(async () =>
         {
-            for (var iteration = 0; iteration < broadcastsPerSender; iteration++)
+            for (var iteration = 0; iteration < BroadcastsPerConnection; iteration++)
             {
                 await connection.InvokeAsync<int>("All");
             }
@@ -75,7 +79,7 @@ public class StressTests
 
         await Task.WhenAll(sendTasks);
 
-        var finishedTask = await Task.WhenAny(completionSource.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        var finishedTask = await Task.WhenAny(completionSource.Task, Task.Delay(TimeSpan.FromSeconds(45)));
         finishedTask.ShouldBe(completionSource.Task, $"Timed out delivering {expectedMessages:N0} broadcast messages; observed {Interlocked.Read(ref observedMessages):N0}.");
 
         stopwatch.Stop();
@@ -108,19 +112,21 @@ public class StressTests
         var before = await FetchCountsAsync();
         _outputHelper.WriteLine($"Initial grain counts: {before}");
 
-        var hubConnection = await CreateUserConnectionAsync("stress-user", _firstApp, nameof(SimpleTestHub));
+        var hubConnection = await CreateUserConnectionAsync("stress-user", _apps[0], nameof(SimpleTestHub));
         hubConnection.On("GetMessage", () => "connection1");
 
         await hubConnection.StartAsync();
         hubConnection.State.ShouldBe(HubConnectionState.Connected);
         _outputHelper.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
 
-        for (var iteration = 0; iteration < 6; iteration++)
-        {
-            await hubConnection.InvokeAsync<int>("DoTest");
-            await hubConnection.InvokeAsync("AddToGroup", StressGroup);
-            await hubConnection.InvokeAsync("GroupSendAsync", StressGroup, $"payload-{iteration}");
-        }
+        var workflowTasks = Enumerable.Range(0, GroupWorkflowIterations)
+            .Select(async iteration =>
+            {
+                await hubConnection.InvokeAsync<int>("DoTest");
+                await hubConnection.InvokeAsync("AddToGroup", StressGroup);
+                await hubConnection.InvokeAsync("GroupSendAsync", StressGroup, $"payload-{iteration}");
+            });
+        await Task.WhenAll(workflowTasks);
 
         await Task.Delay(TimeSpan.FromMilliseconds(250));
 
@@ -166,8 +172,8 @@ public class StressTests
 
     private async Task<HubConnection> CreateStressConnectionAsync(int index, Func<long> onBroadcastReceived)
     {
-        var useUser = _random.NextDouble() < 0.5;
-        var app = _random.NextDouble() < 0.5 ? _firstApp : _secondApp;
+        var useUser = Random.Shared.NextDouble() < 0.5;
+        var app = _apps[Random.Shared.Next(_apps.Count)];
         HubConnection connection;
         string? userId = null;
 
@@ -201,7 +207,7 @@ public class StressTests
         connection.State.ShouldBe(HubConnectionState.Connected);
         _outputHelper.WriteLine($"[stress#{index}] connected (ConnectionId={connection.ConnectionId}, user={userId ?? "anonymous"}).");
 
-        if (_random.NextDouble() < 0.35)
+        if (Random.Shared.NextDouble() < 0.35)
         {
             await connection.InvokeAsync("AddToGroup", StressGroup);
             _outputHelper.WriteLine($"[stress#{index}] joined group {StressGroup}.");

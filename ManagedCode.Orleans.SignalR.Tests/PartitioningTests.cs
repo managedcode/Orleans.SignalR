@@ -78,25 +78,22 @@ public class PartitioningTests
     public async Task Default_Group_Configuration_Should_Use_Group_Partitioning()
     {
         // Arrange
-        const int groupCount = 20;
+        const int groupCount = 100;
         var connection = _apps[1].CreateSignalRClient(nameof(SimpleTestHub));
         await connection.StartAsync();
         connection.State.ShouldBe(HubConnectionState.Connected);
 
         // Act - Add connection to multiple groups
-        for (int i = 0; i < groupCount; i++)
-        {
-            await connection.InvokeAsync("AddToGroup", $"group_{i}");
-        }
-
-        // Give some time for group operations to complete
-        await Task.Delay(1000);
+        var addTasks = Enumerable.Range(0, groupCount)
+            .Select(i => connection.InvokeAsync("AddToGroup", $"group_{i}"))
+            .ToArray();
+        await Task.WhenAll(addTasks);
 
         // Assert - Send messages to different groups
-        for (int i = 0; i < groupCount; i++)
-        {
-            await connection.InvokeAsync("GroupSendAsync", $"group_{i}", $"Hello group_{i}!");
-        }
+        var sendTasks = Enumerable.Range(0, groupCount)
+            .Select(i => connection.InvokeAsync("GroupSendAsync", $"group_{i}", $"Hello group_{i}!"))
+            .ToArray();
+        await Task.WhenAll(sendTasks);
 
         // Verify group coordinator is working with default configuration (partitioning enabled)
         var groupCoordinatorGrain = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(_siloCluster.Cluster.Client);
@@ -104,7 +101,8 @@ public class PartitioningTests
 
         var defaultGroupPartitions = (int)new OrleansSignalROptions().GroupPartitionCount;
         defaultGroupPartitions.ShouldBeGreaterThan(1);
-        groupPartitionCount.ShouldBe(defaultGroupPartitions);
+        groupPartitionCount.ShouldBeGreaterThanOrEqualTo(defaultGroupPartitions);
+        (groupPartitionCount & (groupPartitionCount - 1)).ShouldBe(0);
 
         // Cleanup
         await connection.StopAsync();

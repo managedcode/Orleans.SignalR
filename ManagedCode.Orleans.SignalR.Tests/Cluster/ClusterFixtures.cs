@@ -46,7 +46,7 @@ public sealed class LoadClusterFixture : ClusterFixtureBase
     public LoadClusterFixture()
         : base(builder =>
         {
-            builder.Options.InitialSilosCount = 4;
+            builder.Options.InitialSilosCount = 6;
         })
     {
     }
