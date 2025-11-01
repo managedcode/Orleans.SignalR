@@ -88,7 +88,7 @@ flowchart LR
     hub[ASP.NET Core SignalR Hub]
     manager[OrleansHubLifetimeManager<T>]
     subgraph Orleans
-        grains[Orleans grain topology<br/>(coordinators & partitions)]
+        grains[Orleans grain topology (coordinators and partitions)]
     end
     clients[Connected clients]
 
@@ -105,11 +105,11 @@ flowchart LR
 ```mermaid
 flowchart TD
     connect([Client connect / disconnect])
-    coordinator{SignalRConnectionCoordinator<br/>consistent hashing}
+    coordinator{SignalRConnectionCoordinator / consistent hashing}
     partitions[[SignalRConnectionPartition(s)]]
     observers[[Observer notifications]]
     clients[[Connected clients]]
-    scaling[(Adjust partition count<br/>via hints)]
+    scaling[(Adjust partition count via hints)]
 
     connect --> coordinator --> partitions --> observers --> clients
     coordinator -. dynamic scaling .-> scaling -.-> partitions
@@ -125,9 +125,9 @@ flowchart TD
 ```mermaid
 flowchart TD
     action([Group operation])
-    groupCoord{SignalRGroupCoordinator<br/>assign hash partition}
-    groupPartition[[SignalRGroupPartition<br/>(stateful fan-out)]]
-    membership[(Membership maps<br/>(connection <-> group))]
+    groupCoord{SignalRGroupCoordinator / assign hash partition}
+    groupPartition[[SignalRGroupPartition (stateful fan-out)]]
+    membership[(Membership maps (connection ↔ group))]
     cleanup([Notify coordinator when empty])
 
     action --> groupCoord --> groupPartition
