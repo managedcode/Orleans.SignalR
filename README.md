@@ -85,55 +85,60 @@ At the heart of Orleans.SignalR sits `OrleansHubLifetimeManager<THub>`. It repla
 
 ```mermaid
 flowchart LR
-    hub[ASP.NET Core SignalR Hub]
-    manager[OrleansHubLifetimeManager<T>]
+    hub["ASP.NET Core SignalR Hub"]
+    manager["OrleansHubLifetimeManager<T>"]
     subgraph Orleans
-        grains[Orleans grain topology (coordinators and partitions)]
+        grains["Grain topology: coordinators & partitions"]
     end
-    clients[Connected clients]
+    clients["Connected clients"]
 
     hub --> manager --> grains --> clients
 ```
 
-### Connection Fan-Out Pipeline
+1. The ASP.NET Core hub writes to `OrleansHubLifetimeManager<T>` instead of the default SignalR manager.
+2. The lifetime manager resolves the Orleans grains that own connections, groups, users, and invocations.
+3. Grains fan messages back to clients by invoking the observers recorded for each connection.
 
-1. **Connection observed** — when a client connects, the lifetime manager creates a hub subscription (`ISignalRObserver`).
-2. **Coordinator assignment** — `SignalRConnectionCoordinatorGrain` maps the connection to a partition via consistent hashing.
-3. **Partition grain** — `SignalRConnectionPartitionGrain` stores the observer key and relays messages to the client.
-4. **Dynamic scaling** — partition counts expand to powers of two when tracked connections exceed `ConnectionsPerPartitionHint`. When the load drops to zero, the count resets to the configured base.
+### Connection Fan-Out Pipeline
 
 ```mermaid
 flowchart TD
-    connect([Client connect / disconnect])
-    coordinator{SignalRConnectionCoordinator / consistent hashing}
-    partitions[[SignalRConnectionPartition(s)]]
-    observers[[Observer notifications]]
-    clients[[Connected clients]]
-    scaling[(Adjust partition count via hints)]
+    connect["Client connect / disconnect"]
+    coordinator["SignalRConnectionCoordinator | consistent hashing"]
+    partition["SignalRConnectionPartition"]
+    observers["Observer notifications"]
+    consumers["Connected clients"]
+    scaling["Dynamic scaling when hints exceeded"]
 
-    connect --> coordinator --> partitions --> observers --> clients
-    coordinator -. dynamic scaling .-> scaling -.-> partitions
+    connect --> coordinator --> partition --> observers --> consumers
+    coordinator -.-> scaling
 ```
+
+1. **Connection observed** — the lifetime manager registers an `ISignalRObserver` when a client connects.
+2. **Coordinator assignment** — `SignalRConnectionCoordinatorGrain` hashes the connection ID to a partition number.
+3. **Partition grain** — `SignalRConnectionPartitionGrain` stores the observer handle and relays messages such as `Clients.All`, `Clients.Client`, or `Clients.User`.
+4. **Dynamic scaling** — the coordinator grows the partition ring (powers of two) when `ConnectionsPerPartitionHint` is exceeded and shrinks it when load drops to zero.
 
 ### Group Fan-Out Pipeline
 
-1. **Group coordinator** — `SignalRGroupCoordinatorGrain` tracks group names and membership counts.
-2. **Group partition assignment** — groups are consistently hashed to `SignalRGroupPartitionGrain` instances using the same power-of-two heuristic (`GroupPartitionCount` + `GroupsPerPartitionHint`).
-3. **Partition state** — each partition stores bidirectional maps of connections-to-groups and group-to-observer links, enabling efficient `SendToGroup`, `SendToGroups`, and exclusions.
-4. **Automatic cleanup** — when a group empties, the coordinator is notified so partitions can release unused entries and (if idle) shrink back to the base partition count.
-
 ```mermaid
 flowchart TD
-    action([Group operation])
-    groupCoord{SignalRGroupCoordinator / assign hash partition}
-    groupPartition[[SignalRGroupPartition (stateful fan-out)]]
-    membership[(Membership maps (connection ↔ group))]
-    cleanup([Notify coordinator when empty])
+    action["Group operation"]
+    coordinator["SignalRGroupCoordinator | hash to partition"]
+    partition["SignalRGroupPartition | stateful fan-out"]
+    membership["Membership map (connection ↔ group)"]
+    observers["Observer notifications"]
+    cleanup["Empty group cleanup"]
 
-    action --> groupCoord --> groupPartition
-    groupPartition --> membership --> groupPartition
-    membership --> cleanup -.-> groupCoord
+    action --> coordinator --> partition --> observers
+    partition --> membership --> partition
+    membership --> cleanup -.-> coordinator
 ```
+
+1. **Group coordinator** — `SignalRGroupCoordinatorGrain` maintains group membership counts.
+2. **Partition assignment** — group names are hashed to `SignalRGroupPartitionGrain` instances using the same power-of-two heuristic (`GroupPartitionCount` plus `GroupsPerPartitionHint`).
+3. **Partition state** — partitions keep connection↔group maps so `SendToGroup`, `SendToGroups`, and exclusion variants can enumerate the relevant observers quickly.
+4. **Automatic cleanup** — when a group becomes empty the coordinator notifies partitions so they can drop state and resize if necessary.
 
 ### Connection, Group, and User Grains
 
