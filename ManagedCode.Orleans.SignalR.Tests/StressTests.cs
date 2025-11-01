@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
@@ -133,6 +134,7 @@ public class StressTests : IAsyncLifetime
         _output.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
 
         const int workflowIterations = 200;
+        var workflowWatch = Stopwatch.StartNew();
         var workflowTasks = Enumerable.Range(0, workflowIterations)
             .Select(async iteration =>
             {
@@ -141,6 +143,8 @@ public class StressTests : IAsyncLifetime
                 await hubConnection.InvokeAsync("GroupSendAsync", "stress-group", $"payload-{iteration}");
             });
         await Task.WhenAll(workflowTasks);
+        workflowWatch.Stop();
+        _output.WriteLine($"Completed {workflowIterations} workflow iterations in {workflowWatch.Elapsed}.");
 
         await Task.Delay(TimeSpan.FromMilliseconds(250));
 
@@ -163,6 +167,7 @@ public class StressTests : IAsyncLifetime
         await _cluster.Cluster.Client.GetGrain<IManagementGrain>(0)
             .ForceActivationCollection(TimeSpan.Zero);
 
+        var deactivationWatch = Stopwatch.StartNew();
         var deactivationObserved = await WaitUntilAsync(
             "all stress grains to deactivate",
             async () =>
@@ -177,11 +182,12 @@ public class StressTests : IAsyncLifetime
             },
             timeout: TimeSpan.FromSeconds(15),
             progress: async () => (await FetchCountsAsync()).ToString());
+        deactivationWatch.Stop();
 
         deactivationObserved.ShouldBeTrue("Stress grains did not deactivate as expected.");
 
         var after = await FetchCountsAsync();
-        _output.WriteLine($"Final grain counts: {after}");
+        _output.WriteLine($"Final grain counts: {after} (deactivation check took {deactivationWatch.Elapsed}).");
     }
 
     private async Task<HubConnection> CreateUserConnectionAsync(string user, TestWebApplication app, string hub)

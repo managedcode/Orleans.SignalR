@@ -24,10 +24,10 @@ jobs:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
     - name: Restore dependencies
-      run: dotnet restore ManagedCode.Orleans.SignalR.sln
+      run: dotnet restore ManagedCode.Orleans.SignalR.slnx
 
     - name: Build
-      run: dotnet build ManagedCode.Orleans.SignalR.sln --configuration Release --no-restore
+      run: dotnet build ManagedCode.Orleans.SignalR.slnx --configuration Release --no-restore
 
     - name: Test
       run: dotnet test ManagedCode.Orleans.SignalR.Tests/ManagedCode.Orleans.SignalR.Tests.csproj --configuration Release --no-build --verbosity normal --collect:"XPlat Code Coverage"

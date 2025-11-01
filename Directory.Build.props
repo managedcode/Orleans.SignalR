@@ -6,7 +6,7 @@
         <EnableNETAnalyzers>true</EnableNETAnalyzers>
         <Nullable>enable</Nullable>
     </PropertyGroup>
-    
+
     <!--NuGet-->
     <PropertyGroup>
         <Authors>ManagedCode</Authors>
@@ -25,8 +25,8 @@
         <RepositoryUrl>https://github.com/managedcode/Orleans.SignalR</RepositoryUrl>
         <PackageProjectUrl>https://github.com/managedcode/Orleans.SignalR</PackageProjectUrl>
         <Product>Managed Code - Orleans SignalR</Product>
-        <Version>8.1.1</Version>
-        <PackageVersion>8.1.1</PackageVersion>
+        <Version>9.0.0</Version>
+        <PackageVersion>9.0.0</PackageVersion>
 
     </PropertyGroup>
     <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
