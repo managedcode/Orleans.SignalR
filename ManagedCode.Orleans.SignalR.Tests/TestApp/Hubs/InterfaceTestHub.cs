@@ -6,7 +6,7 @@ public class InterfaceTestHub : Hub<IClientInterfaceHub>, IServerInterfaceHub
 {
     public override Task OnConnectedAsync()
     {
-        var user = Context.User;
+        _ = Context.User;
         return base.OnConnectedAsync();
     }
 

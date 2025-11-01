@@ -1,27 +1,18 @@
-using System;
 using System.Diagnostics;
-using System.Linq;
-using System.Threading.Tasks;
-using Shouldly;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
+using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
 [Collection(nameof(SmokeCluster))]
-public class CoordinatorScalingTests
+public class CoordinatorScalingTests(SmokeClusterFixture cluster, ITestOutputHelper output)
 {
-    private readonly SmokeClusterFixture _cluster;
-    private readonly ITestOutputHelper _output;
-
-    public CoordinatorScalingTests(SmokeClusterFixture cluster, ITestOutputHelper output)
-    {
-        _cluster = cluster;
-        _output = output;
-    }
+    private readonly SmokeClusterFixture _cluster = cluster;
+    private readonly ITestOutputHelper _output = output;
 
     [Fact]
     public async Task ConnectionCoordinator_Scales_With_Connection_Load()
@@ -49,7 +40,7 @@ public class CoordinatorScalingTests
             await coordinator.NotifyConnectionRemoved(id);
         }
 
-        var reset = await WaitForPartitionCountAsync(() => coordinator.GetPartitionCount(), baseline, _output);
+        var reset = await WaitForPartitionCountAsync(coordinator.GetPartitionCount, baseline, _output);
         reset.ShouldBe(baseline);
     }
 
@@ -79,7 +70,7 @@ public class CoordinatorScalingTests
             await coordinator.NotifyGroupRemoved(group);
         }
 
-        var reset = await WaitForPartitionCountAsync(() => coordinator.GetPartitionCount(), baseline, _output);
+        var reset = await WaitForPartitionCountAsync(coordinator.GetPartitionCount, baseline, _output);
         reset.ShouldBe(baseline);
     }
 
@@ -88,7 +79,7 @@ public class CoordinatorScalingTests
         var timeout = TimeSpan.FromSeconds(5);
         var poll = TimeSpan.FromMilliseconds(100);
         var stopwatch = Stopwatch.StartNew();
-        int current = await accessor();
+        var current = await accessor();
 
         while (current != expected && stopwatch.Elapsed < timeout)
         {

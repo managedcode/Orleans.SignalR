@@ -57,13 +57,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             partitionId = await coordinatorGrain.GetPartitionForConnection(connection.ConnectionId);
             var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain<THub>(_clusterClient, partitionId);
             subscription.AddGrain(partitionGrain);
-            await Task.Run(() => partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference));
+            await partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference);
         }
         else
         {
             var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
             subscription.AddGrain(connectionHolderGrain);
-            await Task.Run(() => connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference));
+            await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference);
         }
 
         if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
@@ -76,54 +76,63 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 partitionId,
                 subscription.Reference,
                 heartbeatInterval);
-            await Task.Run(() => heartbeatGrain.Start(registration));
+            await heartbeatGrain.Start(registration);
         }
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
         {
             var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!);
             subscription.AddGrain(userGrain);
-            await Task.Run(() => userGrain.AddConnection(connection.ConnectionId, subscription.Reference));
-            _ = Task.Run(() => userGrain.RequestMessage());
+            await userGrain.AddConnection(connection.ConnectionId, subscription.Reference);
+            _ = Task.Run(userGrain.RequestMessage);
         }
     }
 
     public override async Task OnDisconnectedAsync(HubConnectionContext connection)
     {
         _connections.Remove(connection);
-        
-        using var subscription = connection.Features.Get<Subscription>();
 
-        if (subscription is null)
-            return;
-
-        var tasks = new List<Task>(subscription.Grains.Count);
-
-        foreach (var grain in subscription.Grains)
-            tasks.Add(grain.RemoveConnection(connection.ConnectionId, subscription.Reference));
-        
-        // For small number of grains (typical case), await all tasks
-        // This ensures proper cleanup on disconnect
-        await Task.Run(() => Task.WhenAll(tasks));
-
-        await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
-            .NotifyConnectionRemoved(connection.ConnectionId));
+        var subscription = connection.Features.Get<Subscription>();
 
         if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
         {
             var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
             var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connection.ConnectionId);
-            await Task.Run(() => heartbeatGrain.Stop());
+            await heartbeatGrain.Stop();
         }
+
+        if (subscription is not null)
+        {
+            using (subscription)
+            {
+                var removalTasks = subscription.Grains
+                    .Select(grain => grain.RemoveConnection(connection.ConnectionId, subscription.Reference))
+                    .ToArray();
+
+                if (removalTasks.Length > 0)
+                {
+                    await Task.WhenAll(removalTasks);
+                }
+            }
+
+            connection.Features.Set<Subscription?>(null);
+        }
+
+        var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
+        await coordinator.NotifyConnectionRemoved(connection.ConnectionId);
     }
 
     public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient).SendToAll(message), cancellationToken);
+        }
         else
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient).SendToAll(message), cancellationToken);
+        }
     }
 
     public override Task SendAllExceptAsync(string methodName, object?[] args,
@@ -131,11 +140,15 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
                 .SendToAllExcept(message, excludedConnectionIds.ToArray()), cancellationToken);
+        }
         else
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
                 .SendToAllExcept(message, excludedConnectionIds.ToArray()), cancellationToken);
+        }
     }
 
     public override Task SendConnectionAsync(string connectionId, string methodName, object?[] args,
@@ -143,11 +156,15 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
                 .SendToConnection(message, connectionId), cancellationToken);
+        }
         else
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
                 .SendToConnection(message, connectionId), cancellationToken);
+        }
     }
 
     public override Task SendConnectionsAsync(IReadOnlyList<string> connectionIds, string methodName, object?[] args,
@@ -155,11 +172,15 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
                 .SendToConnections(message, connectionIds.ToArray()), cancellationToken);
+        }
         else
+        {
             return Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
                 .SendToConnections(message, connectionIds.ToArray()), cancellationToken);
+        }
     }
 
     public override Task SendGroupAsync(string groupName, string methodName, object?[] args,
@@ -167,16 +188,20 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
+        {
             return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient).SendToGroup(groupName, message), cancellationToken);
+        }
         else
+        {
             return Task.Run(() => NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName).SendToGroup(message), cancellationToken);
+        }
     }
 
     public override Task SendGroupsAsync(IReadOnlyList<string> groupNames, string methodName, object?[] args,
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
-        
+
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
@@ -193,11 +218,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                     _ = groupGrain.SendToGroup(message).ContinueWith(t =>
                     {
                         if (t.IsFaulted)
+                        {
                             _logger.LogError(t.Exception, "Failed to send to group {GroupName}", groupName);
+                        }
                     }, TaskContinuationOptions.OnlyOnFaulted);
                 }
             }, cancellationToken);
-            
+
             return Task.CompletedTask;
         }
     }
@@ -207,11 +234,15 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
+        {
             return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
                 .SendToGroupExcept(groupName, message, excludedConnectionIds.ToArray()), cancellationToken);
+        }
         else
+        {
             return Task.Run(() => NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName)
                 .SendToGroupExcept(message, excludedConnectionIds.ToArray()), cancellationToken);
+        }
     }
 
     public override Task SendUserAsync(string userId, string methodName, object?[] args,
@@ -225,7 +256,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
-        
+
         // For potentially many users, use fire-and-forget to avoid memory issues
         Task.Run(() =>
         {
@@ -235,11 +266,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 _ = userGrain.SendToUser(message).ContinueWith(t =>
                 {
                     if (t.IsFaulted)
+                    {
                         _logger.LogError(t.Exception, "Failed to send to user {UserId}", userId);
+                    }
                 }, TaskContinuationOptions.OnlyOnFaulted);
             }
         }, cancellationToken);
-        
+
         return Task.CompletedTask;
     }
 
@@ -248,7 +281,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var subscription = GetSubscription(connectionId);
         if (subscription is null)
+        {
             return;
+        }
 
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
@@ -276,7 +311,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var subscription = GetSubscription(connectionId);
         if (subscription is null)
+        {
             return;
+        }
 
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
@@ -308,81 +345,127 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         // send thing
         if (string.IsNullOrEmpty(connectionId))
+        {
             throw new ArgumentNullException(nameof(connectionId));
+        }
 
         var connection = _connections[connectionId];
-        
-        // ID needs to be unique for each invocation and across servers, we generate a GUID every time, that should provide enough uniqueness guarantees.
+
         var invocationId = GenerateInvocationId();
-
-        var tcs = new TaskCompletionSource<T>();
-
-        using var subscription = CreateSubscription(message =>
-        {
-            if (message is CompletionMessage completionMessage)
-            {
-                if (completionMessage.HasResult)
-                    tcs.SetResult((T)completionMessage.Result!);
-                else
-                    tcs.SetException(new Exception(completionMessage.Error));
-            }
-
-            return Task.CompletedTask;
-        });
-
         var invocationGrain = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId);
-        subscription.AddGrain(invocationGrain);
-        await Task.Run(()=> invocationGrain.AddInvocation(subscription.Reference, 
-            new InvocationInfo(connectionId, invocationId, typeof(T))), cancellationToken);
+        var invocationInfo = new InvocationInfo(connectionId, invocationId, typeof(T));
 
-        var invocationMessage = new InvocationMessage(invocationId, methodName, args);
-
-        if (connection == null)
-        {
-            // TODO: Need to handle other server going away while waiting for connection result
-            var invocation = _orleansSignalOptions.Value.ConnectionPartitionCount > 1
-                ? await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
-                    .SendToConnection(invocationMessage, connectionId))
-                : await Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
-                    .SendToConnection(invocationMessage, connectionId));
-
-            if (invocation == false)
-                throw new IOException($"Connection '{connectionId}' does not exist.");
-        }
-        else
-        {
-
-            try
-            {
-                await Task.Run(() => connection.WriteAsync(invocationMessage, cancellationToken), cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "InvokeConnectionAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
-                throw;
-            }
-            
-        }
+        TaskCompletionSource<T>? completionSource = null;
+        Subscription? subscription = null;
+        Task<CompletionMessage?>? completionTask = null;
 
         try
         {
-            return await Task.Run(() => tcs.Task, cancellationToken);
-        }
-        catch
-        {
-            // ConnectionAborted will trigger a generic "Canceled" exception from the task, let's convert it into a more specific message.
-            if (connection?.ConnectionAborted.IsCancellationRequested == true)
-                throw new IOException($"Connection '{connectionId}' disconnected.");
+            try
+            {
+                completionSource = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+                subscription = CreateSubscription(message =>
+                {
+                    if (message is CompletionMessage completionMessage)
+                    {
+                        if (completionMessage.HasResult)
+                        {
+                            completionSource.TrySetResult((T)completionMessage.Result!);
+                        }
+                        else
+                        {
+                            completionSource.TrySetException(new Exception(completionMessage.Error));
+                        }
+                    }
 
-            throw;
+                    return Task.CompletedTask;
+                });
+
+                subscription.AddGrain(invocationGrain);
+                await invocationGrain.AddInvocation(subscription.Reference, invocationInfo);
+            }
+            catch (InvalidOperationException ex) when (IsLocalObjectReferenceException(ex))
+            {
+                completionSource = null;
+                subscription?.Dispose();
+                subscription = null;
+
+                await invocationGrain.AddInvocation(null, invocationInfo);
+                completionTask = invocationGrain.WaitForCompletion();
+            }
+
+            var invocationMessage = new InvocationMessage(invocationId, methodName, args);
+
+            if (connection == null)
+            {
+                // TODO: Need to handle other server going away while waiting for connection result
+                var invocation = _orleansSignalOptions.Value.ConnectionPartitionCount > 1
+                    ? await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
+                        .SendToConnection(invocationMessage, connectionId))
+                    : await Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
+                        .SendToConnection(invocationMessage, connectionId));
+
+                if (invocation == false)
+                {
+                    throw new IOException($"Connection '{connectionId}' does not exist.");
+                }
+            }
+            else
+            {
+                try
+                {
+                    await Task.Run(() => connection.WriteAsync(invocationMessage, cancellationToken), cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "InvokeConnectionAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
+                    throw;
+                }
+            }
+
+            try
+            {
+                if (completionSource is not null)
+                {
+                    return await Task.Run(() => completionSource.Task, cancellationToken);
+                }
+
+                var completionMessage = await completionTask!.WaitAsync(cancellationToken) ?? throw new IOException($"Invocation '{invocationId}' returned no result for connection '{connectionId}'.");
+
+                if (completionMessage.HasResult)
+                {
+                    return (T)completionMessage.Result!;
+                }
+
+                throw new Exception(completionMessage.Error);
+            }
+            catch
+            {
+                if (connection?.ConnectionAborted.IsCancellationRequested == true)
+                {
+                    throw new IOException($"Connection '{connectionId}' disconnected.");
+                }
+
+                throw;
+            }
         }
         finally
         {
-            if (connection is not null)
+            if (subscription is not null && connection is not null)
             {
-                foreach (var grain in subscription.Grains)
-                    await Task.Run(() => grain.RemoveConnection(connection.ConnectionId, subscription.Reference), cancellationToken);
+                var removalTasks = subscription.Grains
+                    .Select(grain => grain.RemoveConnection(connection.ConnectionId, subscription.Reference))
+                    .ToArray();
+
+                if (removalTasks.Length > 0)
+                {
+                    await Task.WhenAll(removalTasks);
+                }
             }
+
+            await invocationGrain.RemoveInvocation();
+
+            subscription?.Dispose();
         }
     }
 
@@ -417,13 +500,17 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return subscription;
     }
 
-
     private Subscription CreateSubscription(Func<HubMessage, Task> onNextAction)
     {
         var subscription = new Subscription(new SignalRObserver(onNextAction));
-        var reference = _clusterClient.CreateObjectReference<ISignalRObserver>(subscription.GetObserver());
+        var reference = CreateObserverReference(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;
+    }
+
+    private ISignalRObserver CreateObserverReference(SignalRObserver observer)
+    {
+        return _clusterClient.CreateObjectReference<ISignalRObserver>(observer);
     }
 
     private async Task OnNextAsync(WeakReference<HubConnectionContext> connectionReference, HubMessage message)
@@ -439,11 +526,15 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         catch (Exception ex)
         {
             if (message is InvocationMessage invocation)
+            {
                 if (!string.IsNullOrEmpty(invocation.InvocationId))
+                {
                     await Task.Run(() => NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocation.InvocationId)
                         .TryCompleteResult(connection.ConnectionId,
                             CompletionMessage.WithError(invocation.InvocationId,
                                 $"Connection disconnected. Reason:{ex.Message}")));
+                }
+            }
 
             //todo: maybe it's good idea to remove the connection?
 
@@ -471,22 +562,32 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var connection = _connections[connectionId];
         return connection?.Features.Get<Subscription>();
     }
-    
+
+    private static bool IsLocalObjectReferenceException(Exception ex)
+    {
+        return ex is InvalidOperationException invalid &&
+               invalid.Message.Contains("Cannot create a local object reference from a grain", StringComparison.OrdinalIgnoreCase);
+    }
+
     private void OnApplicationStopping()
     {
         var tasks = new List<Task>(_connections.Count);
-        
+
         foreach (var connection in _connections)
         {
             var subscription = connection.Features.Get<Subscription>();
 
             if (subscription is null)
+            {
                 return;
+            }
 
             foreach (var grain in subscription.Grains)
+            {
                 tasks.Add(grain.RemoveConnection(connection.ConnectionId, subscription.Reference));
+            }
         }
-        
+
         _ = Task.Run(() => Task.WhenAll(tasks));
     }
 }

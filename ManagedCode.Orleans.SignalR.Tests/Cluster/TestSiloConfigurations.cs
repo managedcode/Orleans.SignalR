@@ -1,7 +1,5 @@
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Server.Extensions;
-using ManagedCode.Orleans.SignalR.Tests;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Orleans.TestingHost;
 

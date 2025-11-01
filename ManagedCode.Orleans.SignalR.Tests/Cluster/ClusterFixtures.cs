@@ -1,4 +1,3 @@
-using System;
 using Orleans.TestingHost;
 using Xunit;
 

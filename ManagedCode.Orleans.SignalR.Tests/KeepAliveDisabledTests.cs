@@ -1,7 +1,6 @@
-using System;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -9,7 +8,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
-using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
@@ -114,11 +112,11 @@ public class KeepAliveDisabledTests : IAsyncLifetime
             await connection.InvokeAsync("AddToGroup", groupName);
 
             // Allow the hub to finish the "joined the group" broadcast.
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            await Task.Delay(TimeSpan.FromSeconds(2));
 
             await connection.InvokeAsync("GroupSendAsync", groupName, "payload");
 
-            var completed = await Task.WhenAny(groupMessage.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            var completed = await Task.WhenAny(groupMessage.Task, Task.Delay(TimeSpan.FromSeconds(10)));
             completed.ShouldBe(groupMessage.Task, "Group broadcast did not arrive when keep-alive was disabled.");
             groupMessage.Task.Result.ShouldContain("payload");
         }

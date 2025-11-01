@@ -140,7 +140,9 @@ public class HubSmokeTests
         while (DateTime.UtcNow - start < limit)
         {
             if (condition())
+            {
                 return;
+            }
 
             await Task.Delay(PollInterval);
         }
@@ -153,7 +155,9 @@ public class HubSmokeTests
         foreach (var connection in connections)
         {
             if (connection == null)
+            {
                 continue;
+            }
 
             try
             {
@@ -176,8 +180,7 @@ public class HubSmokeTests
         connection.On("SendAll", onMessage);
         connection.Closed += error =>
         {
-            if (output is not null)
-                output.WriteLine(error is null
+            output?.WriteLine(error is null
                     ? "Connection closed without error"
                     : $"Connection closed: {error.Message}\n{error}");
             return Task.CompletedTask;

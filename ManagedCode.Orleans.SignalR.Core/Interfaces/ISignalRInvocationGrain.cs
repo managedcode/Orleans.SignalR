@@ -13,9 +13,9 @@ public interface ISignalRInvocationGrain : IGrainWithStringKey, IObserverConnect
 
     Task<ReturnType> TryGetReturnType();
 
-    [OneWay]
-    Task AddInvocation(ISignalRObserver observer, InvocationInfo invocationInfo);
+    Task AddInvocation(ISignalRObserver? observer, InvocationInfo invocationInfo);
 
-    [OneWay]
     Task<InvocationInfo?> RemoveInvocation();
+
+    Task<CompletionMessage?> WaitForCompletion();
 }

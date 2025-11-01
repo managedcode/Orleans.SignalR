@@ -64,7 +64,9 @@ internal static class TypedClientBuilder<T>
         BuildFactoryMethod(type, ctor);
 
         foreach (var method in GetAllInterfaceMethods(typeof(T)))
+        {
             BuildMethod(type, method, proxyField);
+        }
 
         return type.CreateTypeInfo()!;
     }
@@ -72,11 +74,17 @@ internal static class TypedClientBuilder<T>
     private static IEnumerable<MethodInfo> GetAllInterfaceMethods(Type interfaceType)
     {
         foreach (var parent in interfaceType.GetInterfaces())
-        foreach (var parentMethod in GetAllInterfaceMethods(parent))
-            yield return parentMethod;
+        {
+            foreach (var parentMethod in GetAllInterfaceMethods(parent))
+            {
+                yield return parentMethod;
+            }
+        }
 
         foreach (var method in interfaceType.GetMethods())
+        {
             yield return method;
+        }
     }
 
     private static ConstructorInfo BuildConstructor(TypeBuilder type, FieldInfo proxyField)
@@ -112,14 +120,18 @@ internal static class TypedClientBuilder<T>
 
         MethodInfo invokeMethod;
         if (isInvoke)
+        {
             invokeMethod = typeof(ISingleClientProxy).GetMethod(nameof(ISingleClientProxy.InvokeCoreAsync),
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
                     new[] { typeof(string), typeof(object[]), typeof(CancellationToken) }, null)!
                 .MakeGenericMethod(returnType.GenericTypeArguments);
+        }
         else
+        {
             invokeMethod = typeof(IClientProxy).GetMethod(nameof(IClientProxy.SendCoreAsync),
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
                 new[] { typeof(string), typeof(object[]), typeof(CancellationToken) }, null)!;
+        }
 
         methodBuilder.SetReturnType(interfaceMethodInfo.ReturnType);
         methodBuilder.SetParameters(paramTypes);
@@ -128,13 +140,17 @@ internal static class TypedClientBuilder<T>
         var genericTypeNames = paramTypes.Where(p => p.IsGenericParameter).Select(p => p.Name).Distinct().ToArray();
 
         if (genericTypeNames.Length > 0)
+        {
             methodBuilder.DefineGenericParameters(genericTypeNames);
+        }
 
         // Check to see if the last parameter of the method is a CancellationToken
         var hasCancellationToken = paramTypes.LastOrDefault() == typeof(CancellationToken);
         if (hasCancellationToken)
+        {
             // remove CancellationToken from input paramTypes
             paramTypes = paramTypes.Take(paramTypes.Length - 1).ToArray();
+        }
 
         var methodName = interfaceMethodInfo.GetCustomAttribute<HubMethodNameAttribute>()?.Name ??
                          interfaceMethodInfo.Name;
@@ -194,11 +210,15 @@ internal static class TypedClientBuilder<T>
         generator.Emit(OpCodes.Ldloc_0);
 
         if (hasCancellationToken)
+        {
             // Get CancellationToken from input argument and put it on the stack
             generator.Emit(OpCodes.Ldarg, paramTypes.Length + 1);
+        }
         else
+        {
             // Get 'CancellationToken.None' and put it on the stack, for when method does not have CancellationToken
             generator.Emit(OpCodes.Call, CancellationTokenNoneProperty.GetMethod!);
+        }
 
         // Send!
         generator.Emit(OpCodes.Callvirt, invokeMethod);
@@ -221,36 +241,52 @@ internal static class TypedClientBuilder<T>
     private static void VerifyInterface(Type interfaceType)
     {
         if (!interfaceType.IsInterface)
+        {
             throw new InvalidOperationException("Type must be an interface.");
+        }
 
         if (interfaceType.GetProperties().Length != 0)
+        {
             throw new InvalidOperationException("Type must not contain properties.");
+        }
 
         if (interfaceType.GetEvents().Length != 0)
+        {
             throw new InvalidOperationException("Type must not contain events.");
+        }
 
         foreach (var method in interfaceType.GetMethods())
+        {
             VerifyMethod(method);
+        }
 
         foreach (var parent in interfaceType.GetInterfaces())
+        {
             VerifyInterface(parent);
+        }
     }
 
     private static void VerifyMethod(MethodInfo interfaceMethod)
     {
         if (!typeof(Task).IsAssignableFrom(interfaceMethod.ReturnType))
+        {
             throw new InvalidOperationException(
                 $"Cannot generate proxy implementation for '{typeof(T).FullName}.{interfaceMethod.Name}'. All client proxy methods must return '{typeof(Task).FullName}' or '{typeof(Task).FullName}<T>'.");
+        }
 
         foreach (var parameter in interfaceMethod.GetParameters())
         {
             if (parameter.IsOut)
+            {
                 throw new InvalidOperationException(
                     $"Cannot generate proxy implementation for '{typeof(T).FullName}.{interfaceMethod.Name}'. Client proxy methods must not have 'out' parameters.");
+            }
 
             if (parameter.ParameterType.IsByRef)
+            {
                 throw new InvalidOperationException(
                     $"Cannot generate proxy implementation for '{typeof(T).FullName}.{interfaceMethod.Name}'. Client proxy methods must not have 'ref' parameters.");
+            }
         }
     }
 }

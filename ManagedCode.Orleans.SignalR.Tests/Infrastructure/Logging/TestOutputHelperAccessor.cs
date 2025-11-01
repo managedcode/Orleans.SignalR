@@ -1,4 +1,3 @@
-using System.Threading;
 using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;

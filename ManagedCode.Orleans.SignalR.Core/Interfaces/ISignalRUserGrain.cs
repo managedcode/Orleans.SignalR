@@ -9,7 +9,7 @@ public interface ISignalRUserGrain : IGrainWithStringKey, IObserverConnectionMan
 {
     [OneWay]
     Task SendToUser(HubMessage message);
-    
+
     [OneWay]
     Task RequestMessage();
 }

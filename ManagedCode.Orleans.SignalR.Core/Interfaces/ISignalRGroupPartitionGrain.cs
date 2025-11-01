@@ -12,10 +12,10 @@ public interface ISignalRGroupPartitionGrain : IGrainWithIntegerKey, IObserverCo
 
     [OneWay]
     Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds);
-    
+
     [OneWay]
     Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer);
-    
+
     [OneWay]
     Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer);
 

@@ -9,10 +9,10 @@ public interface ISignalRConnectionCoordinatorGrain : IGrainWithStringKey
 {
     [ReadOnly]
     Task<int> GetPartitionCount();
-    
+
     [ReadOnly]
     Task<int> GetPartitionForConnection(string connectionId);
-    
+
     [OneWay]
     Task SendToAll(HubMessage message);
 

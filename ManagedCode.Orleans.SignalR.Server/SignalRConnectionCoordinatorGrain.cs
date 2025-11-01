@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -44,10 +45,22 @@ public class SignalRConnectionCoordinatorGrain(
     {
         return Task.FromResult(_currentPartitionCount);
     }
-    
+
     public Task<int> GetPartitionForConnection(string connectionId)
     {
+        var stopwatch = Stopwatch.StartNew();
         var partition = GetOrAssignPartition(connectionId);
+        stopwatch.Stop();
+
+        if (stopwatch.Elapsed > TimeSpan.FromMilliseconds(500))
+        {
+            _logger.LogWarning(
+                "GetPartitionForConnection for {ConnectionId} took {Elapsed} (tracked={Tracked})",
+                connectionId,
+                stopwatch.Elapsed,
+                _connectionPartitions.Count);
+        }
+
         return Task.FromResult(partition);
     }
 
@@ -58,6 +71,12 @@ public class SignalRConnectionCoordinatorGrain(
         {
             return;
         }
+
+        var distribution = _connectionPartitions
+            .GroupBy(static kvp => kvp.Value)
+            .Select(group => $"{group.Key}:{group.Count()}")
+            .ToArray();
+        _logger.LogInformation("Sending to all partitions {Distribution}", string.Join(",", distribution));
 
         var tasks = new List<Task>(partitions.Count);
         foreach (var partitionId in partitions)

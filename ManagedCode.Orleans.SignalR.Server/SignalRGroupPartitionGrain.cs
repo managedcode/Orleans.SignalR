@@ -167,10 +167,10 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
 
         if (_state.State.IsEmpty)
         {
-            return _state.ClearStateAsync();
+            return _state.ClearStateAsync(cancellationToken);
         }
 
-        return _state.WriteStateAsync();
+        return _state.WriteStateAsync(cancellationToken);
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)

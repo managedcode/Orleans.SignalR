@@ -5,25 +5,16 @@ namespace ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 
 [Immutable]
 [GenerateSerializer]
-public readonly struct InvocationMessageSurrogate
+public readonly struct InvocationMessageSurrogate(string? invocationId, string target, object?[] arguments, string[]? streamIds,
+    IDictionary<string, string>? headers)
 {
-    [Id(0)] public readonly string? InvocationId;
+    [Id(0)] public readonly string? InvocationId = invocationId;
 
-    [Id(1)] public readonly string Target;
+    [Id(1)] public readonly string Target = target;
 
-    [Id(2)] public readonly object?[] Arguments;
+    [Id(2)] public readonly object?[] Arguments = arguments;
 
-    [Id(3)] public readonly string[]? StreamIds;
+    [Id(3)] public readonly string[]? StreamIds = streamIds;
 
-    [Id(4)] public readonly IDictionary<string, string>? Headers;
-
-    public InvocationMessageSurrogate(string? invocationId, string target, object?[] arguments, string[]? streamIds,
-        IDictionary<string, string>? headers)
-    {
-        InvocationId = invocationId;
-        Target = target;
-        Arguments = arguments;
-        StreamIds = streamIds;
-        Headers = headers;
-    }
+    [Id(4)] public readonly IDictionary<string, string>? Headers = headers;
 }

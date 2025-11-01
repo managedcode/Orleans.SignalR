@@ -1,16 +1,13 @@
-using System.Diagnostics;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
 using ManagedCode.Orleans.SignalR.Core.Config;
-using ManagedCode.Orleans.SignalR.Tests;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 
 namespace ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -39,22 +36,24 @@ public class HttpHostProgram
             options.ClientTimeoutInterval = TestDefaults.ClientTimeout;
             options.KeepAliveInterval = TestDefaults.KeepAliveInterval;
         });
-        
-        
+
         if (builder.Environment.IsProduction())
+        {
             builder.Services.AddSignalR()
                 .AddOrleans();
+        }
         else
+        {
             builder.Services.AddSignalR(); //.AddStackExchangeRedis();
-        
-        
+        }
+
         builder.Services.AddSingleton<JwtSecurityTokenHandler>();
         builder.Services.AddAuthentication(options =>
         {
             options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
             options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
         });
-        
+
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(options =>
         {
             options.RequireHttpsMetadata = false;
@@ -74,7 +73,6 @@ public class HttpHostProgram
         {
             options.AddPolicy("RequireAuthenticatedUser", policy => { policy.RequireAuthenticatedUser(); });
         });
-
 
         var app = builder.Build();
 

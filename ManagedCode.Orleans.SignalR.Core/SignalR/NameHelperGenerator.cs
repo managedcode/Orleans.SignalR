@@ -1,18 +1,12 @@
-using System;
+using System.IO.Hashing;
 using System.Text;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Orleans;
-using System.IO.Hashing;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public static class NameHelperGenerator
 {
-    private static string ConnectionNamespace<TMessage>(string hub)
-    {
-        return $"{hub}.{typeof(TMessage).FullName}";
-    }
-
     public static ISignalRConnectionHolderGrain GetConnectionHolderGrain<THub>(IGrainFactory grainFactory)
     {
         return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(typeof(THub).FullName!));
@@ -22,12 +16,12 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRConnectionHolderGrain>(CleanString(hubKey));
     }
-    
+
     public static ISignalRConnectionCoordinatorGrain GetConnectionCoordinatorGrain<THub>(IGrainFactory grainFactory)
     {
         return grainFactory.GetGrain<ISignalRConnectionCoordinatorGrain>(CleanString(typeof(THub).FullName!));
     }
-    
+
     public static ISignalRConnectionPartitionGrain GetConnectionPartitionGrain<THub>(IGrainFactory grainFactory, int partitionId)
     {
         var key = GetPartitionGrainKey(typeof(THub).FullName!, partitionId, alreadyCleaned: false);
@@ -59,17 +53,17 @@ public static class NameHelperGenerator
     {
         return grainFactory.GetGrain<ISignalRGroupGrain>(CleanString(typeof(THub).FullName + "::" + groupId));
     }
-    
+
     public static ISignalRGroupCoordinatorGrain GetGroupCoordinatorGrain<THub>(IGrainFactory grainFactory)
     {
         return grainFactory.GetGrain<ISignalRGroupCoordinatorGrain>(CleanString(typeof(THub).FullName!));
     }
-    
+
     public static ISignalRGroupCoordinatorGrain GetGroupCoordinatorGrain(IGrainFactory grainFactory, string hubKey)
     {
         return grainFactory.GetGrain<ISignalRGroupCoordinatorGrain>(CleanString(hubKey));
     }
-    
+
     public static ISignalRGroupPartitionGrain GetGroupPartitionGrain<THub>(IGrainFactory grainFactory, int partitionId)
     {
         var key = GetPartitionGrainKey(typeof(THub).FullName!, partitionId, alreadyCleaned: false);
@@ -92,7 +86,7 @@ public static class NameHelperGenerator
     public static string CleanString(string input)
     {
         var builder = new StringBuilder();
-        foreach (char c in input)
+        foreach (var c in input)
         {
             if (char.IsLetterOrDigit(c) || c == '-' || c == ':' || c == '.')
             {
@@ -100,7 +94,7 @@ public static class NameHelperGenerator
             }
             else
             {
-                builder.Append(":");
+                builder.Append(':');
             }
         }
         return builder.ToString();

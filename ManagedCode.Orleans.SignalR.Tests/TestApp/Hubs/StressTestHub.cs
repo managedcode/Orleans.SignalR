@@ -63,7 +63,7 @@ public class StressTestHub : Hub
         return channel.Reader;
     }
 
-    private async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
+    private static async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
         CancellationToken cancellationToken)
     {
         Exception localException = null;
@@ -92,22 +92,30 @@ public class StressTestHub : Hub
     {
         await foreach (var item in stream)
         {
-            if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStream)))
-                TestWebApplication.StaticLogs[nameof(UploadStream)] = new ConcurrentQueue<string>();
+            if (!TestWebApplication.StaticLogs.TryGetValue(nameof(UploadStream), out var value))
+            {
+                value = new ConcurrentQueue<string>();
+                TestWebApplication.StaticLogs[nameof(UploadStream)] = value;
+            }
 
-            TestWebApplication.StaticLogs[nameof(UploadStream)].Enqueue(item);
+            value.Enqueue(item);
         }
     }
 
     public async Task UploadStreamChannelReader(ChannelReader<string> stream)
     {
         while (await stream.WaitToReadAsync())
-        while (stream.TryRead(out var item))
         {
-            if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStreamChannelReader)))
-                TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)] = new ConcurrentQueue<string>();
+            while (stream.TryRead(out var item))
+            {
+                if (!TestWebApplication.StaticLogs.TryGetValue(nameof(UploadStreamChannelReader), out var value))
+                {
+                    value = new ConcurrentQueue<string>();
+                    TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)] = value;
+                }
 
-            TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)].Enqueue(item);
+                value.Enqueue(item);
+            }
         }
     }
 
@@ -115,6 +123,11 @@ public class StressTestHub : Hub
     {
         await Clients.All.SendAsync("All", "test");
         return new Random().Next(1, 100);
+    }
+
+    public async Task BroadcastPayload(string payload)
+    {
+        await Clients.All.SendAsync("PerfBroadcast", payload);
     }
 
     public async Task<int> Connections(string[] connections)

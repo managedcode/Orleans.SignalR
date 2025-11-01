@@ -1,5 +1,3 @@
-using System;
-
 namespace ManagedCode.Orleans.SignalR.Tests;
 
 internal static class TestDefaults

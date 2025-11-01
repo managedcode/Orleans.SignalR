@@ -29,11 +29,11 @@ public static class OrleansDependencyInjectionExtensions
 
         return signalrBuilder;
     }
-    
+
     public static ISiloBuilder ConfigureOrleansSignalR(this ISiloBuilder siloBuilder)
     {
         var timeSpan = TimeSpan.FromMinutes(7);
-        
+
         void SetSpecificCollectionAge<T>(GrainCollectionOptions options)
         {
             var attribute = typeof(T).GetCustomAttribute<GrainTypeAttribute>();

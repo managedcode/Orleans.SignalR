@@ -37,7 +37,7 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
 
         _stateStorage.State ??= new ConnectionState();
     }
-    
+
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         Logs.AddConnection(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
@@ -65,8 +65,12 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
         Logs.SendToAllExcept(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), excludedConnectionIds);
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
+        {
             if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            {
                 hashSet.Add(observer);
+            }
+        }
 
         await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
             connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
@@ -75,9 +79,11 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
     public async Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
         Logs.SendToConnection(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
-        
+
         if (!_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+        {
             return false;
+        }
 
         await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
             connection => connection.GetPrimaryKeyString() == observer));
@@ -88,11 +94,15 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
     public async Task SendToConnections(HubMessage message, string[] connectionIds)
     {
         Logs.SendToConnections(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionIds);
-       
+
         var hashSet = new HashSet<string>();
         foreach (var connectionId in connectionIds)
+        {
             if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            {
                 hashSet.Add(observer);
+            }
+        }
 
         await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
             connection => hashSet.Contains(connection.GetPrimaryKeyString())));
@@ -104,15 +114,19 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
         _observerManager.Subscribe(observer, observer);
         return Task.CompletedTask;
     }
-    
+
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         Logs.OnDeactivateAsync(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
         _observerManager.ClearExpired();
-        
+
         if (_observerManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
-            await _stateStorage.ClearStateAsync();
+        {
+            await _stateStorage.ClearStateAsync(cancellationToken);
+        }
         else
-            await _stateStorage.WriteStateAsync();
+        {
+            await _stateStorage.WriteStateAsync(cancellationToken);
+        }
     }
 }

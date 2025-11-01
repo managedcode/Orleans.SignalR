@@ -16,7 +16,10 @@ public class SimpleTestHub : Hub
     public async Task<string> DoUser()
     {
         if (string.IsNullOrEmpty(Context.UserIdentifier))
+        {
             return "no";
+        }
+
         await Clients.User(Context.UserIdentifier).SendAsync("DoUser", Context.UserIdentifier);
         return Context.UserIdentifier;
     }
@@ -81,7 +84,7 @@ public class SimpleTestHub : Hub
         return channel.Reader;
     }
 
-    private async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
+    private static async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
         CancellationToken cancellationToken)
     {
         Exception localException = null;
@@ -110,22 +113,30 @@ public class SimpleTestHub : Hub
     {
         await foreach (var item in stream)
         {
-            if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStream)))
-                TestWebApplication.StaticLogs[nameof(UploadStream)] = new ConcurrentQueue<string>();
+            if (!TestWebApplication.StaticLogs.TryGetValue(nameof(UploadStream), out var value))
+            {
+                value = new ConcurrentQueue<string>();
+                TestWebApplication.StaticLogs[nameof(UploadStream)] = value;
+            }
 
-            TestWebApplication.StaticLogs[nameof(UploadStream)].Enqueue(item);
+            value.Enqueue(item);
         }
     }
 
     public async Task UploadStreamChannelReader(ChannelReader<string> stream)
     {
         while (await stream.WaitToReadAsync())
-        while (stream.TryRead(out var item))
         {
-            if (!TestWebApplication.StaticLogs.ContainsKey(nameof(UploadStreamChannelReader)))
-                TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)] = new ConcurrentQueue<string>();
+            while (stream.TryRead(out var item))
+            {
+                if (!TestWebApplication.StaticLogs.TryGetValue(nameof(UploadStreamChannelReader), out var value))
+                {
+                    value = new ConcurrentQueue<string>();
+                    TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)] = value;
+                }
 
-            TestWebApplication.StaticLogs[nameof(UploadStreamChannelReader)].Enqueue(item);
+                value.Enqueue(item);
+            }
         }
     }
 
@@ -133,6 +144,11 @@ public class SimpleTestHub : Hub
     {
         await Clients.All.SendAsync("SendAll", "test");
         return new Random().Next(1, 100);
+    }
+
+    public async Task BroadcastPayload(string payload)
+    {
+        await Clients.All.SendAsync("PerfBroadcast", payload);
     }
 
     public async Task<int> Connections(string[] connections)
@@ -168,7 +184,7 @@ public class SimpleTestHub : Hub
         await Task.Delay(200);
         return a + b;
     }
-    
+
     public async Task<string> WaitForMessage(string connectionId)
     {
         var message = await Clients.Client(connectionId).InvokeAsync<string>("GetMessage", CancellationToken.None);

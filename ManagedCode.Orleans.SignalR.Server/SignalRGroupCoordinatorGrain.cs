@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -34,7 +33,7 @@ public class SignalRGroupCoordinatorGrain(
         _basePartitionCount = Math.Max(1, options.Value.GroupPartitionCount);
         _currentPartitionCount = (int)_basePartitionCount;
         _hubKey = this.GetPrimaryKeyString();
-            
+
         logger.LogInformation("Group coordinator activated with base partition count {PartitionCount} and hint {GroupsPerPartition}", _basePartitionCount, _groupsPerPartitionHint);
         return base.OnActivateAsync(cancellationToken);
     }
@@ -43,7 +42,7 @@ public class SignalRGroupCoordinatorGrain(
     {
         return Task.FromResult(_currentPartitionCount);
     }
-    
+
     public Task<int> GetPartitionForGroup(string groupName)
     {
         var partition = GetOrAssignPartition(groupName);

@@ -1,7 +1,7 @@
-using System.Diagnostics;
 using System.Linq;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
@@ -15,87 +15,100 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 
 [Collection(nameof(LoadCluster))]
 [Trait("Category", "Load")]
-public class StressTests
+public class StressTests : IAsyncLifetime
 {
-    private const string StressGroup = "stress-group";
-    private const int StressConnectionCount = 211;
-    private const int BroadcastsPerConnection = 233;
-    private const int GroupWorkflowIterations = 29;
-    private static readonly TimeSpan WaitInterval = TimeSpan.FromMilliseconds(200);
-    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(1);
-
-    private readonly IReadOnlyList<TestWebApplication> _apps;
-    private readonly ITestOutputHelper _outputHelper;
-    private readonly LoadClusterFixture _siloCluster;
+    private readonly LoadClusterFixture _cluster;
+    private readonly ITestOutputHelper _output;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
+    private readonly PerformanceScenarioSettings _stressSettings = PerformanceScenarioSettings.CreateStress();
+    private readonly IList<TestWebApplication> _apps = new List<TestWebApplication>();
 
-    public StressTests(LoadClusterFixture testApp, ITestOutputHelper outputHelper)
+    public StressTests(LoadClusterFixture cluster, ITestOutputHelper output)
     {
-        _siloCluster = testApp;
-        _outputHelper = outputHelper;
-        _loggerAccessor.Output = outputHelper;
-        _apps = Enumerable.Range(0, 4)
-            .Select(index => new TestWebApplication(_siloCluster, 8081 + index, loggerAccessor: _loggerAccessor))
-            .ToArray();
+        _cluster = cluster;
+        _output = output;
+        _loggerAccessor.Output = output;
+    }
+
+    public Task InitializeAsync()
+    {
+        for (var index = 0; index < 4; index++)
+        {
+            _apps.Add(new TestWebApplication(_cluster, 20_000 + index, loggerAccessor: _loggerAccessor));
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        foreach (var app in _apps)
+        {
+            app.Dispose();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private PerformanceScenarioHarness CreateHarness() =>
+        new(_cluster, _output, _loggerAccessor, _stressSettings);
+
+    [Fact]
+    public async Task Stress_User_Roundtrip()
+    {
+        var harness = CreateHarness();
+        await harness.RunDeviceEchoAsync(useOrleans: true, basePort: 30_000);
     }
 
     [Fact]
-    public async Task InvokeAsyncSignalRTest()
+    public async Task Stress_Broadcast_Fanout()
     {
-        var expectedMessages = (long)StressConnectionCount * BroadcastsPerConnection;
+        var harness = CreateHarness();
+        await harness.RunBroadcastFanoutAsync(useOrleans: true, basePort: 31_000);
+    }
 
-        _outputHelper.WriteLine($"Creating {StressConnectionCount} connections for stress broadcast test.");
-        var connections = new List<HubConnection>(StressConnectionCount);
-        var observedMessages = 0L;
-        var completionSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    [Fact]
+    public async Task Stress_Group_Broadcast()
+    {
+        var harness = CreateHarness();
+        await harness.RunGroupScenarioAsync(useOrleans: true, basePort: 32_000);
+    }
 
-        async Task<HubConnection> CreateAsync(int connectionIndex)
-        {
-            return await CreateStressConnectionAsync(connectionIndex, () =>
-            {
-                var total = Interlocked.Increment(ref observedMessages);
-                if (total >= expectedMessages)
-                {
-                    completionSource.TrySetResult();
-                }
+    [Fact]
+    public async Task Stress_Streaming()
+    {
+        var harness = CreateHarness();
+        await harness.RunStreamingScenarioAsync(useOrleans: true, basePort: 33_000);
+    }
 
-                return total;
-            });
-        }
+    [Fact]
+    public async Task Stress_Invocation()
+    {
+        var harness = CreateHarness();
+        await harness.RunInvocationScenarioAsync(useOrleans: true, basePort: 34_000);
+    }
 
-        var connectionTasks = Enumerable.Range(0, StressConnectionCount)
-            .Select(CreateAsync)
-            .ToArray();
-        connections.AddRange(await Task.WhenAll(connectionTasks));
+    [Fact]
+    public async Task Stress_All_Scenarios()
+    {
+        var harness = CreateHarness();
+        var device = await harness.RunDeviceEchoAsync(true, 40_000);
+        var broadcast = await harness.RunBroadcastFanoutAsync(true, 41_000);
+        var group = await harness.RunGroupScenarioAsync(true, 42_000);
+        var stream = await harness.RunStreamingScenarioAsync(true, 43_000);
+        var invocation = await harness.RunInvocationScenarioAsync(true, 44_000);
 
-        var stopwatch = Stopwatch.StartNew();
-        var sendTasks = connections.Select(connection => Task.Run(async () =>
-        {
-            for (var iteration = 0; iteration < BroadcastsPerConnection; iteration++)
-            {
-                await connection.InvokeAsync<int>("All");
-            }
-        }));
-
-        await Task.WhenAll(sendTasks);
-
-        var finishedTask = await Task.WhenAny(completionSource.Task, Task.Delay(TimeSpan.FromSeconds(45)));
-        finishedTask.ShouldBe(completionSource.Task, $"Timed out delivering {expectedMessages:N0} broadcast messages; observed {Interlocked.Read(ref observedMessages):N0}.");
-
-        stopwatch.Stop();
-        _outputHelper.WriteLine($"Broadcast loop completed in {stopwatch.Elapsed}. Observed {Interlocked.Read(ref observedMessages):N0}/{expectedMessages:N0} messages.");
-
-        await DisposeConnectionsAsync(connections);
+        _output.WriteLine($"Stress cascade durations: device={device}, broadcast={broadcast}, group={group}, stream={stream}, invocation={invocation}.");
     }
 
     [Fact]
     public async Task InvokeAsyncAndOnTest()
     {
-        _outputHelper.WriteLine("Clearing previous activations for clean state.");
-        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0)
+        _output.WriteLine("Clearing previous activations for clean state.");
+        await _cluster.Cluster.Client.GetGrain<IManagementGrain>(0)
             .ForceActivationCollection(TimeSpan.Zero);
 
-        var management = _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0);
+        var management = _cluster.Cluster.Client.GetGrain<IManagementGrain>(0);
 
         async Task<GrainCounts> FetchCountsAsync()
         {
@@ -110,21 +123,22 @@ public class StressTests
         }
 
         var before = await FetchCountsAsync();
-        _outputHelper.WriteLine($"Initial grain counts: {before}");
+        _output.WriteLine($"Initial grain counts: {before}");
 
         var hubConnection = await CreateUserConnectionAsync("stress-user", _apps[0], nameof(SimpleTestHub));
         hubConnection.On("GetMessage", () => "connection1");
 
         await hubConnection.StartAsync();
         hubConnection.State.ShouldBe(HubConnectionState.Connected);
-        _outputHelper.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
+        _output.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
 
-        var workflowTasks = Enumerable.Range(0, GroupWorkflowIterations)
+        const int workflowIterations = 200;
+        var workflowTasks = Enumerable.Range(0, workflowIterations)
             .Select(async iteration =>
             {
                 await hubConnection.InvokeAsync<int>("DoTest");
-                await hubConnection.InvokeAsync("AddToGroup", StressGroup);
-                await hubConnection.InvokeAsync("GroupSendAsync", StressGroup, $"payload-{iteration}");
+                await hubConnection.InvokeAsync("AddToGroup", "stress-group");
+                await hubConnection.InvokeAsync("GroupSendAsync", "stress-group", $"payload-{iteration}");
             });
         await Task.WhenAll(workflowTasks);
 
@@ -134,19 +148,19 @@ public class StressTests
         during.ConnectionTotal.ShouldBeGreaterThan(0, "Connection grains should activate after stress activity.");
         during.GroupTotal.ShouldBeGreaterThan(0, "Group grains should activate after stress activity.");
         during.User.ShouldBeGreaterThanOrEqualTo(1, "User grain should activate after stress activity.");
-        _outputHelper.WriteLine($"Grain counts after activity: {during}");
+        _output.WriteLine($"Grain counts after activity: {during}");
 
         var randomResult = await hubConnection.InvokeAsync<int>("DoTest");
         randomResult.ShouldBeGreaterThan(0);
 
-        await hubConnection.InvokeAsync("AddToGroup", StressGroup);
+        await hubConnection.InvokeAsync("AddToGroup", "stress-group");
         await hubConnection.InvokeAsync("WaitForMessage", hubConnection.ConnectionId);
 
         await hubConnection.StopAsync();
         await hubConnection.DisposeAsync();
-        _outputHelper.WriteLine("Stress connection disposed.");
+        _output.WriteLine("Stress connection disposed.");
 
-        await _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0)
+        await _cluster.Cluster.Client.GetGrain<IManagementGrain>(0)
             .ForceActivationCollection(TimeSpan.Zero);
 
         var deactivationObserved = await WaitUntilAsync(
@@ -167,87 +181,27 @@ public class StressTests
         deactivationObserved.ShouldBeTrue("Stress grains did not deactivate as expected.");
 
         var after = await FetchCountsAsync();
-        _outputHelper.WriteLine($"Final grain counts: {after}");
-    }
-
-    private async Task<HubConnection> CreateStressConnectionAsync(int index, Func<long> onBroadcastReceived)
-    {
-        var useUser = Random.Shared.NextDouble() < 0.5;
-        var app = _apps[Random.Shared.Next(_apps.Count)];
-        HubConnection connection;
-        string? userId = null;
-
-        if (useUser)
-        {
-            userId = $"stress-user-{index}";
-            connection = await CreateUserConnectionAsync(userId, app, nameof(StressTestHub));
-        }
-        else
-        {
-            connection = app.CreateSignalRClient(nameof(StressTestHub));
-        }
-
-        connection.On("All", (string _) =>
-        {
-            var total = onBroadcastReceived();
-            if (total % 10_000 == 0)
-            {
-                _outputHelper.WriteLine($"Received {total} broadcast messages so far.");
-            }
-        });
-
-        connection.Closed += error =>
-        {
-            var reason = error is null ? "closed" : $"closed with error: {error.Message}";
-            _outputHelper.WriteLine($"[stress#{index}] {reason} (ConnectionId={connection.ConnectionId ?? "n/a"}, user={userId ?? "anonymous"}).");
-            return Task.CompletedTask;
-        };
-
-        await connection.StartAsync();
-        connection.State.ShouldBe(HubConnectionState.Connected);
-        _outputHelper.WriteLine($"[stress#{index}] connected (ConnectionId={connection.ConnectionId}, user={userId ?? "anonymous"}).");
-
-        if (Random.Shared.NextDouble() < 0.35)
-        {
-            await connection.InvokeAsync("AddToGroup", StressGroup);
-            _outputHelper.WriteLine($"[stress#{index}] joined group {StressGroup}.");
-        }
-
-        return connection;
+        _output.WriteLine($"Final grain counts: {after}");
     }
 
     private async Task<HubConnection> CreateUserConnectionAsync(string user, TestWebApplication app, string hub)
     {
         var client = app.CreateHttpClient();
-        var response = await client.GetAsync("/auth?user=" + user);
-        response.EnsureSuccessStatusCode();
-        var token = await response.Content.ReadAsStringAsync();
-
-        var hubConnection = app.CreateSignalRClient(
-            hub,
-            configureConnection: options => options.AccessTokenProvider = () => Task.FromResult<string?>(token));
-
-        return hubConnection;
-    }
-
-    private async Task DisposeConnectionsAsync(IEnumerable<HubConnection> connections)
-    {
-        var list = connections.ToList();
-        _outputHelper.WriteLine($"Disposing {list.Count} stress connections...");
-        foreach (var connection in list)
+        try
         {
-            try
-            {
-                await connection.StopAsync();
-            }
-            catch (Exception ex)
-            {
-                _outputHelper.WriteLine($"Failed to stop {connection.ConnectionId}: {ex.Message}");
-            }
-            finally
-            {
-                await connection.DisposeAsync();
-            }
+            var response = await client.GetAsync("/auth?user=" + user);
+            response.EnsureSuccessStatusCode();
+            var token = await response.Content.ReadAsStringAsync();
+
+            var hubConnection = app.CreateSignalRClient(
+                hub,
+                configureConnection: options => options.AccessTokenProvider = () => Task.FromResult<string?>(token));
+
+            return hubConnection;
+        }
+        finally
+        {
+            client.Dispose();
         }
     }
 
@@ -260,38 +214,39 @@ public class StressTests
         var limit = timeout ?? TimeSpan.FromSeconds(20);
         var start = DateTime.UtcNow;
         var lastLog = TimeSpan.Zero;
+        var logInterval = TimeSpan.FromSeconds(1);
 
         while (DateTime.UtcNow - start < limit)
         {
             if (await condition())
             {
-                _outputHelper.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                _output.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
                 return true;
             }
 
             var elapsed = DateTime.UtcNow - start;
-            if (elapsed - lastLog >= LogInterval)
+            if (elapsed - lastLog >= logInterval)
             {
                 if (progress is not null)
                 {
                     var status = await progress();
-                    _outputHelper.WriteLine($"Waiting for {description}... elapsed {elapsed:c}. Status: {status}");
+                    _output.WriteLine($"Waiting for {description}... elapsed {elapsed:c}. Status: {status}");
                 }
                 else
                 {
-                    _outputHelper.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");
+                    _output.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");
                 }
 
                 lastLog = elapsed;
             }
 
-            await Task.Delay(WaitInterval);
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
         }
 
         if (progress is not null)
         {
             var status = await progress();
-            _outputHelper.WriteLine($"Final status for '{description}': {status}");
+            _output.WriteLine($"Final status for '{description}': {status}");
         }
 
         return await condition();

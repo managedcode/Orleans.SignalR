@@ -1,6 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -16,7 +15,9 @@ public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBa
     public async Task<ActionResult<string>> OkAction([FromQuery] string? user = null)
     {
         if (string.IsNullOrEmpty(user))
+        {
             user = Guid.NewGuid().ToString("N");
+        }
 
         var claims = new ClaimsIdentity(new[]
         {
@@ -24,10 +25,9 @@ public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBa
             new Claim(ClaimTypes.Email, user),
             new Claim(ClaimTypes.NameIdentifier, user)
         });
-        
-        
+
         SignIn(new ClaimsPrincipal(claims));
-        
+
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = claims,
@@ -37,7 +37,7 @@ public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBa
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(HttpHostProgram.GetEncryptionKey()), SecurityAlgorithms.HmacSha256Signature)
         };
         var token = tokenHandler.CreateToken(tokenDescriptor);
-        
+
         return tokenHandler.WriteToken(token);
     }
 }

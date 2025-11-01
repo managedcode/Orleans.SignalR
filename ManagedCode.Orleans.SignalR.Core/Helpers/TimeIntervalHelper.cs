@@ -13,7 +13,9 @@ public static class TimeIntervalHelper
         var timeSpan = orleansSignalOptions.Value.ClientTimeoutInterval;
 
         if (hubOptions.Value.ClientTimeoutInterval.HasValue && timeSpan > hubOptions.Value.ClientTimeoutInterval)
+        {
             timeSpan = hubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         return timeSpan;
     }
@@ -25,14 +27,17 @@ public static class TimeIntervalHelper
 
         if (globalHubOptions.Value.ClientTimeoutInterval.HasValue &&
             timeSpan > globalHubOptions.Value.ClientTimeoutInterval)
+        {
             timeSpan = globalHubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         if (hubOptions.Value.ClientTimeoutInterval.HasValue && timeSpan > hubOptions.Value.ClientTimeoutInterval)
+        {
             timeSpan = hubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         return timeSpan;
     }
-
 
     public static TimeSpan GetClientTimeoutInterval(IOptions<HubOptions> globalHubOptions,
         IOptions<HubOptions> hubOptions)
@@ -41,10 +46,14 @@ public static class TimeIntervalHelper
 
         if (globalHubOptions.Value.ClientTimeoutInterval.HasValue &&
             timeSpan > globalHubOptions.Value.ClientTimeoutInterval)
+        {
             timeSpan = globalHubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         if (hubOptions.Value.ClientTimeoutInterval.HasValue && timeSpan > hubOptions.Value.ClientTimeoutInterval)
+        {
             timeSpan = hubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         return timeSpan;
     }
@@ -54,14 +63,18 @@ public static class TimeIntervalHelper
         var timeSpan = TimeSpan.FromSeconds(15);
 
         if (globalHubOptions.Value.ClientTimeoutInterval.HasValue)
+        {
             timeSpan = globalHubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         if (hubOptions.Value.ClientTimeoutInterval.HasValue)
+        {
             timeSpan = hubOptions.Value.ClientTimeoutInterval.Value;
+        }
 
         return timeSpan;
     }
-    
+
     public static TimeSpan AddExpirationIntervalBuffer(TimeSpan timeSpan)
     {
         return timeSpan * 1.2;

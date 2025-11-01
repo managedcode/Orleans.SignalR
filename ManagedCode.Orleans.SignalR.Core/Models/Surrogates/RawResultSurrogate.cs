@@ -4,12 +4,7 @@ namespace ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 
 [Immutable]
 [GenerateSerializer]
-public readonly struct RawResultSurrogate
+public readonly struct RawResultSurrogate(byte[] rawSerializedData)
 {
-    [Id(0)] public readonly byte[] RawSerializedData;
-
-    public RawResultSurrogate(byte[] rawSerializedData)
-    {
-        RawSerializedData = rawSerializedData;
-    }
+    [Id(0)] public readonly byte[] RawSerializedData = rawSerializedData;
 }

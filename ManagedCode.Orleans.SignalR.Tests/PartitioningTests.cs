@@ -1,23 +1,14 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Shouldly;
 using ManagedCode.Orleans.SignalR.Core.Config;
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using Orleans;
-using Orleans.TestingHost;
+using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
-using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
@@ -59,7 +50,7 @@ public class PartitioningTests
 
         // Act - Send a message (uses partitioned coordinator by default)
         var result = await connection.InvokeAsync<int>("All");
-        
+
         // Assert
         result.ShouldBeGreaterThan(0);
 
@@ -112,15 +103,16 @@ public class PartitioningTests
     public async Task Partitioned_SendToAll_Should_Reach_All_Connections()
     {
         // Arrange
-        const int connectionsPerApp = 8;
+        const int connectionsPerApp = 100;
         var totalConnections = connectionsPerApp * _apps.Count;
         var connections = new HubConnection[totalConnections];
         var connectionLabels = new string[totalConnections];
         var receivedMessages = new TaskCompletionSource<string>[totalConnections];
+        var startedPerApp = new int[_apps.Count];
 
         try
         {
-            for (int i = 0; i < totalConnections; i++)
+            for (var i = 0; i < totalConnections; i++)
             {
                 var appIndex = i % _apps.Count;
                 var app = _apps[appIndex];
@@ -136,8 +128,13 @@ public class PartitioningTests
                     receivedMessages[index].TrySetResult(message);
                 });
                 await connections[i].StartAsync();
-                _testOutputHelper.WriteLine($"[{label}] started with id {connections[i].ConnectionId}.");
+                startedPerApp[appIndex]++;
             }
+
+            var startSummary = string.Join(", ",
+                startedPerApp.Select((count, index) => $"app#{index}:{count}"));
+            _testOutputHelper.WriteLine(
+                $"Started {totalConnections} connections across {_apps.Count} apps ({startSummary}).");
 
             // Act
             await connections[0].InvokeAsync("All");
@@ -212,19 +209,23 @@ public class PartitioningTests
         var received1 = new TaskCompletionSource<bool>();
         var received2 = new TaskCompletionSource<bool>();
 
-        connection1.On<string>("SendAll", msg => 
+        connection1.On<string>("SendAll", msg =>
         {
             messages1.Add(msg);
             if (msg.Contains("send message:"))
+            {
                 received1.TrySetResult(true);
+            }
         });
-        connection2.On<string>("SendAll", msg => 
+        connection2.On<string>("SendAll", msg =>
         {
             messages2.Add(msg);
             if (msg.Contains("send message:"))
+            {
                 received2.TrySetResult(true);
+            }
         });
-        connection3.On<string>("SendAll", msg => messages3.Add(msg));
+        connection3.On<string>("SendAll", messages3.Add);
 
         await connection1.StartAsync();
         _testOutputHelper.WriteLine($"[group] app#0 started connection {connection1.ConnectionId}.");
@@ -245,14 +246,14 @@ public class PartitioningTests
 
         // Assert
         await Task.WhenAny(Task.WhenAll(received1.Task, received2.Task), Task.Delay(2000));
-        
+
         received1.Task.IsCompletedSuccessfully.ShouldBeTrue();
         received2.Task.IsCompletedSuccessfully.ShouldBeTrue();
-        
+
         // Check that connection1 and connection2 received the group message
         messages1.ShouldContain(msg => msg.EndsWith("send message: Group message."));
         messages2.ShouldContain(msg => msg.EndsWith("send message: Group message."));
-        
+
         // Connection3 should not receive any group messages
         messages3.ShouldNotContain(msg => msg.Contains("send message:") || msg.Contains("has joined"));
 

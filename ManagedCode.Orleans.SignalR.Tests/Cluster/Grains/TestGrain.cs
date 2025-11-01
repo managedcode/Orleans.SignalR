@@ -7,17 +7,11 @@ using Orleans.Concurrency;
 namespace ManagedCode.Orleans.SignalR.Tests.Cluster.Grains;
 
 [Reentrant]
-public class TestGrain : Grain, ITestGrain
+public class TestGrain(IHubContext<InterfaceTestHub> hubContext,
+    IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> orleansHubContext) : Grain, ITestGrain
 {
-    private readonly IHubContext<InterfaceTestHub> _hubContext;
-    private readonly IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> _orleansHubContext;
-
-    public TestGrain(IHubContext<InterfaceTestHub> hubContext,
-        IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> orleansHubContext)
-    {
-        _hubContext = hubContext;
-        _orleansHubContext = orleansHubContext;
-    }
+    private readonly IHubContext<InterfaceTestHub> _hubContext = hubContext;
+    private readonly IOrleansHubContext<InterfaceTestHub, IClientInterfaceHub> _orleansHubContext = orleansHubContext;
 
     public Task PushRandom()
     {
@@ -39,7 +33,7 @@ public class TestGrain : Grain, ITestGrain
     {
         return _orleansHubContext.Clients.Client(connectionId).GetMessage();
     }
-    
+
     public Task SendToUser(string userName, string message)
     {
         return _hubContext.Clients.User(userName).SendAsync("SendMessage", message);

@@ -1,15 +1,13 @@
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Shouldly;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
+using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
-using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
@@ -121,7 +119,9 @@ public class InterfaceHubTests
         foreach (var connection in connections)
         {
             if (connection is null)
+            {
                 continue;
+            }
 
             try
             {
@@ -189,7 +189,6 @@ public class InterfaceHubTests
         await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection4.ConnectionId));
         _outputHelper.WriteLine("msg4-thorw");
 
-
         _outputHelper.WriteLine("stopping...");
         await connection1.StopAsync();
         await connection2.StopAsync();
@@ -224,7 +223,6 @@ public class InterfaceHubTests
             msg2.ShouldBe("connection2");
         }
 
-
         await Task.Delay(resilienceDelay);
 
         for (var i = 0; i < 4; i++)
@@ -241,7 +239,6 @@ public class InterfaceHubTests
             msg2.ShouldBe("connection2");
         }
 
-
         await connection1.StopAsync();
         await connection2.StopAsync();
     }
@@ -256,10 +253,10 @@ public class InterfaceHubTests
         var connection2 = await CreateHubConnection(_secondApp);
 
         connection1.On<int>("SendRandom", random => messages1.Add(random.ToString()));
-        connection1.On<string>("SendMessage", messages => messages1.Add(messages));
+        connection1.On<string>("SendMessage", messages1.Add);
 
         connection2.On<int>("SendRandom", random => messages2.Add(random.ToString()));
-        connection2.On<string>("SendMessage", messages => messages2.Add(messages));
+        connection2.On<string>("SendMessage", messages2.Add);
 
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
 

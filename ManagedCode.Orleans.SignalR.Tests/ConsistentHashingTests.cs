@@ -1,19 +1,12 @@
-using System.Collections.Generic;
-using System.Linq;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-public class ConsistentHashingTests
+public class ConsistentHashingTests(ITestOutputHelper output)
 {
-    private readonly ITestOutputHelper _output;
-
-    public ConsistentHashingTests(ITestOutputHelper output)
-    {
-        _output = output;
-    }
+    private readonly ITestOutputHelper _output = output;
 
     [Fact]
     public void ConsistentHashRing_Should_Distribute_Connections_Evenly()
@@ -104,7 +97,7 @@ public class ConsistentHashingTests
         const int initialPartitions = 4;
         const int newPartitions = 5;
         const int connectionCount = 10000;
-        
+
         var connections = Enumerable.Range(0, connectionCount)
             .Select(i => $"connection_{i}")
             .ToList();
@@ -113,8 +106,8 @@ public class ConsistentHashingTests
         var ring2 = new ConsistentHashRing(newPartitions);
 
         // Act
-        var mapping1 = connections.ToDictionary(c => c, c => ring1.GetPartition(c));
-        var mapping2 = connections.ToDictionary(c => c, c => ring2.GetPartition(c));
+        var mapping1 = connections.ToDictionary(c => c, ring1.GetPartition);
+        var mapping2 = connections.ToDictionary(c => c, ring2.GetPartition);
 
         // Count how many connections changed partitions
         var remappedCount = connections.Count(c => mapping1[c] != mapping2[c]);
@@ -125,7 +118,7 @@ public class ConsistentHashingTests
         var expectedRemappedPercentage = 100.0 / newPartitions;
         _output.WriteLine($"Remapped: {remappedCount}/{connectionCount} ({remappedPercentage:F2}%)");
         _output.WriteLine($"Expected: ~{expectedRemappedPercentage:F2}%");
-        
+
         // Allow some tolerance
         Assert.InRange(remappedPercentage, expectedRemappedPercentage - 10, expectedRemappedPercentage + 10);
     }

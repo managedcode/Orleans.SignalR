@@ -1,5 +1,4 @@
 using ManagedCode.Orleans.SignalR.Client.Extensions;
-using ManagedCode.Orleans.SignalR.Core.Config;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Orleans.TestingHost;

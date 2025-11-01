@@ -21,6 +21,6 @@ public class SignalRObserver(Func<HubMessage, Task> onNextAction) : ISignalRObse
             await _onNextAction.Invoke(message);
         }
     }
-    
+
     public bool IsExist => _onNextAction != null;
 }

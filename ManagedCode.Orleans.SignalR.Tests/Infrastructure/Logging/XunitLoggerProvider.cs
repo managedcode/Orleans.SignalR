@@ -1,6 +1,4 @@
-using System;
 using Microsoft.Extensions.Logging;
-using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 

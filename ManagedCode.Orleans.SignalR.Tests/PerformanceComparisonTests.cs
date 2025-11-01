@@ -1,13 +1,6 @@
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
-using ManagedCode.Orleans.SignalR.Tests.TestApp;
-using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
-using Microsoft.AspNetCore.SignalR.Client;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -17,328 +10,72 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 [Collection(nameof(LoadCluster))]
 public class PerformanceComparisonTests
 {
-    private const int BroadcastConnectionCount = 211;
-    private const int BroadcastMessageCount = 1_001;
-
-    private const int GroupConnectionCount = 127;
-    private const int GroupCount = 113;
-    private const int GroupMessagesPerGroup = 257;
-
-    private readonly LoadClusterFixture _cluster;
+    private readonly PerformanceScenarioHarness _harness;
+    private readonly PerformanceScenarioSettings _settings;
     private readonly ITestOutputHelper _output;
-    private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     public PerformanceComparisonTests(LoadClusterFixture cluster, ITestOutputHelper output)
     {
-        _cluster = cluster;
+        var loggerAccessor = new TestOutputHelperAccessor { Output = output };
         _output = output;
-        _loggerAccessor.Output = output;
+        _harness = new PerformanceScenarioHarness(cluster, output, loggerAccessor, PerformanceScenarioSettings.CreatePerformance());
+        _settings = _harness.Settings;
     }
 
     [Fact]
-    public async Task Broadcast_Performance_Comparison()
+    public async Task Device_Echo_Performance_Comparison()
     {
-        var orleans = await RunBroadcastScenarioAsync(useOrleans: true, basePort: 9400);
-        var inMemory = await RunBroadcastScenarioAsync(useOrleans: false, basePort: 9500);
+        var orleans = await _harness.RunDeviceEchoAsync(useOrleans: true, basePort: 9400);
+        var inMemory = await _harness.RunDeviceEchoAsync(useOrleans: false, basePort: 9500);
 
-        _output.WriteLine(
-            $"Broadcast comparison ({BroadcastConnectionCount} connections, {BroadcastMessageCount} broadcasts) => Orleans: {orleans.TotalMilliseconds:F0} ms, In-Memory: {inMemory.TotalMilliseconds:F0} ms");
-
-        orleans.ShouldNotBe(TimeSpan.Zero);
-        inMemory.ShouldNotBe(TimeSpan.Zero);
+        AssertValidDurations("Device echo", orleans, inMemory);
     }
 
     [Fact]
-    public async Task Group_Performance_Comparison()
+    public async Task Broadcast_Fanout_Performance_Comparison()
     {
-        var orleans = await RunGroupScenarioAsync(useOrleans: true, basePort: 9600);
-        var inMemory = await RunGroupScenarioAsync(useOrleans: false, basePort: 9700);
+        var orleans = await _harness.RunBroadcastFanoutAsync(useOrleans: true, basePort: 9600);
+        var inMemory = await _harness.RunBroadcastFanoutAsync(useOrleans: false, basePort: 9700);
+
+        AssertValidDurations("Broadcast", orleans, inMemory);
+    }
+
+    [Fact]
+    public async Task Group_Broadcast_Performance_Comparison()
+    {
+        var orleans = await _harness.RunGroupScenarioAsync(useOrleans: true, basePort: 9800);
+        var inMemory = await _harness.RunGroupScenarioAsync(useOrleans: false, basePort: 9900);
+
+        AssertValidDurations("Group", orleans, inMemory);
+    }
+
+    [Fact]
+    public async Task Streaming_Performance_Comparison()
+    {
+        var orleans = await _harness.RunStreamingScenarioAsync(useOrleans: true, basePort: 10_000);
+        var inMemory = await _harness.RunStreamingScenarioAsync(useOrleans: false, basePort: 10_100);
+
+        AssertValidDurations("Streaming", orleans, inMemory);
+    }
+
+    [Fact]
+    public async Task Invocation_Performance_Comparison()
+    {
+        var orleans = await _harness.RunInvocationScenarioAsync(useOrleans: true, basePort: 10_200);
+        var inMemory = await _harness.RunInvocationScenarioAsync(useOrleans: false, basePort: 10_300);
+
+        AssertValidDurations("Invocation", orleans, inMemory);
+    }
+
+    private void AssertValidDurations(string scenario, TimeSpan orleans, TimeSpan inMemory)
+    {
+        orleans.ShouldBeGreaterThan(TimeSpan.Zero, $"{scenario} Orleans run should have a non-zero duration.");
+        inMemory.ShouldBeGreaterThan(TimeSpan.Zero, $"{scenario} in-memory run should have a non-zero duration.");
+
+        var delta = orleans - inMemory;
+        var ratio = inMemory.TotalMilliseconds == 0 ? double.PositiveInfinity : orleans.TotalMilliseconds / inMemory.TotalMilliseconds;
 
         _output.WriteLine(
-            $"Group comparison ({GroupConnectionCount} connections, {GroupCount} groups, {GroupMessagesPerGroup} messages/group) => Orleans: {orleans.TotalMilliseconds:F0} ms, In-Memory: {inMemory.TotalMilliseconds:F0} ms");
-
-        orleans.ShouldNotBe(TimeSpan.Zero);
-        inMemory.ShouldNotBe(TimeSpan.Zero);
-    }
-
-    private async Task<TimeSpan> RunBroadcastScenarioAsync(bool useOrleans, int basePort)
-    {
-        var apps = CreateApplications(basePort, useOrleans);
-        var (connections, perAppCounts, _) = await CreateConnectionsAsync(apps, BroadcastConnectionCount);
-
-        try
-        {
-            long received = 0;
-            var totalConnections = connections.Count;
-            long expected;
-            if (useOrleans)
-            {
-                expected = BroadcastMessageCount * (long)totalConnections * totalConnections;
-            }
-            else
-            {
-                expected = BroadcastMessageCount * perAppCounts.Sum(count => (long)count * count);
-            }
-
-            foreach (var connection in connections)
-            {
-                connection.On<string>("SendAll", _ => Interlocked.Increment(ref received));
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250));
-
-            var starting = Interlocked.Read(ref received);
-            var stopwatch = Stopwatch.StartNew();
-            _output.WriteLine($"Broadcast run ({BroadcastConnectionCount} connections × {BroadcastMessageCount:N0} messages).");
-
-            var sendTasks = connections.Select(connection => Task.Run(async () =>
-            {
-                for (var iteration = 0; iteration < BroadcastMessageCount; iteration++)
-                {
-                    await connection.InvokeAsync<int>("All");
-                }
-            }));
-            await Task.WhenAll(sendTasks);
-
-            var progressStep = Math.Max(10_000, expected / 20);
-            var lastReported = 0L;
-
-            var completed = await WaitUntilAsync(
-                () => Interlocked.Read(ref received) - starting >= expected,
-                timeout: TimeSpan.FromMinutes(2),
-                _output,
-                () =>
-                {
-                    var delivered = Interlocked.Read(ref received) - starting;
-                    if (delivered - lastReported >= progressStep || delivered == expected)
-                    {
-                        lastReported = delivered;
-                        return $"{delivered:N0}/{expected:N0}";
-                    }
-
-                    return null;
-                });
-
-            stopwatch.Stop();
-
-            var delivered = Interlocked.Read(ref received) - starting;
-            if (!completed)
-            {
-                _output.WriteLine($"Broadcast scenario timed out with {delivered:N0}/{expected:N0} messages delivered.");
-            }
-
-            delivered.ShouldBe(expected, $"Expected all broadcasts to reach listeners (delivered {delivered:N0}/{expected:N0}).");
-            var throughput = delivered / Math.Max(1, stopwatch.Elapsed.TotalSeconds);
-            _output.WriteLine($"Broadcast delivered {delivered:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} msg/s.");
-
-            return stopwatch.Elapsed;
-        }
-        finally
-        {
-            await DisposeAsync(connections);
-            DisposeApplications(apps);
-        }
-    }
-
-    private async Task<TimeSpan> RunGroupScenarioAsync(bool useOrleans, int basePort)
-    {
-        var apps = CreateApplications(basePort, useOrleans);
-        var (connections, _, connectionAppIndices) = await CreateConnectionsAsync(apps, GroupConnectionCount);
-
-        try
-        {
-            var groupNames = Enumerable.Range(0, GroupCount).Select(i => $"perf-group-{i}").ToArray();
-            var groupMembers = groupNames.ToDictionary(name => name, _ => new List<HubConnection>());
-
-            long received = 0;
-
-            var subscriptionTasks = new List<Task>(connections.Count);
-
-            for (var index = 0; index < connections.Count; index++)
-            {
-                var connection = connections[index];
-                var groupName = groupNames[index % groupNames.Length];
-                groupMembers[groupName].Add(connection);
-                connection.On<string>("SendAll", _ => Interlocked.Increment(ref received));
-                subscriptionTasks.Add(connection.InvokeAsync("AddToGroup", groupName));
-            }
-
-            await Task.WhenAll(subscriptionTasks);
-
-            var activeGroups = groupMembers.Where(kvp => kvp.Value.Count > 0).ToArray();
-            var appIndexByConnection = connections
-                .Select((connection, idx) => (connection, idx))
-                .ToDictionary(tuple => tuple.connection, tuple => connectionAppIndices[tuple.idx]);
-
-            long expected;
-            if (useOrleans)
-            {
-                expected = activeGroups.Sum(kvp => (long)kvp.Value.Count * kvp.Value.Count) * GroupMessagesPerGroup;
-            }
-            else
-            {
-                expected = activeGroups.Sum(kvp =>
-                {
-                    var members = kvp.Value;
-                    return members.Sum(sender =>
-                    {
-                        var senderApp = appIndexByConnection[sender];
-                        var recipients = members.Count(connection => appIndexByConnection[connection] == senderApp);
-                        return (long)recipients;
-                    }) * GroupMessagesPerGroup;
-                });
-            }
-            expected.ShouldBeGreaterThan(0, "At least one connection must belong to a group.");
-
-            await Task.Delay(TimeSpan.FromMilliseconds(250));
-
-            var starting = Interlocked.Read(ref received);
-            var stopwatch = Stopwatch.StartNew();
-            _output.WriteLine($"Group run ({GroupConnectionCount} connections across {activeGroups.Length} active groups × {GroupMessagesPerGroup:N0} messages).");
-
-            var sendTasks = activeGroups.Select(tuple => Task.Run(async () =>
-            {
-                var (group, members) = tuple;
-                var perSender = members.Select(sender => Task.Run(async () =>
-                {
-                    for (var message = 0; message < GroupMessagesPerGroup; message++)
-                    {
-                        await sender.InvokeAsync("GroupSendAsync", group, $"payload-{message}");
-                    }
-                }));
-                await Task.WhenAll(perSender);
-            }));
-            await Task.WhenAll(sendTasks);
-
-            var progressStep = Math.Max(10_000, expected / 20);
-            var lastReported = 0L;
-
-            var completed = await WaitUntilAsync(
-                () => Interlocked.Read(ref received) - starting >= expected,
-                timeout: TimeSpan.FromMinutes(2),
-                _output,
-                () =>
-                {
-                    var delivered = Interlocked.Read(ref received) - starting;
-                    if (delivered - lastReported >= progressStep || delivered == expected)
-                    {
-                        lastReported = delivered;
-                        return $"{delivered:N0}/{expected:N0}";
-                    }
-
-                    return null;
-                });
-
-            stopwatch.Stop();
-
-            var delivered = Interlocked.Read(ref received) - starting;
-            if (!completed)
-            {
-                _output.WriteLine($"Group scenario timed out with {delivered:N0}/{expected:N0} messages delivered.");
-            }
-
-            delivered.ShouldBe(expected, $"Expected all group messages to reach listeners (delivered {delivered:N0}/{expected:N0}).");
-            var throughput = delivered / Math.Max(1, stopwatch.Elapsed.TotalSeconds);
-            _output.WriteLine($"Group broadcast delivered {delivered:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} msg/s.");
-
-            return stopwatch.Elapsed;
-        }
-        finally
-        {
-            await DisposeAsync(connections);
-            DisposeApplications(apps);
-        }
-    }
-
-    private List<TestWebApplication> CreateApplications(int basePort, bool useOrleans)
-    {
-        var apps = new List<TestWebApplication>(4);
-        for (var i = 0; i < 4; i++)
-        {
-            var app = new TestWebApplication(_cluster, basePort + i, useOrleans, _loggerAccessor);
-            apps.Add(app);
-        }
-
-        return apps;
-    }
-
-    private static async Task<(List<HubConnection> Connections, int[] PerAppCounts, int[] ConnectionAppIndices)> CreateConnectionsAsync(
-        IReadOnlyList<TestWebApplication> apps,
-        int count)
-    {
-        var connections = new List<HubConnection>(count);
-        var perAppCounts = new int[apps.Count];
-        var connectionAppIndices = new int[count];
-
-        for (var index = 0; index < count; index++)
-        {
-            var appIndex = index % apps.Count;
-            var app = apps[appIndex];
-            var connection = app.CreateSignalRClient(nameof(SimpleTestHub));
-            await connection.StartAsync();
-            connections.Add(connection);
-            perAppCounts[appIndex]++;
-            connectionAppIndices[index] = appIndex;
-        }
-
-        return (connections, perAppCounts, connectionAppIndices);
-    }
-
-    private static async Task DisposeAsync(IEnumerable<HubConnection> connections)
-    {
-        foreach (var connection in connections)
-        {
-            try
-            {
-                await connection.StopAsync();
-            }
-            catch
-            {
-                // ignored — we're tearing down the test
-            }
-            finally
-            {
-                await connection.DisposeAsync();
-            }
-        }
-    }
-
-    private static void DisposeApplications(IEnumerable<TestWebApplication> apps)
-    {
-        foreach (var app in apps)
-        {
-            app.Dispose();
-        }
-    }
-
-    private static async Task<bool> WaitUntilAsync(
-        Func<bool> condition,
-        TimeSpan? timeout,
-        ITestOutputHelper output,
-        Func<string?>? progress = null)
-    {
-        var start = DateTime.UtcNow;
-        var deadline = timeout.HasValue ? start + timeout.Value : (DateTime?)null;
-
-        while (!deadline.HasValue || DateTime.UtcNow < deadline.Value)
-        {
-            if (condition())
-            {
-                return true;
-            }
-
-            if (progress is not null)
-            {
-                var status = progress();
-                if (!string.IsNullOrEmpty(status))
-                {
-                    output.WriteLine($"Progress: {status}");
-                }
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
-        }
-
-        return condition();
+            $"{scenario} comparison => Orleans: {orleans.TotalMilliseconds:F0} ms, In-Memory: {inMemory.TotalMilliseconds:F0} ms, Δ={delta.TotalMilliseconds:F0} ms, ratio={ratio:F2}×.");
     }
 }
