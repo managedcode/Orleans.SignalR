@@ -2,7 +2,7 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
-internal sealed class TestOutputHelperAccessor : ITestOutputHelperAccessor
+public sealed class TestOutputHelperAccessor : ITestOutputHelperAccessor
 {
     private readonly AsyncLocal<ITestOutputHelper?> _current = new();
 

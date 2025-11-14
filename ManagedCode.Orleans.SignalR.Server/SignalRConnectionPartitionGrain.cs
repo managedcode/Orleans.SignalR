@@ -33,7 +33,8 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
         _stateStorage = stateStorage;
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        _observerManager = new ObserverManager<ISignalRObserver>(TimeIntervalHelper.AddExpirationIntervalBuffer(timeSpan), _logger);
+        var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeSpan);
+        _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
 
         _stateStorage.State ??= new ConnectionState();
     }

@@ -10,7 +10,7 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Infrastructure;
 
-internal sealed class PerformanceScenarioHarness
+public sealed class PerformanceScenarioHarness
 {
     private readonly LoadClusterFixture _cluster;
     private readonly ITestOutputHelper _output;
@@ -59,28 +59,33 @@ internal sealed class PerformanceScenarioHarness
                 connections.Add(connection);
             }
 
+            var passes = Math.Max(1, Settings.DevicePasses);
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} device echo";
-            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections × {Settings.DeviceMessagesPerConnection} messages.");
+            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections × {Settings.DeviceMessagesPerConnection} messages for {passes} passes.");
 
             var stopwatch = Stopwatch.StartNew();
 
-            var sendTasks = new List<Task>(connections.Count);
-            for (var index = 0; index < connections.Count; index++)
+            for (var pass = 0; pass < passes; pass++)
             {
-                var connectionIndex = index;
-                var connection = connections[connectionIndex];
-                var targetConnectionId = connectionIds[connectionIndex];
-                sendTasks.Add(Task.Run(async () =>
+                var sendTasks = new List<Task>(connections.Count);
+                for (var index = 0; index < connections.Count; index++)
                 {
-                    for (var iteration = 0; iteration < Settings.DeviceMessagesPerConnection; iteration++)
+                    var connectionIndex = index;
+                    var connection = connections[connectionIndex];
+                    var targetConnectionId = connectionIds[connectionIndex];
+                    sendTasks.Add(Task.Run(async () =>
                     {
-                        await connection.InvokeAsync<int>("Connections", new[] { targetConnectionId });
-                    }
-                }));
+                        for (var iteration = 0; iteration < Settings.DeviceMessagesPerConnection; iteration++)
+                        {
+                            await connection.InvokeAsync<int>("Connections", new[] { targetConnectionId });
+                        }
+                    }));
+                }
+                await Task.WhenAll(sendTasks);
             }
-            await Task.WhenAll(sendTasks);
 
-            var expected = (long)Settings.DeviceConnections * Settings.DeviceMessagesPerConnection;
+            var expectedPerConnectionCount = Settings.DeviceMessagesPerConnection * passes;
+            var expected = (long)Settings.DeviceConnections * expectedPerConnectionCount;
             var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalDelivered), expected, Settings.DeviceTimeout, scenarioLabel);
             completed.ShouldBeTrue($"Timed out awaiting {scenarioLabel} deliveries.");
 
@@ -88,7 +93,7 @@ internal sealed class PerformanceScenarioHarness
 
             for (var index = 0; index < perConnection.Length; index++)
             {
-                perConnection[index].ShouldBe(Settings.DeviceMessagesPerConnection, $"Device connection #{index} should receive all messages.");
+                perConnection[index].ShouldBe(expectedPerConnectionCount, $"Device connection #{index} should receive all messages across {passes} passes.");
             }
 
             var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
@@ -159,21 +164,31 @@ internal sealed class PerformanceScenarioHarness
                     : (long)perAppSenderCounts[appIndex] * Settings.BroadcastMessagesPerConnection;
             }
 
+            var broadcastPasses = Math.Max(1, Settings.BroadcastPasses);
+            for (var idx = 0; idx < expectedPerConnection.Length; idx++)
+            {
+                expectedPerConnection[idx] *= broadcastPasses;
+            }
+
             var expectedDeliveries = expectedPerConnection.Sum();
             var senders = connections.Take(senderCount).ToArray();
 
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} broadcast";
+            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections, {senderCount} senders, {broadcastPasses} passes.");
             var stopwatch = Stopwatch.StartNew();
 
-            var sendTasks = senders.Select((connection, senderIndex) => Task.Run(async () =>
+            for (var pass = 0; pass < broadcastPasses; pass++)
             {
-                for (var iteration = 0; iteration < Settings.BroadcastMessagesPerConnection; iteration++)
+                var sendTasks = senders.Select((connection, senderIndex) => Task.Run(async () =>
                 {
-                    var payload = $"broadcast:{senderIndex:D2}:{iteration:D5}";
-                    await connection.InvokeAsync("BroadcastPayload", payload);
-                }
-            }));
-            await Task.WhenAll(sendTasks);
+                    for (var iteration = 0; iteration < Settings.BroadcastMessagesPerConnection; iteration++)
+                    {
+                        var payload = $"broadcast:{senderIndex:D2}:{pass:D2}:{iteration:D5}";
+                        await connection.InvokeAsync("BroadcastPayload", payload);
+                    }
+                }));
+                await Task.WhenAll(sendTasks);
+            }
 
             var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalDelivered), expectedDeliveries, Settings.BroadcastTimeout, scenarioLabel);
             completed.ShouldBeTrue($"Timed out awaiting {scenarioLabel} deliveries.");
@@ -246,7 +261,7 @@ internal sealed class PerformanceScenarioHarness
             }
 
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} group";
-            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections across {groupMembers.Count} groups (size {Settings.GroupSize}).");
+            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections across {groupMembers.Count} groups (size {Settings.GroupSize}) for {Math.Max(1, Settings.GroupPasses)} passes.");
 
             await Task.WhenAll(connections.Select((connection, index) => connection.InvokeAsync("AddToGroup", groupAssignments[index])));
             await Task.Delay(TimeSpan.FromMilliseconds(500));
@@ -288,33 +303,43 @@ internal sealed class PerformanceScenarioHarness
                 }
             }
 
-            var sendStopwatch = Stopwatch.StartNew();
-            var sendTasks = groupMembers.Select(group => Task.Run(async () =>
+            var groupPasses = Math.Max(1, Settings.GroupPasses);
+            for (var idx = 0; idx < expectedPerConnection.Length; idx++)
             {
-                var members = group.Value;
-                var broadcasters = members.Take(Math.Min(Settings.GroupBroadcastersPerGroup, members.Count)).ToArray();
-                if (broadcasters.Length == 0)
-                {
-                    return;
-                }
+                expectedPerConnection[idx] *= groupPasses;
+            }
 
-                var baseCount = Settings.GroupMessagesPerGroup / broadcasters.Length;
-                var extra = Settings.GroupMessagesPerGroup % broadcasters.Length;
+            var sendStopwatch = Stopwatch.StartNew();
 
-                for (var idx = 0; idx < broadcasters.Length; idx++)
+            for (var pass = 0; pass < groupPasses; pass++)
+            {
+                var sendTasks = groupMembers.Select(group => Task.Run(async () =>
                 {
-                    var broadcasterIndex = broadcasters[idx];
-                    var messagesToSend = baseCount + (idx < extra ? 1 : 0);
-                    var connection = connections[broadcasterIndex];
-                    var marker = groupMarkers[broadcasterIndex];
-                    var groupName = group.Key;
-                    for (var iteration = 0; iteration < messagesToSend; iteration++)
+                    var members = group.Value;
+                    var broadcasters = members.Take(Math.Min(Settings.GroupBroadcastersPerGroup, members.Count)).ToArray();
+                    if (broadcasters.Length == 0)
                     {
-                        await connection.InvokeAsync("GroupSendAsync", groupName, $"{marker}{idx:D2}:{iteration:D5}");
+                        return;
                     }
-                }
-            }));
-            await Task.WhenAll(sendTasks);
+
+                    var baseCount = Settings.GroupMessagesPerGroup / broadcasters.Length;
+                    var extra = Settings.GroupMessagesPerGroup % broadcasters.Length;
+
+                    for (var idx = 0; idx < broadcasters.Length; idx++)
+                    {
+                        var broadcasterIndex = broadcasters[idx];
+                        var messagesToSend = baseCount + (idx < extra ? 1 : 0);
+                        var connection = connections[broadcasterIndex];
+                        var marker = groupMarkers[broadcasterIndex];
+                        var groupName = group.Key;
+                        for (var iteration = 0; iteration < messagesToSend; iteration++)
+                        {
+                            await connection.InvokeAsync("GroupSendAsync", groupName, $"{marker}{pass:D2}:{idx:D2}:{iteration:D5}");
+                        }
+                    }
+                }));
+                await Task.WhenAll(sendTasks);
+            }
 
             var expected = expectedPerConnection.Sum();
             var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalDelivered), expected, Settings.GroupTimeout, scenarioLabel);
@@ -360,8 +385,9 @@ internal sealed class PerformanceScenarioHarness
                 connections.Add(connection);
             }
 
+            var streamPasses = Math.Max(1, Settings.StreamPasses);
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} streaming";
-            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections streaming {Settings.StreamItemsPerConnection} items each.");
+            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections streaming {Settings.StreamItemsPerConnection} items each for {streamPasses} passes.");
 
             var stopwatch = Stopwatch.StartNew();
 
@@ -371,17 +397,21 @@ internal sealed class PerformanceScenarioHarness
                 var connection = connections[index];
                 var streamTask = Task.Run(async () =>
                 {
-                    await foreach (var item in connection.StreamAsync<int>("Counter", Settings.StreamItemsPerConnection, 0))
+                    for (var pass = 0; pass < streamPasses; pass++)
                     {
-                        _ = item;
-                        Interlocked.Increment(ref perConnection[connectionIndex]);
-                        Interlocked.Increment(ref totalItems);
+                        await foreach (var item in connection.StreamAsync<int>("Counter", Settings.StreamItemsPerConnection, 0))
+                        {
+                            _ = item;
+                            Interlocked.Increment(ref perConnection[connectionIndex]);
+                            Interlocked.Increment(ref totalItems);
+                        }
                     }
                 });
                 streamTasks.Add(streamTask);
             }
 
-            var expected = (long)Settings.StreamConnections * Settings.StreamItemsPerConnection;
+            var expectedPerConnectionCount = Settings.StreamItemsPerConnection * streamPasses;
+            var expected = (long)Settings.StreamConnections * expectedPerConnectionCount;
             var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalItems), expected, Settings.StreamTimeout, scenarioLabel);
             completed.ShouldBeTrue($"Timed out awaiting {scenarioLabel} delivery.");
 
@@ -391,7 +421,7 @@ internal sealed class PerformanceScenarioHarness
 
             for (var index = 0; index < perConnection.Length; index++)
             {
-                perConnection[index].ShouldBe(Settings.StreamItemsPerConnection, $"Stream connection #{index} should receive all items.");
+                perConnection[index].ShouldBe(expectedPerConnectionCount, $"Stream connection #{index} should receive all items.");
             }
 
             var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
@@ -423,24 +453,29 @@ internal sealed class PerformanceScenarioHarness
                 connections.Add(connection);
             }
 
+            var invocationPasses = Math.Max(1, Settings.InvocationPasses);
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} invocation";
-            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections × {Settings.InvocationMessagesPerConnection} invocations.");
+            _output.WriteLine($"{scenarioLabel}: {connections.Count} connections × {Settings.InvocationMessagesPerConnection} invocations for {invocationPasses} passes.");
 
             var stopwatch = Stopwatch.StartNew();
 
             var invocationTasks = connections.Select((connection, index) => Task.Run(async () =>
             {
-                for (var iteration = 0; iteration < Settings.InvocationMessagesPerConnection; iteration++)
+                for (var pass = 0; pass < invocationPasses; pass++)
                 {
-                    var result = await connection.InvokeAsync<int>("Plus", iteration, index);
-                    result.ShouldBe(iteration + index, "Plus result should match expected sum.");
-                    Interlocked.Increment(ref perConnection[index]);
-                    Interlocked.Increment(ref totalInvocations);
+                    for (var iteration = 0; iteration < Settings.InvocationMessagesPerConnection; iteration++)
+                    {
+                        var result = await connection.InvokeAsync<int>("Plus", iteration, index);
+                        result.ShouldBe(iteration + index, "Plus result should match expected sum.");
+                        Interlocked.Increment(ref perConnection[index]);
+                        Interlocked.Increment(ref totalInvocations);
+                    }
                 }
             }));
 
             var workerTask = Task.WhenAll(invocationTasks);
-            var expected = (long)Settings.InvocationConnections * Settings.InvocationMessagesPerConnection;
+            var expectedPerConnectionCount = Settings.InvocationMessagesPerConnection * invocationPasses;
+            var expected = (long)Settings.InvocationConnections * expectedPerConnectionCount;
             var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalInvocations), expected, Settings.InvocationTimeout, scenarioLabel);
             completed.ShouldBeTrue($"Timed out awaiting {scenarioLabel} completion.");
             await workerTask;
@@ -449,7 +484,7 @@ internal sealed class PerformanceScenarioHarness
 
             for (var index = 0; index < perConnection.Length; index++)
             {
-                perConnection[index].ShouldBe(Settings.InvocationMessagesPerConnection, $"Invocation connection #{index} should complete all invocations.");
+                perConnection[index].ShouldBe(expectedPerConnectionCount, $"Invocation connection #{index} should complete all invocations across all passes.");
             }
 
             var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
@@ -551,20 +586,25 @@ internal sealed class PerformanceScenarioHarness
     }
 }
 
-internal sealed record PerformanceScenarioSettings(
+public sealed record PerformanceScenarioSettings(
     int DeviceConnections,
     int DeviceMessagesPerConnection,
+    int DevicePasses,
     int BroadcastConnections,
     int BroadcastMessagesPerConnection,
     int BroadcastSenderCount,
+    int BroadcastPasses,
     int GroupConnections,
     int GroupSize,
     int GroupMessagesPerGroup,
     int GroupBroadcastersPerGroup,
+    int GroupPasses,
     int StreamConnections,
     int StreamItemsPerConnection,
+    int StreamPasses,
     int InvocationConnections,
     int InvocationMessagesPerConnection,
+    int InvocationPasses,
     TimeSpan DeviceTimeout,
     TimeSpan BroadcastTimeout,
     TimeSpan GroupTimeout,
@@ -572,42 +612,52 @@ internal sealed record PerformanceScenarioSettings(
     TimeSpan InvocationTimeout)
 {
     public static PerformanceScenarioSettings CreatePerformance() => new(
-        DeviceConnections: 400,
-        DeviceMessagesPerConnection: 250,
-        BroadcastConnections: 150,
-        BroadcastMessagesPerConnection: 80,
-        BroadcastSenderCount: 8,
-        GroupConnections: 800,
-        GroupSize: 200,
-        GroupMessagesPerGroup: 180,
-        GroupBroadcastersPerGroup: 8,
-        StreamConnections: 200,
-        StreamItemsPerConnection: 300,
-        InvocationConnections: 300,
-        InvocationMessagesPerConnection: 400,
-        DeviceTimeout: TimeSpan.FromMinutes(5),
-        BroadcastTimeout: TimeSpan.FromMinutes(5),
-        GroupTimeout: TimeSpan.FromMinutes(5),
-        StreamTimeout: TimeSpan.FromMinutes(5),
-        InvocationTimeout: TimeSpan.FromMinutes(5));
+        DeviceConnections: 150,
+        DeviceMessagesPerConnection: 100,
+        DevicePasses: 1,
+        BroadcastConnections: 100,
+        BroadcastMessagesPerConnection: 50,
+        BroadcastSenderCount: 4,
+        BroadcastPasses: 1,
+        GroupConnections: 200,
+        GroupSize: 50,
+        GroupMessagesPerGroup: 60,
+        GroupBroadcastersPerGroup: 4,
+        GroupPasses: 1,
+        StreamConnections: 100,
+        StreamItemsPerConnection: 120,
+        StreamPasses: 1,
+        InvocationConnections: 140,
+        InvocationMessagesPerConnection: 120,
+        InvocationPasses: 1,
+        DeviceTimeout: TimeSpan.FromMinutes(4),
+        BroadcastTimeout: TimeSpan.FromMinutes(4),
+        GroupTimeout: TimeSpan.FromMinutes(4),
+        StreamTimeout: TimeSpan.FromMinutes(4),
+        InvocationTimeout: TimeSpan.FromMinutes(4));
 
     public static PerformanceScenarioSettings CreateStress() => new(
-        DeviceConnections: 400,
-        DeviceMessagesPerConnection: 150,
+        DeviceConnections: 160,
+        DeviceMessagesPerConnection: 80,
+        DevicePasses: 4,
         BroadcastConnections: 120,
-        BroadcastMessagesPerConnection: 60,
-        BroadcastSenderCount: 6,
-        GroupConnections: 600,
-        GroupSize: 150,
-        GroupMessagesPerGroup: 150,
-        GroupBroadcastersPerGroup: 6,
-        StreamConnections: 250,
-        StreamItemsPerConnection: 250,
-        InvocationConnections: 350,
-        InvocationMessagesPerConnection: 300,
-        DeviceTimeout: TimeSpan.FromMinutes(6),
-        BroadcastTimeout: TimeSpan.FromMinutes(6),
-        GroupTimeout: TimeSpan.FromMinutes(6),
-        StreamTimeout: TimeSpan.FromMinutes(6),
-        InvocationTimeout: TimeSpan.FromMinutes(6));
+        BroadcastMessagesPerConnection: 40,
+        BroadcastSenderCount: 4,
+        BroadcastPasses: 4,
+        GroupConnections: 240,
+        GroupSize: 60,
+        GroupMessagesPerGroup: 70,
+        GroupBroadcastersPerGroup: 4,
+        GroupPasses: 4,
+        StreamConnections: 120,
+        StreamItemsPerConnection: 120,
+        StreamPasses: 4,
+        InvocationConnections: 180,
+        InvocationMessagesPerConnection: 100,
+        InvocationPasses: 4,
+        DeviceTimeout: TimeSpan.FromMinutes(8),
+        BroadcastTimeout: TimeSpan.FromMinutes(8),
+        GroupTimeout: TimeSpan.FromMinutes(8),
+        StreamTimeout: TimeSpan.FromMinutes(8),
+        InvocationTimeout: TimeSpan.FromMinutes(8));
 }

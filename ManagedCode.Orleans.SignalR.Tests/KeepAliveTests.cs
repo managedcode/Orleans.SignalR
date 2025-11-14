@@ -10,15 +10,15 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-[Collection(nameof(SmokeCluster))]
+[Collection(nameof(KeepAliveCluster))]
 public class KeepAliveTests : IAsyncLifetime
 {
-    private readonly SmokeClusterFixture _siloCluster;
+    private readonly KeepAliveClusterFixture _siloCluster;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
     private readonly ITestOutputHelper _output;
     private TestWebApplication? _app;
 
-    public KeepAliveTests(SmokeClusterFixture siloCluster, ITestOutputHelper output)
+    public KeepAliveTests(KeepAliveClusterFixture siloCluster, ITestOutputHelper output)
     {
         _siloCluster = siloCluster;
         _output = output;
@@ -71,6 +71,48 @@ public class KeepAliveTests : IAsyncLifetime
         {
             await connection.StopAsync();
             await connection.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task KeepAlive_should_allow_direct_sends_after_idle_interval()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("Test host is not initialised.");
+        }
+
+        var receiver = _app.CreateSignalRClient(nameof(SimpleTestHub));
+        var sender = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        var payload = "keep-alive-route";
+        var routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.On<string>("Route", message => routed.TrySetResult(message));
+
+        try
+        {
+            await receiver.StartAsync();
+            await sender.StartAsync();
+            receiver.ConnectionId.ShouldNotBeNull();
+            sender.ConnectionId.ShouldNotBeNull();
+
+            _output.WriteLine("Waiting past the client timeout to ensure keep-alive heartbeats keep observers warm.");
+            await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
+
+            await sender.InvokeAsync("RouteToConnection", receiver.ConnectionId!, payload);
+            var completed = await Task.WhenAny(routed.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.ShouldBe(routed.Task, "Receiver did not observe targeted send after idle interval.");
+
+            var content = await routed.Task;
+            content.ShouldContain(sender.ConnectionId!);
+            content.ShouldContain(payload);
+        }
+        finally
+        {
+            await receiver.StopAsync();
+            await sender.StopAsync();
+            await receiver.DisposeAsync();
+            await sender.DisposeAsync();
         }
     }
 

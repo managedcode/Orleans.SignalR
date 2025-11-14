@@ -40,7 +40,8 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
         _messagesStorage = messagesStorage;
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        _observerManager = new ObserverManager<ISignalRObserver>(TimeIntervalHelper.AddExpirationIntervalBuffer(timeSpan), _logger);
+        var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeSpan);
+        _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)

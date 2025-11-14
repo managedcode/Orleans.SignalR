@@ -157,6 +157,11 @@ public class SimpleTestHub : Hub
         return new Random().Next(1, 100);
     }
 
+    public Task RouteToConnection(string connectionId, string payload)
+    {
+        return Clients.Client(connectionId).SendAsync("Route", $"{Context.ConnectionId}:{payload}");
+    }
+
     public async Task<int> Others()
     {
         await Clients.Others.SendAsync("SendAll", "test");

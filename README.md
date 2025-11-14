@@ -183,7 +183,7 @@ Configure `OrleansSignalROptions` to tune throughput and lifecycle characteristi
 | Option | Default | Description |
 | --- | --- | --- |
 | `ClientTimeoutInterval` | 00:00:30 | How long a client can remain silent before the server times out the connection. Mirrors SignalR keep-alive. |
-| `KeepEachConnectionAlive` | `true` | When enabled, the subscription timer pings partition grains so observers never expire. Disable to reduce ping traffic; connections still register with partitions but idle observers can be trimmed once they exceed `ClientTimeoutInterval`. |
+| `KeepEachConnectionAlive` | `true` | When enabled, the subscription timer pings partition grains so observers never expire. Disable to reduce ping traffic; connections still register with partitions but Orleans observers remain active indefinitely (cleanup happens only when the host disconnects). |
 | `KeepMessageInterval` | 00:01:06 | Persistence window for offline message delivery (grains store messages briefly so reconnecting clients do not miss data). |
 | `ConnectionPartitionCount` | `4` | Base number of connection partitions (set to `1` to disable partitioning). |
 | `ConnectionsPerPartitionHint` | `10_000` | Target connections per partition; coordinators add partitions when this hint is exceeded. |

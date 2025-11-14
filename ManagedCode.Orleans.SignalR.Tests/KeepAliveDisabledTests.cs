@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -12,15 +14,15 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-[Collection(nameof(SmokeCluster))]
+[Collection(nameof(KeepAliveDisabledCluster))]
 public class KeepAliveDisabledTests : IAsyncLifetime
 {
-    private readonly SmokeClusterFixture _siloCluster;
+    private readonly KeepAliveDisabledClusterFixture _siloCluster;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
     private readonly ITestOutputHelper _output;
     private TestWebApplication? _app;
 
-    public KeepAliveDisabledTests(SmokeClusterFixture siloCluster, ITestOutputHelper testOutputHelper)
+    public KeepAliveDisabledTests(KeepAliveDisabledClusterFixture siloCluster, ITestOutputHelper testOutputHelper)
     {
         _siloCluster = siloCluster;
         _loggerAccessor.Output = testOutputHelper;
@@ -88,6 +90,48 @@ public class KeepAliveDisabledTests : IAsyncLifetime
             _output.WriteLine(senderDisconnected
                 ? "Sender disconnected after timeout as expected."
                 : "Sender remained connected after timeout window.");
+        }
+        finally
+        {
+            await sender.StopAsync();
+            await receiver.StopAsync();
+            await sender.DisposeAsync();
+            await receiver.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Idle_connection_should_receive_direct_send_after_idle_window()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("TestWebApplication was not initialized.");
+        }
+
+        var sender = _app.CreateSignalRClient(nameof(SimpleTestHub));
+        var receiver = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        var routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.On<string>("Route", payload => routed.TrySetResult(payload));
+
+        try
+        {
+            await receiver.StartAsync();
+            await sender.StartAsync();
+            receiver.ConnectionId.ShouldNotBeNull();
+            sender.ConnectionId.ShouldNotBeNull();
+
+            var idle = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(5);
+            _output.WriteLine($"Waiting {idle} before sending targeted message without Orleans keep-alive.");
+            await Task.Delay(idle);
+
+            await sender.InvokeAsync("RouteToConnection", receiver.ConnectionId!, "idle-route");
+
+            var completed = await Task.WhenAny(routed.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.ShouldBe(routed.Task, "Receiver did not get targeted send after idle period.");
+            var payload = await routed.Task;
+            payload.ShouldContain(sender.ConnectionId!);
+            payload.ShouldContain("idle-route");
         }
         finally
         {
@@ -183,6 +227,64 @@ public class KeepAliveDisabledTests : IAsyncLifetime
         finally
         {
             connection.Closed -= Handler;
+        }
+    }
+
+    [Fact]
+    public async Task Active_targeted_send_should_not_drop_when_keep_alive_disabled()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("TestWebApplication was not initialized.");
+        }
+
+        const int messageCount = 6;
+        var receiver = _app.CreateSignalRClient(nameof(SimpleTestHub));
+        var sender = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        var payloads = new List<string>(messageCount);
+        var delivered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        receiver.On<string>("Route", message =>
+        {
+            lock (payloads)
+            {
+                payloads.Add(message);
+                if (payloads.Count == messageCount)
+                {
+                    delivered.TrySetResult(true);
+                }
+            }
+        });
+
+        try
+        {
+            await receiver.StartAsync();
+            await sender.StartAsync();
+            receiver.ConnectionId.ShouldNotBeNull();
+            sender.ConnectionId.ShouldNotBeNull();
+
+            for (var i = 0; i < messageCount; i++)
+            {
+                await sender.InvokeAsync("RouteToConnection", receiver.ConnectionId!, $"keepalive-disabled-{i}");
+                await Task.Delay(TimeSpan.FromMilliseconds(600));
+            }
+
+            var completed = await Task.WhenAny(delivered.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+            completed.ShouldBe(delivered.Task, "Not all targeted sends arrived while keep-alive was disabled.");
+
+            lock (payloads)
+            {
+                payloads.Count.ShouldBe(messageCount);
+                payloads.Last().ShouldContain($"keepalive-disabled-{messageCount - 1}");
+            }
+        }
+        finally
+        {
+            await sender.StopAsync();
+            await receiver.StopAsync();
+            await sender.DisposeAsync();
+            await receiver.DisposeAsync();
         }
     }
 }

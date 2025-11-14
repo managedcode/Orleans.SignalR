@@ -39,7 +39,7 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         _state.State ??= new GroupPartitionState();
 
         var timeout = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        var expiration = TimeIntervalHelper.AddExpirationIntervalBuffer(timeout);
+        var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeout);
         _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
 

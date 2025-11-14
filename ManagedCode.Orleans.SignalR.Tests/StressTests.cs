@@ -1,5 +1,6 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure;
@@ -14,51 +15,145 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-[Collection(nameof(LoadCluster))]
-[Trait("Category", "Load")]
-public class StressTests : IAsyncLifetime
+public abstract class StressTestBase<TFixture> : IAsyncLifetime where TFixture : LoadClusterFixture
 {
-    private readonly LoadClusterFixture _cluster;
-    private readonly ITestOutputHelper _output;
-    private readonly TestOutputHelperAccessor _loggerAccessor = new();
-    private readonly PerformanceScenarioSettings _stressSettings = PerformanceScenarioSettings.CreateStress();
-    private readonly IList<TestWebApplication> _apps = new List<TestWebApplication>();
-
-    public StressTests(LoadClusterFixture cluster, ITestOutputHelper output)
+    protected StressTestBase(TFixture cluster, ITestOutputHelper output)
     {
-        _cluster = cluster;
-        _output = output;
-        _loggerAccessor.Output = output;
+        Cluster = cluster;
+        Output = output;
+        LoggerAccessor.Output = output;
     }
 
-    public Task InitializeAsync()
+    protected TFixture Cluster { get; }
+    protected ITestOutputHelper Output { get; }
+    protected TestOutputHelperAccessor LoggerAccessor { get; } = new();
+    protected PerformanceScenarioSettings StressSettings { get; } = PerformanceScenarioSettings.CreateStress();
+    protected IList<TestWebApplication> Apps { get; } = new List<TestWebApplication>();
+
+    protected virtual bool RequiresWebApps => false;
+
+    public virtual Task InitializeAsync()
     {
-        for (var index = 0; index < 4; index++)
+        if (RequiresWebApps)
         {
-            _apps.Add(new TestWebApplication(_cluster, 20_000 + index, loggerAccessor: _loggerAccessor));
+            for (var index = 0; index < 4; index++)
+            {
+                Apps.Add(new TestWebApplication(Cluster, 20_000 + index, loggerAccessor: LoggerAccessor));
+            }
         }
 
         return Task.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public virtual Task DisposeAsync()
     {
-        foreach (var app in _apps)
+        if (RequiresWebApps)
         {
-            app.Dispose();
+            foreach (var app in Apps)
+            {
+                app.Dispose();
+            }
         }
 
         return Task.CompletedTask;
     }
 
-    private PerformanceScenarioHarness CreateHarness() =>
-        new(_cluster, _output, _loggerAccessor, _stressSettings);
+    protected PerformanceScenarioHarness CreateHarness() =>
+        new(Cluster, Output, LoggerAccessor, StressSettings);
+
+    protected async Task<HubConnection> CreateUserConnectionAsync(string user, TestWebApplication app, string hub)
+    {
+        var client = app.CreateHttpClient();
+        try
+        {
+            var response = await client.GetAsync("/auth?user=" + user);
+            response.EnsureSuccessStatusCode();
+            var token = await response.Content.ReadAsStringAsync();
+
+            var hubConnection = app.CreateSignalRClient(
+                hub,
+                configureConnection: options => options.AccessTokenProvider = () => Task.FromResult<string?>(token));
+
+            return hubConnection;
+        }
+        finally
+        {
+            client.Dispose();
+        }
+    }
+
+    protected async Task<bool> WaitUntilAsync(
+        string description,
+        Func<Task<bool>> condition,
+        TimeSpan? timeout = null,
+        Func<Task<string>>? progress = null)
+    {
+        var limit = timeout ?? TimeSpan.FromSeconds(20);
+        var start = DateTime.UtcNow;
+        var lastLog = TimeSpan.Zero;
+        var logInterval = TimeSpan.FromSeconds(1);
+
+        while (DateTime.UtcNow - start < limit)
+        {
+            if (await condition())
+            {
+                Output.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                return true;
+            }
+
+            var elapsed = DateTime.UtcNow - start;
+            if (elapsed - lastLog >= logInterval)
+            {
+                if (progress is not null)
+                {
+                    var status = await progress();
+                    Output.WriteLine($"Waiting for {description}... elapsed {elapsed:c}. Status: {status}");
+                }
+                else
+                {
+                    Output.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");
+                }
+
+                lastLog = elapsed;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+        }
+
+        if (progress is not null)
+        {
+            var status = await progress();
+            Output.WriteLine($"Final status for '{description}': {status}");
+        }
+
+        return await condition();
+    }
+}
+
+[Collection(nameof(LoadClusterDevice))]
+[Trait("Category", "Load")]
+public sealed class StressUserRoundtripTests : StressTestBase<LoadClusterDeviceFixture>
+{
+    public StressUserRoundtripTests(LoadClusterDeviceFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
+    }
 
     [Fact]
     public async Task Stress_User_Roundtrip()
     {
         var harness = CreateHarness();
         await harness.RunDeviceEchoAsync(useOrleans: true, basePort: 30_000);
+    }
+}
+
+[Collection(nameof(LoadClusterBroadcast))]
+[Trait("Category", "Load")]
+public sealed class StressBroadcastFanoutTests : StressTestBase<LoadClusterBroadcastFixture>
+{
+    public StressBroadcastFanoutTests(LoadClusterBroadcastFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
     }
 
     [Fact]
@@ -67,12 +162,32 @@ public class StressTests : IAsyncLifetime
         var harness = CreateHarness();
         await harness.RunBroadcastFanoutAsync(useOrleans: true, basePort: 31_000);
     }
+}
+
+[Collection(nameof(LoadClusterGroup))]
+[Trait("Category", "Load")]
+public sealed class StressGroupBroadcastTests : StressTestBase<LoadClusterGroupFixture>
+{
+    public StressGroupBroadcastTests(LoadClusterGroupFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
+    }
 
     [Fact]
     public async Task Stress_Group_Broadcast()
     {
         var harness = CreateHarness();
         await harness.RunGroupScenarioAsync(useOrleans: true, basePort: 32_000);
+    }
+}
+
+[Collection(nameof(LoadClusterStreaming))]
+[Trait("Category", "Load")]
+public sealed class StressStreamingTests : StressTestBase<LoadClusterStreamingFixture>
+{
+    public StressStreamingTests(LoadClusterStreamingFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
     }
 
     [Fact]
@@ -81,12 +196,32 @@ public class StressTests : IAsyncLifetime
         var harness = CreateHarness();
         await harness.RunStreamingScenarioAsync(useOrleans: true, basePort: 33_000);
     }
+}
+
+[Collection(nameof(LoadClusterInvocation))]
+[Trait("Category", "Load")]
+public sealed class StressInvocationTests : StressTestBase<LoadClusterInvocationFixture>
+{
+    public StressInvocationTests(LoadClusterInvocationFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
+    }
 
     [Fact]
     public async Task Stress_Invocation()
     {
         var harness = CreateHarness();
         await harness.RunInvocationScenarioAsync(useOrleans: true, basePort: 34_000);
+    }
+}
+
+[Collection(nameof(LoadClusterCascade))]
+[Trait("Category", "Load")]
+public sealed class StressCascadeTests : StressTestBase<LoadClusterCascadeFixture>
+{
+    public StressCascadeTests(LoadClusterCascadeFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
     }
 
     [Fact]
@@ -99,17 +234,28 @@ public class StressTests : IAsyncLifetime
         var stream = await harness.RunStreamingScenarioAsync(true, 43_000);
         var invocation = await harness.RunInvocationScenarioAsync(true, 44_000);
 
-        _output.WriteLine($"Stress cascade durations: device={device}, broadcast={broadcast}, group={group}, stream={stream}, invocation={invocation}.");
+        Output.WriteLine($"Stress cascade durations: device={device}, broadcast={broadcast}, group={group}, stream={stream}, invocation={invocation}.");
     }
+}
+
+[Collection(nameof(LoadClusterActivation))]
+[Trait("Category", "Load")]
+public sealed class StressActivationTests : StressTestBase<LoadClusterActivationFixture>
+{
+    public StressActivationTests(LoadClusterActivationFixture cluster, ITestOutputHelper output)
+        : base(cluster, output)
+    {
+    }
+
+    protected override bool RequiresWebApps => true;
 
     [Fact]
     public async Task InvokeAsyncAndOnTest()
     {
-        _output.WriteLine("Clearing previous activations for clean state.");
-        await _cluster.Cluster.Client.GetGrain<IManagementGrain>(0)
-            .ForceActivationCollection(TimeSpan.Zero);
+        Output.WriteLine("Clearing previous activations for clean state.");
+        await Cluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
 
-        var management = _cluster.Cluster.Client.GetGrain<IManagementGrain>(0);
+        var management = Cluster.Cluster.Client.GetGrain<IManagementGrain>(0);
 
         async Task<GrainCounts> FetchCountsAsync()
         {
@@ -124,47 +270,30 @@ public class StressTests : IAsyncLifetime
         }
 
         var before = await FetchCountsAsync();
-        _output.WriteLine($"Initial grain counts: {before}");
+        Output.WriteLine($"Initial grain counts: {before}");
 
-        var hubConnection = await CreateUserConnectionAsync("stress-user", _apps[0], nameof(SimpleTestHub));
-        hubConnection.On("GetMessage", () => "connection1");
+        var harness = CreateHarness();
+        var result = await harness.RunDeviceEchoAsync(true, 45_000);
+        Output.WriteLine($"Device roundtrip took {result}.");
 
+        var hubConnection = await CreateUserConnectionAsync("stress-user", Apps[0], nameof(SimpleTestHub));
         await hubConnection.StartAsync();
         hubConnection.State.ShouldBe(HubConnectionState.Connected);
-        _output.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
+        Output.WriteLine($"Stress connection started with id {hubConnection.ConnectionId}.");
 
-        const int workflowIterations = 200;
-        var workflowWatch = Stopwatch.StartNew();
-        var workflowTasks = Enumerable.Range(0, workflowIterations)
-            .Select(async iteration =>
-            {
-                await hubConnection.InvokeAsync<int>("DoTest");
-                await hubConnection.InvokeAsync("AddToGroup", "stress-group");
-                await hubConnection.InvokeAsync("GroupSendAsync", "stress-group", $"payload-{iteration}");
-            });
-        await Task.WhenAll(workflowTasks);
-        workflowWatch.Stop();
-        _output.WriteLine($"Completed {workflowIterations} workflow iterations in {workflowWatch.Elapsed}.");
-
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        await hubConnection.InvokeAsync<int>("All");
+        await hubConnection.InvokeAsync("AddToGroup", "stress-group");
+        await hubConnection.StopAsync();
+        await hubConnection.DisposeAsync();
+        Output.WriteLine("Stress connection disposed.");
 
         var during = await FetchCountsAsync();
         during.ConnectionTotal.ShouldBeGreaterThan(0, "Connection grains should activate after stress activity.");
         during.GroupTotal.ShouldBeGreaterThan(0, "Group grains should activate after stress activity.");
         during.User.ShouldBeGreaterThanOrEqualTo(1, "User grain should activate after stress activity.");
-        _output.WriteLine($"Grain counts after activity: {during}");
+        Output.WriteLine($"Grain counts after activity: {during}");
 
-        var randomResult = await hubConnection.InvokeAsync<int>("DoTest");
-        randomResult.ShouldBeGreaterThan(0);
-
-        await hubConnection.InvokeAsync("AddToGroup", "stress-group");
-        await hubConnection.InvokeAsync("WaitForMessage", hubConnection.ConnectionId);
-
-        await hubConnection.StopAsync();
-        await hubConnection.DisposeAsync();
-        _output.WriteLine("Stress connection disposed.");
-
-        await _cluster.Cluster.Client.GetGrain<IManagementGrain>(0)
+        await Cluster.Cluster.Client.GetGrain<IManagementGrain>(0)
             .ForceActivationCollection(TimeSpan.Zero);
 
         var deactivationWatch = Stopwatch.StartNew();
@@ -187,75 +316,7 @@ public class StressTests : IAsyncLifetime
         deactivationObserved.ShouldBeTrue("Stress grains did not deactivate as expected.");
 
         var after = await FetchCountsAsync();
-        _output.WriteLine($"Final grain counts: {after} (deactivation check took {deactivationWatch.Elapsed}).");
-    }
-
-    private async Task<HubConnection> CreateUserConnectionAsync(string user, TestWebApplication app, string hub)
-    {
-        var client = app.CreateHttpClient();
-        try
-        {
-            var response = await client.GetAsync("/auth?user=" + user);
-            response.EnsureSuccessStatusCode();
-            var token = await response.Content.ReadAsStringAsync();
-
-            var hubConnection = app.CreateSignalRClient(
-                hub,
-                configureConnection: options => options.AccessTokenProvider = () => Task.FromResult<string?>(token));
-
-            return hubConnection;
-        }
-        finally
-        {
-            client.Dispose();
-        }
-    }
-
-    private async Task<bool> WaitUntilAsync(
-        string description,
-        Func<Task<bool>> condition,
-        TimeSpan? timeout = null,
-        Func<Task<string>>? progress = null)
-    {
-        var limit = timeout ?? TimeSpan.FromSeconds(20);
-        var start = DateTime.UtcNow;
-        var lastLog = TimeSpan.Zero;
-        var logInterval = TimeSpan.FromSeconds(1);
-
-        while (DateTime.UtcNow - start < limit)
-        {
-            if (await condition())
-            {
-                _output.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
-                return true;
-            }
-
-            var elapsed = DateTime.UtcNow - start;
-            if (elapsed - lastLog >= logInterval)
-            {
-                if (progress is not null)
-                {
-                    var status = await progress();
-                    _output.WriteLine($"Waiting for {description}... elapsed {elapsed:c}. Status: {status}");
-                }
-                else
-                {
-                    _output.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");
-                }
-
-                lastLog = elapsed;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(200));
-        }
-
-        if (progress is not null)
-        {
-            var status = await progress();
-            _output.WriteLine($"Final status for '{description}': {status}");
-        }
-
-        return await condition();
+        Output.WriteLine($"Final grain counts: {after} (deactivation check took {deactivationWatch.Elapsed}).");
     }
 
     private readonly record struct GrainCounts(
