@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,94 +14,107 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
-using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRUserGrain)}")]
-public class SignalRUserGrain : Grain, ISignalRUserGrain
+public class SignalRUserGrain : SignalRObserverGrainBase<SignalRUserGrain>, ISignalRUserGrain
 {
-    private readonly ILogger<SignalRUserGrain> _logger;
     private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions;
-    private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IPersistentState<ConnectionState> _stateStorage;
     private readonly IPersistentState<HubMessageState> _messagesStorage;
 
     public SignalRUserGrain(ILogger<SignalRUserGrain> logger,
-        IOptions<OrleansSignalROptions> orleansSignalOptions, IOptions<HubOptions> hubOptions,
+        IOptions<OrleansSignalROptions> orleansSignalOptions,
+        IOptions<HubOptions> hubOptions,
         [PersistentState(nameof(SignalRUserGrain), OrleansSignalROptions.OrleansSignalRStorage)]
         IPersistentState<ConnectionState> stateStorage,
-        [PersistentState(nameof(SignalRUserGrain)+nameof(HubMessageState), OrleansSignalROptions.OrleansSignalRStorage)]
+        [PersistentState(nameof(SignalRUserGrain) + nameof(HubMessageState), OrleansSignalROptions.OrleansSignalRStorage)]
         IPersistentState<HubMessageState> messagesStorage)
+        : base(logger, orleansSignalOptions, hubOptions)
     {
-        _logger = logger;
         _orleansSignalOptions = orleansSignalOptions;
         _stateStorage = stateStorage;
         _messagesStorage = messagesStorage;
-
-        var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeSpan);
-        _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
+
+    protected override int TrackedConnectionCount => _stateStorage.State.ConnectionIds.Count;
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.AddConnection(_logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString(), connectionId);
-        _observerManager.Subscribe(observer, observer);
+        Logs.AddConnection(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString(), connectionId);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
+        TrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
 
     public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.RemoveConnection(_logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString(), connectionId);
-        _observerManager.Unsubscribe(observer);
+        Logs.RemoveConnection(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString(), connectionId);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
+        UntrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
 
     public async Task SendToUser(HubMessage message)
     {
-        Logs.SendToUser(_logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
-        if (_observerManager.Count == 0)
+        Logs.SendToUser(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
+
+        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        {
+            DispatchToLiveObservers(LiveObservers.Values, message);
+            return;
+        }
+
+        if (ObserverManager.Count == 0)
         {
             _messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
             return;
         }
 
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
     }
 
     public async Task RequestMessage()
     {
-        if (_messagesStorage.State.Messages.Count > 0)
+        if (_messagesStorage.State.Messages.Count == 0)
         {
-            var currentDateTime = DateTime.UtcNow;
-            foreach (var message in _messagesStorage.State.Messages.ToArray())
+            return;
+        }
+
+        var currentDateTime = DateTime.UtcNow;
+        foreach (var message in _messagesStorage.State.Messages.ToArray())
+        {
+            if (message.Value >= currentDateTime)
             {
-                if (message.Value >= currentDateTime)
+                if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
                 {
-                    await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message.Key)));
+                    DispatchToLiveObservers(LiveObservers.Values, message.Key);
                 }
-                _messagesStorage.State.Messages.Remove(message.Key);
+                else
+                {
+                    await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message.Key)));
+                }
             }
+
+            _messagesStorage.State.Messages.Remove(message.Key);
         }
     }
 
     public Task Ping(ISignalRObserver observer)
     {
-        Logs.Ping(_logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
-        _observerManager.Subscribe(observer, observer);
+        Logs.Ping(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
+        TouchObserver(observer);
         return Task.CompletedTask;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
-        Logs.OnDeactivateAsync(_logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
-        _observerManager.ClearExpired();
+        Logs.OnDeactivateAsync(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
+        ClearObserverTracking();
 
-        if (_observerManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
+        if (ObserverManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
         {
             await _stateStorage.ClearStateAsync(cancellationToken);
         }
@@ -120,11 +134,16 @@ public class SignalRUserGrain : Grain, ISignalRUserGrain
 
         if (_messagesStorage.State.Messages.Count == 0)
         {
-            await _stateStorage.ClearStateAsync(cancellationToken);
+            await _messagesStorage.ClearStateAsync(cancellationToken);
         }
         else
         {
-            await _stateStorage.WriteStateAsync(cancellationToken);
+            await _messagesStorage.WriteStateAsync(cancellationToken);
         }
+    }
+
+    protected override void OnLiveObserverDispatchFailure(Exception exception)
+    {
+        Logger.LogWarning(exception, "Live observer send failed for user {User}.", this.GetPrimaryKeyString());
     }
 }

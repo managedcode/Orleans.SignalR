@@ -153,6 +153,15 @@ flowchart TD
 - **Reset semantics** — when no entries remain, coordinators revert to the configured `ConnectionPartitionCount` / `GroupPartitionCount` base, so idle hubs do not hold unnecessary grains.
 - **Observer fan-out** — partition grains rely on Orleans `ObserverManager` to multiplex message delivery to every connected client within that partition.
 
+### Placement Strategies
+
+Connection grains (`SignalRConnectionHolderGrain` and `SignalRConnectionPartitionGrain`) use Orleans' default placement strategy by default. If your deployment needs to force a particular placement (for latency or locality reasons) you can:
+
+1. Annotate the grain with the desired built-in placement attribute (e.g., `[PreferLocalPlacement]`, `[RandomPlacement]`, etc.).
+2. Register a custom placement strategy in the silo host (`siloBuilder.ConfigureServices(services => services.UseGrainPlacement<MyPlacementStrategy, MyDirector>());`).
+
+See the [Orleans placement docs](https://learn.microsoft.com/dotnet/orleans/grains/placement) for available options and guidance on writing custom policies.
+
 ### How Connection Partitioning Works
 
 1. **Hub lifetime manager routing** — when a client connects, `OrleansHubLifetimeManager<THub>` asks the `SignalRConnectionCoordinatorGrain` for a partition id and registers the observer with the corresponding `SignalRConnectionPartitionGrain`. When the client disconnects the lifetime manager removes the observer and notifies the coordinator so the mapping can be cleaned up.

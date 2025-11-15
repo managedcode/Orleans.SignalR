@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
-using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
@@ -14,16 +14,13 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
-using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRGroupPartitionGrain)}")]
-public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
+public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupPartitionGrain>, ISignalRGroupPartitionGrain
 {
-    private readonly ILogger<SignalRGroupPartitionGrain> _logger;
-    private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IPersistentState<GroupPartitionState> _state;
     private string? _hubKey;
 
@@ -33,15 +30,13 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         IOptions<HubOptions> hubOptions,
         [PersistentState(nameof(SignalRGroupPartitionGrain), OrleansSignalROptions.OrleansSignalRStorage)]
         IPersistentState<GroupPartitionState> state)
+        : base(logger, orleansSignalOptions, hubOptions)
     {
-        _logger = logger;
         _state = state;
         _state.State ??= new GroupPartitionState();
-
-        var timeout = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeout);
-        _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
+
+    protected override int TrackedConnectionCount => _state.State.ConnectionObservers.Count;
 
     public override Task OnActivateAsync(CancellationToken cancellationToken)
     {
@@ -51,38 +46,52 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
 
     public async Task SendToGroups(HubMessage message, string[] groupNames)
     {
+        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        {
+            var targetConnections = CollectConnectionIds(groupNames, excludedConnections: null);
+            DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
+            return;
+        }
+
         var targetObservers = CollectObservers(groupNames, excludedConnections: null);
 
-        await Task.Run(() => _observerManager.Notify(
+        await Task.Run(() => ObserverManager.Notify(
             observer => observer.OnNextAsync(message),
             observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
     }
 
     public async Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
     {
+        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        {
+            var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
+            DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
+            return;
+        }
+
         var excluded = new HashSet<string>(excludedConnectionIds);
         var targetObservers = CollectObservers(groupNames, excluded);
 
-        await Task.Run(() => _observerManager.Notify(
+        await Task.Run(() => ObserverManager.Notify(
             observer => observer.OnNextAsync(message),
             observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
     }
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        _logger.LogDebug("Registering connection {ConnectionId} in partition {PartitionId}", connectionId,
+        Logger.LogDebug("Registering connection {ConnectionId} in partition {PartitionId}", connectionId,
             this.GetPrimaryKeyLong());
 
-        _observerManager.Subscribe(observer, observer);
         _state.State.ConnectionObservers[connectionId] = observer.GetPrimaryKeyString();
         _state.State.ConnectionGroups.TryAdd(connectionId, new HashSet<string>());
+        TrackConnection(connectionId, observer);
 
         return Task.CompletedTask;
     }
 
     public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        _logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
+        Logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
             this.GetPrimaryKeyLong());
 
         RemoveConnectionInternal(connectionId, observer);
@@ -91,19 +100,19 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
 
     public Task Ping(ISignalRObserver observer)
     {
-        _observerManager.Subscribe(observer, observer);
+        TouchObserver(observer);
         return Task.CompletedTask;
     }
 
     public Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        _logger.LogDebug("Adding connection {ConnectionId} to group {GroupName} in partition {PartitionId}",
+        Logger.LogDebug("Adding connection {ConnectionId} to group {GroupName} in partition {PartitionId}",
             connectionId, groupName, this.GetPrimaryKeyLong());
 
         var observerKey = observer.GetPrimaryKeyString();
 
-        _observerManager.Subscribe(observer, observer);
         _state.State.ConnectionObservers[connectionId] = observerKey;
+        TrackConnection(connectionId, observer);
 
         if (!_state.State.Groups.TryGetValue(groupName, out var connections))
         {
@@ -126,7 +135,7 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
 
     public Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        _logger.LogDebug("Removing connection {ConnectionId} from group {GroupName} in partition {PartitionId}",
+        Logger.LogDebug("Removing connection {ConnectionId} from group {GroupName} in partition {PartitionId}",
             connectionId, groupName, this.GetPrimaryKeyLong());
 
         if (_state.State.Groups.TryGetValue(groupName, out var members))
@@ -161,9 +170,9 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
-        _logger.LogDebug("Deactivating group partition grain {PartitionId}", this.GetPrimaryKeyLong());
+        Logger.LogDebug("Deactivating group partition grain {PartitionId}", this.GetPrimaryKeyLong());
 
-        _observerManager.ClearExpired();
+        ClearObserverTracking();
 
         if (_state.State.IsEmpty)
         {
@@ -198,9 +207,33 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         return observers;
     }
 
+    private HashSet<string> CollectConnectionIds(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)
+    {
+        var connections = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var groupName in groupNames)
+        {
+            if (!_state.State.Groups.TryGetValue(groupName, out var members))
+            {
+                continue;
+            }
+
+            foreach (var (connectionId, _) in members)
+            {
+                if (excludedConnections is not null && excludedConnections.Contains(connectionId))
+                {
+                    continue;
+                }
+
+                connections.Add(connectionId);
+            }
+        }
+
+        return connections;
+    }
+
     private void RemoveConnectionInternal(string connectionId, ISignalRObserver observer)
     {
-        _observerManager.Unsubscribe(observer);
         List<string>? emptiedGroups = null;
 
         if (_state.State.ConnectionGroups.TryGetValue(connectionId, out var groups))
@@ -224,7 +257,7 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         }
 
         _state.State.ConnectionObservers.Remove(connectionId);
-
+        UntrackConnection(connectionId, observer);
         if (emptiedGroups is not null)
         {
             foreach (var group in emptiedGroups)
@@ -257,8 +290,13 @@ public class SignalRGroupPartitionGrain : Grain, ISignalRGroupPartitionGrain
         {
             if (t.IsFaulted)
             {
-                _logger.LogError(t.Exception, "Failed to notify coordinator about group {GroupName} removal.", groupName);
+                Logger.LogError(t.Exception, "Failed to notify coordinator about group {GroupName} removal.", groupName);
             }
         }, TaskContinuationOptions.OnlyOnFaulted);
+    }
+
+    protected override void OnLiveObserverDispatchFailure(Exception exception)
+    {
+        Logger.LogWarning(exception, "Live observer send failed for group partition {PartitionId}.", this.GetPrimaryKeyLong());
     }
 }

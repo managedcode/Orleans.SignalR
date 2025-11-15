@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -12,58 +14,71 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
-using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionPartitionGrain)}")]
-public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitionGrain
+public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRConnectionPartitionGrain>, ISignalRConnectionPartitionGrain
 {
-    private readonly ILogger<SignalRConnectionPartitionGrain> _logger;
-    private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IPersistentState<ConnectionState> _stateStorage;
 
-    public SignalRConnectionPartitionGrain(ILogger<SignalRConnectionPartitionGrain> logger,
-        IOptions<OrleansSignalROptions> orleansSignalOptions, IOptions<HubOptions> hubOptions,
+    public SignalRConnectionPartitionGrain(
+        ILogger<SignalRConnectionPartitionGrain> logger,
+        IOptions<OrleansSignalROptions> orleansSignalOptions,
+        IOptions<HubOptions> hubOptions,
         [PersistentState(nameof(SignalRConnectionPartitionGrain), OrleansSignalROptions.OrleansSignalRStorage)]
         IPersistentState<ConnectionState> stateStorage)
+        : base(logger, orleansSignalOptions, hubOptions)
     {
-        _logger = logger;
         _stateStorage = stateStorage;
-
-        var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
-        var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeSpan);
-        _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
 
         _stateStorage.State ??= new ConnectionState();
     }
 
+    protected override int TrackedConnectionCount => _stateStorage.State.ConnectionIds.Count;
+
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.AddConnection(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
-        _observerManager.Subscribe(observer, observer);
+        Logs.AddConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
+        TrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
 
     public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.RemoveConnection(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
-        _observerManager.Unsubscribe(observer);
+        Logs.RemoveConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
+        UntrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
 
     public async Task SendToPartition(HubMessage message)
     {
-        Logs.SendToAll(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
+        Logs.SendToAll(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
+
+        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        {
+            DispatchToLiveObservers(LiveObservers.Values, message);
+            return;
+        }
+
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
     }
 
     public async Task SendToPartitionExcept(HubMessage message, string[] excludedConnectionIds)
     {
-        Logs.SendToAllExcept(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), excludedConnectionIds);
+        Logs.SendToAllExcept(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), excludedConnectionIds);
+
+        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        {
+            var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
+            var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
+            DispatchToLiveObservers(targets, message);
+            return;
+        }
+
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
         {
@@ -73,20 +88,26 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
             }
         }
 
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
             connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
     }
 
     public async Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
-        Logs.SendToConnection(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
+        Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
 
         if (!_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
         {
             return false;
         }
 
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
+        if (TryGetLiveObserver(connectionId, out var live))
+        {
+            _ = live.OnNextAsync(message);
+            return true;
+        }
+
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
             connection => connection.GetPrimaryKeyString() == observer));
 
         return true;
@@ -94,7 +115,26 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
 
     public async Task SendToConnections(HubMessage message, string[] connectionIds)
     {
-        Logs.SendToConnections(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionIds);
+        Logs.SendToConnections(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionIds);
+
+        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        {
+            List<ISignalRObserver>? targets = null;
+            foreach (var connectionId in connectionIds)
+            {
+                if (TryGetLiveObserver(connectionId, out var observer))
+                {
+                    targets ??= new List<ISignalRObserver>();
+                    targets.Add(observer);
+                }
+            }
+
+            if (targets is not null)
+            {
+                DispatchToLiveObservers(targets, message);
+                return;
+            }
+        }
 
         var hashSet = new HashSet<string>();
         foreach (var connectionId in connectionIds)
@@ -105,23 +145,23 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
             }
         }
 
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message),
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
             connection => hashSet.Contains(connection.GetPrimaryKeyString())));
     }
 
     public Task Ping(ISignalRObserver observer)
     {
-        Logs.Ping(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
-        _observerManager.Subscribe(observer, observer);
+        Logs.Ping(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
+        TouchObserver(observer);
         return Task.CompletedTask;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
-        Logs.OnDeactivateAsync(_logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
-        _observerManager.ClearExpired();
+        Logs.OnDeactivateAsync(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
+        ClearObserverTracking();
 
-        if (_observerManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
+        if (ObserverManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
         {
             await _stateStorage.ClearStateAsync(cancellationToken);
         }
@@ -129,5 +169,10 @@ public class SignalRConnectionPartitionGrain : Grain, ISignalRConnectionPartitio
         {
             await _stateStorage.WriteStateAsync(cancellationToken);
         }
+    }
+
+    protected override void OnLiveObserverDispatchFailure(Exception exception)
+    {
+        Logger.LogWarning(exception, "Live observer send failed for partition {PartitionId}.", this.GetPrimaryKeyLong());
     }
 }

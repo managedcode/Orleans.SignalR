@@ -117,7 +117,7 @@ public class LoadClusterFixture : ClusterFixtureBase
     }
 }
 
-[CollectionDefinition(nameof(LoadCluster))]
+[CollectionDefinition(nameof(LoadCluster), DisableParallelization = true)]
 public sealed class LoadCluster : ICollectionFixture<LoadClusterFixture>
 {
 }
@@ -126,7 +126,7 @@ public sealed class LoadClusterDeviceFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterDevice))]
+[CollectionDefinition(nameof(LoadClusterDevice), DisableParallelization = true)]
 public sealed class LoadClusterDevice : ICollectionFixture<LoadClusterDeviceFixture>
 {
 }
@@ -135,7 +135,7 @@ public sealed class LoadClusterBroadcastFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterBroadcast))]
+[CollectionDefinition(nameof(LoadClusterBroadcast), DisableParallelization = true)]
 public sealed class LoadClusterBroadcast : ICollectionFixture<LoadClusterBroadcastFixture>
 {
 }
@@ -144,7 +144,7 @@ public sealed class LoadClusterGroupFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterGroup))]
+[CollectionDefinition(nameof(LoadClusterGroup), DisableParallelization = true)]
 public sealed class LoadClusterGroup : ICollectionFixture<LoadClusterGroupFixture>
 {
 }
@@ -153,7 +153,7 @@ public sealed class LoadClusterStreamingFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterStreaming))]
+[CollectionDefinition(nameof(LoadClusterStreaming), DisableParallelization = true)]
 public sealed class LoadClusterStreaming : ICollectionFixture<LoadClusterStreamingFixture>
 {
 }
@@ -162,7 +162,7 @@ public sealed class LoadClusterInvocationFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterInvocation))]
+[CollectionDefinition(nameof(LoadClusterInvocation), DisableParallelization = true)]
 public sealed class LoadClusterInvocation : ICollectionFixture<LoadClusterInvocationFixture>
 {
 }
@@ -171,7 +171,7 @@ public sealed class LoadClusterCascadeFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterCascade))]
+[CollectionDefinition(nameof(LoadClusterCascade), DisableParallelization = true)]
 public sealed class LoadClusterCascade : ICollectionFixture<LoadClusterCascadeFixture>
 {
 }
@@ -180,7 +180,24 @@ public sealed class LoadClusterActivationFixture : LoadClusterFixture
 {
 }
 
-[CollectionDefinition(nameof(LoadClusterActivation))]
+[CollectionDefinition(nameof(LoadClusterActivation), DisableParallelization = true)]
 public sealed class LoadClusterActivation : ICollectionFixture<LoadClusterActivationFixture>
+{
+}
+
+public sealed class UserConfigurationClusterFixture : ClusterFixtureBase
+{
+    public UserConfigurationClusterFixture()
+        : base(builder =>
+        {
+            builder.Options.InitialSilosCount = 2;
+            builder.AddSiloBuilderConfigurator<UserConfigurationSiloConfigurator>();
+        })
+    {
+    }
+}
+
+[CollectionDefinition(nameof(UserConfigurationCluster))]
+public sealed class UserConfigurationCluster : ICollectionFixture<UserConfigurationClusterFixture>
 {
 }
