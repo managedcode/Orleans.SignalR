@@ -66,18 +66,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference);
         }
 
-        if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
-        {
-            var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
-            var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connection.ConnectionId);
-            var registration = new ConnectionHeartbeatRegistration(
-                hubKey,
-                usePartitions,
-                partitionId,
-                subscription.Reference,
-                heartbeatInterval);
-            await heartbeatGrain.Start(registration);
-        }
+        subscription.SetConnectionMetadata(hubKey, usePartitions, partitionId);
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
         {
@@ -86,6 +75,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             await userGrain.AddConnection(connection.ConnectionId, subscription.Reference);
             _ = Task.Run(userGrain.RequestMessage);
         }
+
+        await UpdateConnectionHeartbeatAsync(connection.ConnectionId, subscription);
     }
 
     public override async Task OnDisconnectedAsync(HubConnectionContext connection)
@@ -304,6 +295,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             await Task.Run(() => groupGrain.AddConnection(connectionId, subscription.Reference), cancellationToken);
             subscription.AddGrain(groupGrain);
         }
+
+        await UpdateConnectionHeartbeatAsync(connectionId, subscription);
     }
 
     public override async Task RemoveFromGroupAsync(string connectionId, string groupName,
@@ -330,6 +323,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             if (!stillTracked)
             {
                 subscription.RemoveGrain(partitionGrain);
+                await UpdateConnectionHeartbeatAsync(connectionId, subscription);
             }
         }
         else
@@ -337,6 +331,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
             await Task.Run(() => groupGrain.RemoveConnection(connectionId, subscription.Reference), cancellationToken);
             subscription.RemoveGrain(groupGrain);
+            await UpdateConnectionHeartbeatAsync(connectionId, subscription);
         }
     }
 
@@ -561,6 +556,27 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var connection = _connections[connectionId];
         return connection?.Features.Get<Subscription>();
+    }
+
+    private Task UpdateConnectionHeartbeatAsync(string connectionId, Subscription subscription)
+    {
+        if (!_orleansSignalOptions.Value.KeepEachConnectionAlive || string.IsNullOrEmpty(subscription.HubKey))
+        {
+            return Task.CompletedTask;
+        }
+
+        var hubKey = subscription.HubKey!;
+        var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
+        var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connectionId);
+        var registration = new ConnectionHeartbeatRegistration(
+            hubKey,
+            subscription.UsePartitioning,
+            subscription.PartitionId,
+            subscription.Reference,
+            heartbeatInterval,
+            subscription.GetGrainSnapshot());
+
+        return heartbeatGrain.Start(registration);
     }
 
     private static bool IsLocalObjectReferenceException(Exception ex)

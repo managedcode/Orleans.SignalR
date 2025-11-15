@@ -19,27 +19,20 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}")]
-public class SignalRConnectionHolderGrain : SignalRObserverGrainBase<SignalRConnectionHolderGrain>, ISignalRConnectionHolderGrain
+public class SignalRConnectionHolderGrain(
+    ILogger<SignalRConnectionHolderGrain> logger,
+    IOptions<OrleansSignalROptions> orleansSignalOptions,
+    IOptions<HubOptions> hubOptions,
+    [PersistentState(nameof(SignalRConnectionHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)]
+    IPersistentState<ConnectionState> stateStorage)
+    : SignalRObserverGrainBase<SignalRConnectionHolderGrain>(logger, orleansSignalOptions, hubOptions), ISignalRConnectionHolderGrain
 {
-    private readonly IPersistentState<ConnectionState> _stateStorage;
-
-    public SignalRConnectionHolderGrain(
-        ILogger<SignalRConnectionHolderGrain> logger,
-        IOptions<OrleansSignalROptions> orleansSignalOptions,
-        IOptions<HubOptions> hubOptions,
-        [PersistentState(nameof(SignalRConnectionHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<ConnectionState> stateStorage)
-        : base(logger, orleansSignalOptions, hubOptions)
-    {
-        _stateStorage = stateStorage;
-    }
-
-    protected override int TrackedConnectionCount => _stateStorage.State.ConnectionIds.Count;
+    protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         Logs.AddConnection(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionId);
-        _stateStorage.State.ConnectionIds[connectionId] = observer.GetPrimaryKeyString();
+        stateStorage.State.ConnectionIds[connectionId] = observer.GetPrimaryKeyString();
         TrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
@@ -47,7 +40,7 @@ public class SignalRConnectionHolderGrain : SignalRObserverGrainBase<SignalRConn
     public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         Logs.RemoveConnection(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionId);
-        _stateStorage.State.ConnectionIds.Remove(connectionId);
+        stateStorage.State.ConnectionIds.Remove(connectionId);
         UntrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
@@ -80,7 +73,7 @@ public class SignalRConnectionHolderGrain : SignalRObserverGrainBase<SignalRConn
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
         {
-            if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            if (stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
             {
                 hashSet.Add(observer);
             }
@@ -94,7 +87,7 @@ public class SignalRConnectionHolderGrain : SignalRObserverGrainBase<SignalRConn
     {
         Logs.SendToConnection(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionId);
 
-        if (!_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+        if (!stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
         {
             return false;
         }
@@ -137,7 +130,7 @@ public class SignalRConnectionHolderGrain : SignalRObserverGrainBase<SignalRConn
         var hashSet = new HashSet<string>();
         foreach (var connectionId in connectionIds)
         {
-            if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            if (stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
             {
                 hashSet.Add(observer);
             }
@@ -159,13 +152,13 @@ public class SignalRConnectionHolderGrain : SignalRObserverGrainBase<SignalRConn
         Logs.OnDeactivateAsync(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString());
         ClearObserverTracking();
 
-        if (ObserverManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
+        if (ObserverManager.Count == 0 || stateStorage.State.ConnectionIds.Count == 0)
         {
-            await _stateStorage.ClearStateAsync(cancellationToken);
+            await stateStorage.ClearStateAsync(cancellationToken);
         }
         else
         {
-            await _stateStorage.WriteStateAsync(cancellationToken);
+            await stateStorage.WriteStateAsync(cancellationToken);
         }
     }
 

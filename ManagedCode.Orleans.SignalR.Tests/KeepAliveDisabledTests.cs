@@ -1,6 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Http;
+using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -143,6 +146,64 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task KeepAlive_disabled_should_preserve_user_delivery_after_idle_interval()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("TestWebApplication was not initialized.");
+        }
+
+        using var httpClient = _app.CreateHttpClient();
+        var userId = $"user-{Guid.NewGuid():N}";
+        var token = await httpClient.GetStringAsync($"/auth?user={userId}");
+
+        HubConnection CreateAuthenticatedConnection()
+        {
+            return _app.CreateSignalRClient(
+                nameof(SimpleTestHub),
+                configureConnection: options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult(token);
+                });
+        }
+
+        var receiver = CreateAuthenticatedConnection();
+        var sender = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        var payload = $"keepalive-disabled-user-{Guid.NewGuid():N}";
+        var delivered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.On<string>("SendAll", message =>
+        {
+            if (message.Contains(payload, StringComparison.Ordinal))
+            {
+                delivered.TrySetResult(message);
+            }
+        });
+
+        try
+        {
+            await receiver.StartAsync();
+            await sender.StartAsync();
+
+            await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
+
+            await sender.InvokeAsync("SentToUser", userId, payload);
+            var completed = await Task.WhenAny(delivered.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.ShouldBe(delivered.Task, "User-targeted send failed after idle interval when keep-alive disabled.");
+
+            var content = await delivered.Task;
+            content.ShouldContain(payload);
+        }
+        finally
+        {
+            await receiver.StopAsync();
+            await sender.StopAsync();
+            await receiver.DisposeAsync();
+            await sender.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task Group_send_should_work_when_keep_alive_disabled()
     {
         if (_app is null)
@@ -166,11 +227,11 @@ public class KeepAliveDisabledTests : IAsyncLifetime
             await connection.StartAsync();
             connection.ConnectionId.ShouldNotBeNull();
 
-            const string groupName = "keepalive-group";
+            var groupName = $"keepalive-group-{Guid.NewGuid():N}";
             await connection.InvokeAsync("AddToGroup", groupName);
 
-            // Allow the hub to finish the "joined the group" broadcast.
-            await Task.Delay(TimeSpan.FromSeconds(2));
+            // Allow the hub to finish the "joined the group" broadcast and cross the timeout window.
+            await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
 
             await connection.InvokeAsync("GroupSendAsync", groupName, "payload");
 

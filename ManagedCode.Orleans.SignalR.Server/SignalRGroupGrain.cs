@@ -19,22 +19,14 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRGroupGrain)}")]
-public class SignalRGroupGrain : SignalRObserverGrainBase<SignalRGroupGrain>, ISignalRGroupGrain
+public class SignalRGroupGrain(
+    ILogger<SignalRGroupGrain> logger,
+    IOptions<OrleansSignalROptions> orleansSignalOptions,
+    IOptions<HubOptions> hubOptions,
+    [PersistentState(nameof(SignalRGroupGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage)
+    : SignalRObserverGrainBase<SignalRGroupGrain>(logger, orleansSignalOptions, hubOptions), ISignalRGroupGrain
 {
-    private readonly IPersistentState<ConnectionState> _stateStorage;
-
-    public SignalRGroupGrain(
-        ILogger<SignalRGroupGrain> logger,
-        IOptions<OrleansSignalROptions> orleansSignalOptions,
-        IOptions<HubOptions> hubOptions,
-        [PersistentState(nameof(SignalRGroupGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<ConnectionState> stateStorage)
-        : base(logger, orleansSignalOptions, hubOptions)
-    {
-        _stateStorage = stateStorage;
-    }
-
-    protected override int TrackedConnectionCount => _stateStorage.State.ConnectionIds.Count;
+    protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 
     public async Task SendToGroup(HubMessage message)
     {
@@ -64,7 +56,7 @@ public class SignalRGroupGrain : SignalRObserverGrainBase<SignalRGroupGrain>, IS
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
         {
-            if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            if (stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
             {
                 hashSet.Add(observer);
             }
@@ -77,7 +69,7 @@ public class SignalRGroupGrain : SignalRObserverGrainBase<SignalRGroupGrain>, IS
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         Logs.AddConnection(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString(), connectionId);
-        _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
+        stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
         TrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
@@ -85,7 +77,7 @@ public class SignalRGroupGrain : SignalRObserverGrainBase<SignalRGroupGrain>, IS
     public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         Logs.RemoveConnection(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString(), connectionId);
-        _stateStorage.State.ConnectionIds.Remove(connectionId);
+        stateStorage.State.ConnectionIds.Remove(connectionId);
         UntrackConnection(connectionId, observer);
         return Task.CompletedTask;
     }
@@ -102,13 +94,13 @@ public class SignalRGroupGrain : SignalRObserverGrainBase<SignalRGroupGrain>, IS
         Logs.OnDeactivateAsync(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString());
         ClearObserverTracking();
 
-        if (ObserverManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
+        if (ObserverManager.Count == 0 || stateStorage.State.ConnectionIds.Count == 0)
         {
-            await _stateStorage.ClearStateAsync(cancellationToken);
+            await stateStorage.ClearStateAsync(cancellationToken);
         }
         else
         {
-            await _stateStorage.WriteStateAsync(cancellationToken);
+            await stateStorage.WriteStateAsync(cancellationToken);
         }
     }
 

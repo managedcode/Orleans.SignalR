@@ -24,7 +24,6 @@ public class SignalRConnectionCoordinatorGrain(
     IClusterClient _) : Grain, ISignalRConnectionCoordinatorGrain
 {
     private readonly Dictionary<string, int> _connectionPartitions = new(StringComparer.Ordinal);
-    private readonly ILogger<SignalRConnectionCoordinatorGrain> _logger = logger;
     private readonly int _connectionsPerPartitionHint = Math.Max(1, options.Value.ConnectionsPerPartitionHint);
     private uint _basePartitionCount;
     private int _currentPartitionCount;
@@ -54,7 +53,7 @@ public class SignalRConnectionCoordinatorGrain(
 
         if (stopwatch.Elapsed > TimeSpan.FromMilliseconds(500))
         {
-            _logger.LogWarning(
+            logger.LogWarning(
                 "GetPartitionForConnection for {ConnectionId} took {Elapsed} (tracked={Tracked})",
                 connectionId,
                 stopwatch.Elapsed,
@@ -76,7 +75,7 @@ public class SignalRConnectionCoordinatorGrain(
             .GroupBy(static kvp => kvp.Value)
             .Select(group => $"{group.Key}:{group.Count()}")
             .ToArray();
-        _logger.LogInformation("Sending to all partitions {Distribution}", string.Join(",", distribution));
+        logger.LogInformation("Sending to all partitions {Distribution}", string.Join(",", distribution));
 
         var tasks = new List<Task>(partitions.Count);
         foreach (var partitionId in partitions)
@@ -161,10 +160,10 @@ public class SignalRConnectionCoordinatorGrain(
     {
         if (_connectionPartitions.Remove(connectionId))
         {
-            _logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping.", connectionId);
+            logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping.", connectionId);
             if (_connectionPartitions.Count == 0 && _currentPartitionCount != _basePartitionCount)
             {
-                _logger.LogDebug("Resetting partition count to base value {PartitionCount} as no active connections remain.", _basePartitionCount);
+                logger.LogDebug("Resetting partition count to base value {PartitionCount} as no active connections remain.", _basePartitionCount);
                 _currentPartitionCount = (int)_basePartitionCount;
             }
         }
@@ -196,7 +195,7 @@ public class SignalRConnectionCoordinatorGrain(
         partition = PartitionHelper.GetPartitionId(connectionId, (uint)partitionCount);
         _connectionPartitions[connectionId] = partition;
 
-        _logger.LogDebug("Assigned connection {ConnectionId} to partition {Partition} (partitionCount={PartitionCount})", connectionId, partition, partitionCount);
+        logger.LogDebug("Assigned connection {ConnectionId} to partition {Partition} (partitionCount={PartitionCount})", connectionId, partition, partitionCount);
         return partition;
     }
 
@@ -207,7 +206,7 @@ public class SignalRConnectionCoordinatorGrain(
 
         if (desired > _currentPartitionCount)
         {
-            _logger.LogInformation(
+            logger.LogInformation(
                 "Increasing connection partition count from {OldPartitionCount} to {NewPartitionCount} for {ConnectionCount} tracked connections.",
                 _currentPartitionCount,
                 desired,

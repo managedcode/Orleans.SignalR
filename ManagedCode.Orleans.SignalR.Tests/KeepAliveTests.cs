@@ -1,3 +1,7 @@
+using System;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -105,6 +109,114 @@ public class KeepAliveTests : IAsyncLifetime
 
             var content = await routed.Task;
             content.ShouldContain(sender.ConnectionId!);
+            content.ShouldContain(payload);
+        }
+        finally
+        {
+            await receiver.StopAsync();
+            await sender.StopAsync();
+            await receiver.DisposeAsync();
+            await sender.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task KeepAlive_should_preserve_user_delivery_after_idle_interval()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("Test host is not initialised.");
+        }
+
+        using var httpClient = _app.CreateHttpClient();
+        var userId = $"user-{Guid.NewGuid():N}";
+        var token = await httpClient.GetStringAsync($"/auth?user={userId}");
+
+        HubConnection CreateAuthenticatedConnection()
+        {
+            return _app.CreateSignalRClient(
+                nameof(SimpleTestHub),
+                configureConnection: options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult(token);
+                });
+        }
+
+        var receiver = CreateAuthenticatedConnection();
+        var sender = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        var payload = $"keepalive-user-{Guid.NewGuid():N}";
+        var delivered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.On<string>("SendAll", message =>
+        {
+            if (message.Contains(payload, StringComparison.Ordinal))
+            {
+                delivered.TrySetResult(message);
+            }
+        });
+
+        try
+        {
+            await receiver.StartAsync();
+            await sender.StartAsync();
+
+            _output.WriteLine("Waiting past the client timeout before sending a user-targeted message.");
+            await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
+
+            await sender.InvokeAsync("SentToUser", userId, payload);
+            var completed = await Task.WhenAny(delivered.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.ShouldBe(delivered.Task, "Keep-alive user routing failed after idle interval.");
+
+            var content = await delivered.Task;
+            content.ShouldContain(payload);
+        }
+        finally
+        {
+            await receiver.StopAsync();
+            await sender.StopAsync();
+            await receiver.DisposeAsync();
+            await sender.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task KeepAlive_should_preserve_group_delivery_after_idle_interval()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("Test host is not initialised.");
+        }
+
+        var groupName = $"group-{Guid.NewGuid():N}";
+        var receiver = _app.CreateSignalRClient(nameof(SimpleTestHub));
+        var sender = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        var payload = $"keepalive-group-{Guid.NewGuid():N}";
+        var delivered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        receiver.On<string>("SendAll", message =>
+        {
+            if (message.Contains(payload, StringComparison.Ordinal))
+            {
+                delivered.TrySetResult(message);
+            }
+        });
+
+        try
+        {
+            await receiver.StartAsync();
+            await sender.StartAsync();
+            receiver.ConnectionId.ShouldNotBeNull();
+
+            await receiver.InvokeAsync("AddToGroup", groupName);
+
+            _output.WriteLine("Waiting past the client timeout to ensure group observers rely on the heartbeat.");
+            await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
+
+            await sender.InvokeAsync("GroupSendAsync", groupName, payload);
+            var completed = await Task.WhenAny(delivered.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+            completed.ShouldBe(delivered.Task, "Keep-alive group routing failed after idle interval.");
+
+            var content = await delivered.Task;
             content.ShouldContain(payload);
         }
         finally

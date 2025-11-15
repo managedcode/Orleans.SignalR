@@ -15,7 +15,6 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public class SignalRConnectionHeartbeatGrain(
     ILogger<SignalRConnectionHeartbeatGrain> logger) : Grain, ISignalRConnectionHeartbeatGrain
 {
-    private readonly ILogger<SignalRConnectionHeartbeatGrain> _logger = logger;
     private ConnectionHeartbeatRegistration? _registration;
     private IDisposable? _timer;
 
@@ -23,7 +22,7 @@ public class SignalRConnectionHeartbeatGrain(
     {
         _registration = registration;
         ResetTimer(registration.Interval);
-        _logger.LogDebug("Heartbeat started for connection grain {Key} (partitioned={Partitioned}, partitionId={PartitionId}).",
+        logger.LogDebug("Heartbeat started for connection grain {Key} (partitioned={Partitioned}, partitionId={PartitionId}).",
             this.GetPrimaryKeyString(), registration.UsePartitioning, registration.PartitionId);
         return Task.CompletedTask;
     }
@@ -32,7 +31,7 @@ public class SignalRConnectionHeartbeatGrain(
     {
         ResetTimer(null);
         _registration = null;
-        _logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());
+        logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());
         return Task.CompletedTask;
     }
 
@@ -62,22 +61,23 @@ public class SignalRConnectionHeartbeatGrain(
             return;
         }
 
+        var grains = _registration.GrainReferences;
+        if (grains.IsDefaultOrEmpty)
+        {
+            return;
+        }
+
         try
         {
-            if (_registration.UsePartitioning)
+            foreach (var grainReference in grains)
             {
-                var partition = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, _registration.HubKey, _registration.PartitionId);
-                await partition.Ping(_registration.Observer);
-            }
-            else
-            {
-                var holder = NameHelperGenerator.GetConnectionHolderGrain(GrainFactory, _registration.HubKey);
-                await holder.Ping(_registration.Observer);
+                var manager = grainReference.Cast<IObserverConnectionManager>();
+                await manager.Ping(_registration.Observer);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Heartbeat ping failed for connection grain {Key}.", this.GetPrimaryKeyString());
+            logger.LogDebug(ex, "Heartbeat ping failed for connection grain {Key}.", this.GetPrimaryKeyString());
         }
     }
 }
