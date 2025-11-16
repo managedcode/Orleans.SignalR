@@ -92,9 +92,10 @@ public class SignalRGroupGrain(
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         Logs.OnDeactivateAsync(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString());
+        var hasConnections = stateStorage.State.ConnectionIds.Count > 0;
         ClearObserverTracking();
 
-        if (ObserverManager.Count == 0 || stateStorage.State.ConnectionIds.Count == 0)
+        if (!hasConnections)
         {
             await stateStorage.ClearStateAsync(cancellationToken);
         }

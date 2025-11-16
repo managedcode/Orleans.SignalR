@@ -30,13 +30,14 @@ Install-Package ManagedCode.Orleans.SignalR.Client
 
 ```csharp
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Server.Extensions;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Host.UseOrleans(silo =>
 {
     silo.ConfigureOrleansSignalR();
-    silo.AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
+    silo.AddOrleansSignalRInMemoryStorage(); // or silo.AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
 });
 
 builder.Services
@@ -47,6 +48,8 @@ builder.Services
         options.GroupPartitionCount = 4;
     });
 ```
+
+> Storage note: all SignalR grains persist their connection/group metadata using the storage provider registered under `OrleansSignalROptions.OrleansSignalRStorage`. The helper `AddOrleansSignalRInMemoryStorage()` wires up the built-in in-memory provider (per the [Orleans grain persistence docs](https://learn.microsoft.com/dotnet/orleans/grains/grain-persistence)) and is the recommended default because connection state churns rapidly. If you prefer to register the provider yourself—either `AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage)` or a custom `IGrainStorage` implementation—just make sure it uses the same storage name. Avoid heavyweight databases for this store unless you truly need durability beyond silo restarts.
 
 ### 3. Configure your Orleans client
 
@@ -165,7 +168,7 @@ See the [Orleans placement docs](https://learn.microsoft.com/dotnet/orleans/grai
 ### How Connection Partitioning Works
 
 1. **Hub lifetime manager routing** — when a client connects, `OrleansHubLifetimeManager<THub>` asks the `SignalRConnectionCoordinatorGrain` for a partition id and registers the observer with the corresponding `SignalRConnectionPartitionGrain`. When the client disconnects the lifetime manager removes the observer and notifies the coordinator so the mapping can be cleaned up.
-2. **Coordinator bookkeeping** — `SignalRConnectionCoordinatorGrain` keeps an in-memory dictionary of connection ids to partition ids. It calls `PartitionHelper.GetPartitionId` to pick a slot, and `EnsurePartitionCapacity` grows the partition ring to the next power of two when tracked connections exceed `ConnectionsPerPartitionHint`. If all connections vanish it resets to the configured `ConnectionPartitionCount`.
+2. **Coordinator bookkeeping** — `SignalRConnectionCoordinatorGrain` keeps a persisted dictionary of connection ids to partition ids. It calls `PartitionHelper.GetPartitionId` to pick a slot, and `EnsurePartitionCapacity` grows the partition ring to the next power of two when tracked connections exceed `ConnectionsPerPartitionHint`. If all connections vanish it resets to the configured `ConnectionPartitionCount` and writes the updated state back to the configured storage provider.
 3. **Consistent hash ring** — `PartitionHelper` caches hash rings with 150 virtual nodes per physical partition to spread connections evenly. `GetOptimalPartitionCount` and `GetOptimalGroupPartitionCount` implement the “power of two” heuristic used by both coordinators.
 4. **Partition grain fan-out** — each `SignalRConnectionPartitionGrain` persists the connection → observer mapping and uses Orleans `ObserverManager` to broadcast to subscribers, including `SendToPartition`, `SendToPartitionExcept`, and per-connection delivery. On deactivation it clears or writes state based on whether any observers remain.
 
@@ -173,7 +176,7 @@ See the [Orleans placement docs](https://learn.microsoft.com/dotnet/orleans/grai
 
 - **What they are** — a connection partition is just a regular Orleans grain (`SignalRConnectionPartitionGrain`) whose primary key composes the hub identity with a partition number. `NameHelperGenerator.GetConnectionPartitionGrain` hashes the hub name with `XxHash64` and folds in the partition id to produce a long key, so every hub keeps a deterministic set of partition activations.
 
-- **Where they live** — all connection-level grains (coordinator + partitions) are placed in the `ManagedCode.Orleans.SignalR.Server` assembly. The coordinator grain is keyed by the hub name (`typeof(THub).FullName` cleaned to be storage-safe). Partition grains use the same hub key plus the partition number; Orleans activates them on demand and persists the `ConnectionState` record in the storage provider registered under `OrleansSignalROptions.OrleansSignalRStorage`.
+- **Where they live** — all connection-level grains (coordinator + partitions) are placed in the `ManagedCode.Orleans.SignalR.Server` assembly. The coordinator grain is keyed by the hub name (`typeof(THub).FullName` cleaned to be storage-safe). Partition grains use the same hub key plus the partition number; Orleans activates them on demand and persists the `ConnectionState` record in the storage provider registered under `OrleansSignalROptions.OrleansSignalRStorage` (use `silo.AddOrleansSignalRInMemoryStorage()` or register your own provider under that name).
 
 - **How connections land there** — when a new client connects, the lifetime manager creates an `ISignalRObserver` subscription and calls `AddConnection` on the chosen partition. The partition stores `connectionId -> observerKey` in persistent state and subscribes the observer with `ObserverManager`, so later broadcasts simply loop through observers and push HubMessage payloads.
 

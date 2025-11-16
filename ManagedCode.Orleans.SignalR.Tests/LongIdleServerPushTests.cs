@@ -118,11 +118,15 @@ public class LongIdleServerPushTests : IAsyncLifetime
 
             await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(5));
 
-            if (receiver.State != HubConnectionState.Connected)
-            {
-                await receiver.StartAsync();
-                receiver.ConnectionId.ShouldNotBeNull();
-            }
+            // Force client reconnection after the collection window to simulate real SignalR behaviour.
+            await receiver.StopAsync();
+            await sender.StopAsync();
+
+            await receiver.StartAsync();
+            receiver.ConnectionId.ShouldNotBeNull();
+
+            await sender.StartAsync();
+            sender.ConnectionId.ShouldNotBeNull();
 
             routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 

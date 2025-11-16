@@ -4,7 +4,7 @@ namespace ManagedCode.Orleans.SignalR.Core.Config;
 
 public class OrleansSignalROptions
 {
-    public const string OrleansSignalRStorage = "OrleansSignalRStorage";
+    public const string OrleansSignalRStorage = "ManagedCode.Orleans.SignalR.Storage";
 
     /// <summary>
     ///     Gets or sets the time window clients have to send a message before the server closes the connection.

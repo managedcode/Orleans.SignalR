@@ -187,9 +187,10 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
     {
         Logger.LogDebug("Deactivating group partition grain {PartitionId}", this.GetPrimaryKeyLong());
 
+        var hasState = !_state.State.IsEmpty;
         ClearObserverTracking();
 
-        if (_state.State.IsEmpty)
+        if (!hasState)
         {
             return _state.ClearStateAsync(cancellationToken);
         }

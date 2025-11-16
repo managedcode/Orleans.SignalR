@@ -396,9 +396,9 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 // TODO: Need to handle other server going away while waiting for connection result
                 var invocation = _orleansSignalOptions.Value.ConnectionPartitionCount > 1
                     ? await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
-                        .SendToConnection(invocationMessage, connectionId))
+                        .SendToConnection(invocationMessage, connectionId), cancellationToken)
                     : await Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
-                        .SendToConnection(invocationMessage, connectionId));
+                        .SendToConnection(invocationMessage, connectionId), cancellationToken);
 
                 if (invocation == false)
                 {

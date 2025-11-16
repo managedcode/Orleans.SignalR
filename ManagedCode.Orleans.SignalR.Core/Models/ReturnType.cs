@@ -13,8 +13,5 @@ public class ReturnType
     [Id(1)]
     public string? Type { get; set; }
 
-    public Type GetReturnType()
-    {
-        return string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type)!;
-    }
+    public Type GetReturnType() => string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type)!;
 }

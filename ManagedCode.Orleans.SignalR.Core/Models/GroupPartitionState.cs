@@ -3,7 +3,6 @@ using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Models;
 
-[Immutable]
 [GenerateSerializer]
 public class GroupPartitionState
 {

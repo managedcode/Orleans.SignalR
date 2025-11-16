@@ -160,9 +160,10 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         Logs.OnDeactivateAsync(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
+        var hasConnections = _stateStorage.State.ConnectionIds.Count > 0;
         ClearObserverTracking();
 
-        if (ObserverManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)
+        if (!hasConnections)
         {
             await _stateStorage.ClearStateAsync(cancellationToken);
         }

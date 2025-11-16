@@ -28,13 +28,7 @@ public class InvocationInfo
     [Id(2)]
     public string Type { get; private set; } = string.Empty;
 
-    public Type GetResultType()
-    {
-        return string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type)!;
-    }
+    public Type GetResultType() => string.IsNullOrEmpty(Type) ? typeof(object) : System.Type.GetType(Type)!;
 
-    private void SetResultType(Type type)
-    {
-        Type = type.FullName!;
-    }
+    private void SetResultType(Type type) => Type = type.FullName!;
 }

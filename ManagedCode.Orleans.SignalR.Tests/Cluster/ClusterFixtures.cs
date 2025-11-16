@@ -202,3 +202,13 @@ public sealed class UserConfigurationClusterFixture : ClusterFixtureBase
 public sealed class UserConfigurationCluster : ICollectionFixture<UserConfigurationClusterFixture>
 {
 }
+
+public sealed class HighAvailabilityClusterFixture() : ClusterFixtureBase(builder =>
+{
+    builder.Options.InitialSilosCount = 2;
+});
+
+[CollectionDefinition(nameof(HighAvailabilityCluster), DisableParallelization = true)]
+public sealed class HighAvailabilityCluster : ICollectionFixture<HighAvailabilityClusterFixture>
+{
+}

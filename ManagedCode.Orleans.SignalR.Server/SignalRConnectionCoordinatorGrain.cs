@@ -7,32 +7,62 @@ using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
+using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionCoordinatorGrain)}")]
-public class SignalRConnectionCoordinatorGrain(
-    ILogger<SignalRConnectionCoordinatorGrain> logger,
-    IOptions<OrleansSignalROptions> options) : Grain, ISignalRConnectionCoordinatorGrain
+public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectionCoordinatorGrain
 {
-    private readonly Dictionary<string, int> _connectionPartitions = new(StringComparer.Ordinal);
-    private readonly int _connectionsPerPartitionHint = Math.Max(1, options.Value.ConnectionsPerPartitionHint);
+    private readonly ILogger<SignalRConnectionCoordinatorGrain> _logger;
+    private readonly IOptions<OrleansSignalROptions> _options;
+    private readonly IPersistentState<ConnectionCoordinatorState> _state;
+    private readonly Dictionary<string, int> _connectionPartitions;
+    private readonly int _connectionsPerPartitionHint;
     private uint _basePartitionCount;
     private int _currentPartitionCount;
 
+    public SignalRConnectionCoordinatorGrain(
+        ILogger<SignalRConnectionCoordinatorGrain> logger,
+        IOptions<OrleansSignalROptions> options,
+        [PersistentState(nameof(SignalRConnectionCoordinatorGrain), OrleansSignalROptions.OrleansSignalRStorage)]
+        IPersistentState<ConnectionCoordinatorState> state)
+    {
+        _logger = logger;
+        _options = options;
+        _state = state;
+        _state.State ??= new ConnectionCoordinatorState();
+
+        var partitions = _state.State.ConnectionPartitions;
+        if (partitions.Comparer != StringComparer.Ordinal)
+        {
+            partitions = new Dictionary<string, int>(partitions, StringComparer.Ordinal);
+            _state.State.ConnectionPartitions = partitions;
+        }
+
+        _connectionPartitions = partitions;
+        _connectionsPerPartitionHint = Math.Max(1, _options.Value.ConnectionsPerPartitionHint);
+    }
+
     public override Task OnActivateAsync(CancellationToken cancellationToken)
     {
-        _basePartitionCount = Math.Max(1, options.Value.ConnectionPartitionCount);
-        _currentPartitionCount = (int)_basePartitionCount;
+        _basePartitionCount = Math.Max(1u, _options.Value.ConnectionPartitionCount);
+        _currentPartitionCount = _state.State.CurrentPartitionCount;
+        if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
+        {
+            _currentPartitionCount = (int)_basePartitionCount;
+            _state.State.CurrentPartitionCount = _currentPartitionCount;
+        }
 
-        logger.LogInformation(
+        _logger.LogInformation(
             "Connection coordinator activated with base partition count {PartitionCount} and hint {ConnectionsPerPartition}",
             _basePartitionCount,
             _connectionsPerPartitionHint);
@@ -52,7 +82,7 @@ public class SignalRConnectionCoordinatorGrain(
 
         if (stopwatch.Elapsed > TimeSpan.FromMilliseconds(500))
         {
-            logger.LogWarning(
+            _logger.LogWarning(
                 "GetPartitionForConnection for {ConnectionId} took {Elapsed} (tracked={Tracked})",
                 connectionId,
                 stopwatch.Elapsed,
@@ -74,7 +104,7 @@ public class SignalRConnectionCoordinatorGrain(
             .GroupBy(static kvp => kvp.Value)
             .Select(group => $"{group.Key}:{group.Count()}")
             .ToArray();
-        logger.LogInformation("Sending to all partitions {Distribution}", string.Join(",", distribution));
+        _logger.LogInformation("Sending to all partitions {Distribution}", string.Join(",", distribution));
 
         var tasks = new List<Task>(partitions.Count);
         foreach (var partitionId in partitions)
@@ -159,15 +189,29 @@ public class SignalRConnectionCoordinatorGrain(
     {
         if (_connectionPartitions.Remove(connectionId))
         {
-            logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping.", connectionId);
+            _logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping.", connectionId);
             if (_connectionPartitions.Count == 0 && _currentPartitionCount != _basePartitionCount)
             {
-                logger.LogDebug("Resetting partition count to base value {PartitionCount} as no active connections remain.", _basePartitionCount);
+                _logger.LogDebug("Resetting partition count to base value {PartitionCount} as no active connections remain.", _basePartitionCount);
                 _currentPartitionCount = (int)_basePartitionCount;
+                _state.State.CurrentPartitionCount = _currentPartitionCount;
             }
         }
 
         return Task.CompletedTask;
+    }
+
+    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
+    {
+        _state.State.CurrentPartitionCount = _currentPartitionCount;
+        if (_connectionPartitions.Count == 0)
+        {
+            await _state.ClearStateAsync(cancellationToken);
+        }
+        else
+        {
+            await _state.WriteStateAsync(cancellationToken);
+        }
     }
 
     private List<int> GetActivePartitions()
@@ -194,7 +238,7 @@ public class SignalRConnectionCoordinatorGrain(
         partition = PartitionHelper.GetPartitionId(connectionId, (uint)partitionCount);
         _connectionPartitions[connectionId] = partition;
 
-        logger.LogDebug("Assigned connection {ConnectionId} to partition {Partition} (partitionCount={PartitionCount})", connectionId, partition, partitionCount);
+        _logger.LogDebug("Assigned connection {ConnectionId} to partition {Partition} (partitionCount={PartitionCount})", connectionId, partition, partitionCount);
         return partition;
     }
 
@@ -205,12 +249,13 @@ public class SignalRConnectionCoordinatorGrain(
 
         if (desired > _currentPartitionCount)
         {
-            logger.LogInformation(
+            _logger.LogInformation(
                 "Increasing connection partition count from {OldPartitionCount} to {NewPartitionCount} for {ConnectionCount} tracked connections.",
                 _currentPartitionCount,
                 desired,
                 prospectiveConnections);
             _currentPartitionCount = desired;
+            _state.State.CurrentPartitionCount = _currentPartitionCount;
         }
 
         return _currentPartitionCount;

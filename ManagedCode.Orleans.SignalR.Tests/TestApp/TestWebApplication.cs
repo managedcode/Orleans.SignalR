@@ -43,10 +43,22 @@ public class TestWebApplication(
             builder.ConfigureLogging(logging =>
             {
                 logging.ClearProviders();
-                logging.SetMinimumLevel(LogLevel.Debug);
+                var level = GetLogLevelFromEnvironment();
+                logging.SetMinimumLevel(level);
                 logging.AddProvider(new XunitLoggerProvider(_loggerAccessor));
             });
         }
+    }
+
+    private static LogLevel GetLogLevelFromEnvironment()
+    {
+        var value = Environment.GetEnvironmentVariable("ORLEANS_SIGNALR_LOGLEVEL");
+        if (!string.IsNullOrEmpty(value) && Enum.TryParse<LogLevel>(value, ignoreCase: true, out var parsed))
+        {
+            return parsed;
+        }
+
+        return LogLevel.Information;
     }
 
     protected override IHost CreateHost(IHostBuilder builder)

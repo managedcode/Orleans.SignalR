@@ -48,4 +48,14 @@ public static class OrleansDependencyInjectionExtensions
             SetSpecificCollectionAge<SignalRUserGrain>(options);
         });
     }
+
+    /// <summary>
+    ///     Registers the default in-memory storage provider for Orleans.SignalR grains.
+    ///     This wraps <see cref="HostingExtensions.AddMemoryGrainStorage"/> with the storage name required by the built-in grains.
+    /// </summary>
+    public static ISiloBuilder AddOrleansSignalRInMemoryStorage(this ISiloBuilder siloBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(siloBuilder);
+        return siloBuilder.AddMemoryGrainStorage(OrleansSignalROptions.OrleansSignalRStorage);
+    }
 }

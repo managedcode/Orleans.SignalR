@@ -15,6 +15,11 @@ public sealed class PerformanceScenarioHarness
     private readonly LoadClusterFixture _cluster;
     private readonly ITestOutputHelper _output;
     private readonly TestOutputHelperAccessor? _loggerAccessor;
+    private const string DeviceScenarioKey = "device-echo";
+    private const string BroadcastScenarioKey = "broadcast-fanout";
+    private const string GroupScenarioKey = "group-broadcast";
+    private const string StreamScenarioKey = "streaming";
+    private const string InvocationScenarioKey = "invocation";
 
     public PerformanceScenarioSettings Settings { get; }
 
@@ -98,6 +103,7 @@ public sealed class PerformanceScenarioHarness
 
             var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} msg/s.");
+            PerformanceSummaryRecorder.RecordRun(DeviceScenarioKey, "Device Echo", useOrleans, stopwatch.Elapsed, throughput);
 
             return stopwatch.Elapsed;
         }
@@ -203,6 +209,7 @@ public sealed class PerformanceScenarioHarness
 
             var throughput = expectedDeliveries / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
             _output.WriteLine($"{scenarioLabel} delivered {expectedDeliveries:N0}/{expectedDeliveries:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} deliveries/s.");
+            PerformanceSummaryRecorder.RecordRun(BroadcastScenarioKey, "Broadcast Fan-Out", useOrleans, stopwatch.Elapsed, throughput);
 
             return stopwatch.Elapsed;
         }
@@ -357,6 +364,7 @@ public sealed class PerformanceScenarioHarness
 
             var throughput = expected / Math.Max(1.0, sendStopwatch.Elapsed.TotalSeconds);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {sendStopwatch.Elapsed}. Throughput ≈ {throughput:N0} deliveries/s.");
+            PerformanceSummaryRecorder.RecordRun(GroupScenarioKey, "Group Broadcast", useOrleans, sendStopwatch.Elapsed, throughput);
 
             return sendStopwatch.Elapsed;
         }
@@ -426,6 +434,7 @@ public sealed class PerformanceScenarioHarness
 
             var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} items/s.");
+            PerformanceSummaryRecorder.RecordRun(StreamScenarioKey, "Streaming", useOrleans, stopwatch.Elapsed, throughput);
 
             return stopwatch.Elapsed;
         }
@@ -489,6 +498,7 @@ public sealed class PerformanceScenarioHarness
 
             var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
             _output.WriteLine($"{scenarioLabel} completed {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} calls/s.");
+            PerformanceSummaryRecorder.RecordRun(InvocationScenarioKey, "Invocation", useOrleans, stopwatch.Elapsed, throughput);
 
             return stopwatch.Elapsed;
         }

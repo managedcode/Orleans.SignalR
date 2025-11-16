@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
@@ -13,34 +14,66 @@ namespace ManagedCode.Orleans.SignalR.Server;
 
 [Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionHeartbeatGrain)}")]
-public class SignalRConnectionHeartbeatGrain(
-    ILogger<SignalRConnectionHeartbeatGrain> logger) : Grain, ISignalRConnectionHeartbeatGrain
+public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionHeartbeatGrain
 {
+    private readonly ILogger<SignalRConnectionHeartbeatGrain> _logger;
+    private readonly IPersistentState<ConnectionHeartbeatState> _state;
     private ConnectionHeartbeatRegistration? _registration;
     private IDisposable? _timer;
+
+    public SignalRConnectionHeartbeatGrain(
+        ILogger<SignalRConnectionHeartbeatGrain> logger,
+        [PersistentState(nameof(SignalRConnectionHeartbeatGrain), OrleansSignalROptions.OrleansSignalRStorage)]
+        IPersistentState<ConnectionHeartbeatState> state)
+    {
+        _logger = logger;
+        _state = state;
+        _state.State ??= new ConnectionHeartbeatState();
+    }
+
+    public override Task OnActivateAsync(CancellationToken cancellationToken)
+    {
+        if (_state.State.Registration is { } stored)
+        {
+            _registration = stored;
+            ResetTimer(stored.Interval);
+            _logger.LogDebug("Heartbeat restored for connection grain {Key} (hub={Hub}, partitioned={Partitioned}, partitionId={PartitionId}).",
+                this.GetPrimaryKeyString(), stored.HubKey, stored.UsePartitioning, stored.PartitionId);
+        }
+
+        return base.OnActivateAsync(cancellationToken);
+    }
 
     public Task Start(ConnectionHeartbeatRegistration registration)
     {
         _registration = registration;
+        _state.State.Registration = registration;
         ResetTimer(registration.Interval);
-        logger.LogDebug("Heartbeat started for connection grain {Key} (partitioned={Partitioned}, partitionId={PartitionId}).",
-            this.GetPrimaryKeyString(), registration.UsePartitioning, registration.PartitionId);
+        _logger.LogDebug("Heartbeat started for connection grain {Key} (hub={Hub}, partitioned={Partitioned}, partitionId={PartitionId}).",
+            this.GetPrimaryKeyString(), registration.HubKey, registration.UsePartitioning, registration.PartitionId);
         return Task.CompletedTask;
     }
 
     public Task Stop()
     {
         ResetTimer(null);
+        _state.State.Registration = null;
         _registration = null;
-        logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());
+        _logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());
         return Task.CompletedTask;
     }
 
-    public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
+    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         ResetTimer(null);
-        _registration = null;
-        return base.OnDeactivateAsync(reason, cancellationToken);
+        if (_state.State.Registration is null)
+        {
+            await _state.ClearStateAsync(cancellationToken);
+        }
+        else
+        {
+            await _state.WriteStateAsync(cancellationToken);
+        }
     }
 
     private void ResetTimer(TimeSpan? interval)
@@ -86,7 +119,7 @@ public class SignalRConnectionHeartbeatGrain(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Heartbeat ping failed for connection grain {Key}.", this.GetPrimaryKeyString());
+            _logger.LogDebug(ex, "Heartbeat ping failed for connection grain {Key}.", this.GetPrimaryKeyString());
         }
 
         return Task.CompletedTask;
