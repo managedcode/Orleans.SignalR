@@ -198,26 +198,25 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
                 .SendToGroups(groupNames.ToArray(), message), cancellationToken);
         }
-        else
+
+        // For potentially many groups, use fire-and-forget to avoid memory issues
+        _ = Task.Run(async () =>
         {
-            // For potentially many groups, use fire-and-forget to avoid memory issues
-            Task.Run(() =>
+            foreach (var groupName in groupNames)
             {
-                foreach (var groupName in groupNames)
+                try
                 {
                     var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
-                    _ = groupGrain.SendToGroup(message).ContinueWith(t =>
-                    {
-                        if (t.IsFaulted)
-                        {
-                            _logger.LogError(t.Exception, "Failed to send to group {GroupName}", groupName);
-                        }
-                    }, TaskContinuationOptions.OnlyOnFaulted);
+                    await groupGrain.SendToGroup(message).ConfigureAwait(false);
                 }
-            }, cancellationToken);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send to group {GroupName}", groupName);
+                }
+            }
+        }, cancellationToken);
 
-            return Task.CompletedTask;
-        }
+        return Task.CompletedTask;
     }
 
     public override Task SendGroupExceptAsync(string groupName, string methodName, object?[] args,
@@ -249,18 +248,19 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var message = new InvocationMessage(methodName, args);
 
         // For potentially many users, use fire-and-forget to avoid memory issues
-        Task.Run(() =>
+        _ = Task.Run(async () =>
         {
             foreach (var userId in userIds)
             {
-                var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId);
-                _ = userGrain.SendToUser(message).ContinueWith(t =>
+                try
                 {
-                    if (t.IsFaulted)
-                    {
-                        _logger.LogError(t.Exception, "Failed to send to user {UserId}", userId);
-                    }
-                }, TaskContinuationOptions.OnlyOnFaulted);
+                    var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId);
+                    await userGrain.SendToUser(message).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send to user {UserId}", userId);
+                }
             }
         }, cancellationToken);
 
@@ -363,14 +363,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 {
                     if (message is CompletionMessage completionMessage)
                     {
-                        if (completionMessage.HasResult)
-                        {
-                            completionSource.TrySetResult((T)completionMessage.Result!);
-                        }
-                        else
-                        {
-                            completionSource.TrySetException(new Exception(completionMessage.Error));
-                        }
+                            if (completionMessage.HasResult)
+                            {
+                                completionSource.TrySetResult((T)completionMessage.Result!);
+                            }
+                            else
+                            {
+                                completionSource.TrySetException(new HubException(completionMessage.Error));
+                            }
                     }
 
                     return Task.CompletedTask;
@@ -432,7 +432,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                     return (T)completionMessage.Result!;
                 }
 
-                throw new Exception(completionMessage.Error);
+                throw new HubException(completionMessage.Error);
             }
             catch
             {
@@ -568,13 +568,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var hubKey = subscription.HubKey!;
         var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
         var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connectionId);
+        var targets = subscription.GetHeartbeatGrainIds();
         var registration = new ConnectionHeartbeatRegistration(
             hubKey,
             subscription.UsePartitioning,
             subscription.PartitionId,
             subscription.Reference,
             heartbeatInterval,
-            subscription.GetGrainSnapshot());
+            targets);
 
         return heartbeatGrain.Start(registration);
     }

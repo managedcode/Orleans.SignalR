@@ -128,6 +128,7 @@ public class PartitioningTests
                     receivedMessages[index].TrySetResult(message);
                 });
                 await connections[i].StartAsync();
+                await connections[i].InvokeAsync<int>("Plus", 0, 0);
                 startedPerApp[appIndex]++;
             }
 

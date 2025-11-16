@@ -1,3 +1,4 @@
+using System.Globalization;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -157,24 +158,22 @@ public class InterfaceHubTests
         connection3.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection3 - GetMessage");
-            throw new Exception("oops3");
-            return string.Empty;
+            throw new InvalidOperationException("oops3");
         });
 
         connection4.On("GetMessage", () =>
         {
             _outputHelper.WriteLine("Connection4 - GetMessage");
-            throw new Exception("oops4");
-            return string.Empty;
+            throw new InvalidOperationException("oops4");
         });
 
         //invoke in Grain
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");
 
-        var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
+        var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId!);
         _outputHelper.WriteLine("msg1");
 
-        var msg2 = await grain.GetMessage(connection2.ConnectionId);
+        var msg2 = await grain.GetMessage(connection2.ConnectionId!);
         _outputHelper.WriteLine("msg2");
 
         await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
@@ -183,10 +182,10 @@ public class InterfaceHubTests
         msg1.ShouldBe("connection1");
         msg2.ShouldBe("connection2");
 
-        await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection3.ConnectionId));
+        await Assert.ThrowsAsync<HubException>(async () => await grain.GetMessage(connection3.ConnectionId!));
         _outputHelper.WriteLine("msg3-thorw");
 
-        await Assert.ThrowsAsync<Exception>(async () => await grain.GetMessage(connection4.ConnectionId));
+        await Assert.ThrowsAsync<HubException>(async () => await grain.GetMessage(connection4.ConnectionId!));
         _outputHelper.WriteLine("msg4-thorw");
 
         _outputHelper.WriteLine("stopping...");
@@ -214,8 +213,8 @@ public class InterfaceHubTests
             //invoke in Grain
             var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test" + i);
 
-            var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
-            var msg2 = await grain.GetMessage(connection2.ConnectionId);
+            var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId!);
+            var msg2 = await grain.GetMessage(connection2.ConnectionId!);
 
             await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
 
@@ -230,8 +229,8 @@ public class InterfaceHubTests
             //invoke in Grain
             var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test" + i);
 
-            var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId);
-            var msg2 = await grain.GetMessage(connection2.ConnectionId);
+            var msg1 = await grain.GetMessageInvoke(connection1.ConnectionId!);
+            var msg2 = await grain.GetMessage(connection2.ConnectionId!);
 
             await Assert.ThrowsAsync<IOException>(async () => await grain.GetMessage("non-existing"));
 
@@ -252,10 +251,10 @@ public class InterfaceHubTests
         var connection1 = await CreateHubConnection(_firstApp);
         var connection2 = await CreateHubConnection(_secondApp);
 
-        connection1.On<int>("SendRandom", random => messages1.Add(random.ToString()));
+        connection1.On<int>("SendRandom", random => messages1.Add(random.ToString(CultureInfo.InvariantCulture)));
         connection1.On<string>("SendMessage", messages1.Add);
 
-        connection2.On<int>("SendRandom", random => messages2.Add(random.ToString()));
+        connection2.On<int>("SendRandom", random => messages2.Add(random.ToString(CultureInfo.InvariantCulture)));
         connection2.On<string>("SendMessage", messages2.Add);
 
         var grain = _siloCluster.Cluster.Client.GetGrain<ITestGrain>("test");

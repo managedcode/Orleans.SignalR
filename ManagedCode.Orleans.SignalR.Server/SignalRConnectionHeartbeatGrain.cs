@@ -7,6 +7,7 @@ using ManagedCode.Orleans.SignalR.Core.SignalR;
 using Microsoft.Extensions.Logging;
 using Orleans;
 using Orleans.Concurrency;
+using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -50,34 +51,44 @@ public class SignalRConnectionHeartbeatGrain(
         if (interval is { } period && period > TimeSpan.Zero)
         {
             var dueTime = TimeSpan.FromMilliseconds(Math.Max(500, period.TotalMilliseconds / 2));
-            _timer = RegisterTimer(OnTimerTickAsync, null, dueTime, dueTime);
+            _timer = this.RegisterGrainTimer(
+                () => OnTimerTickAsync(null),
+                new GrainTimerCreationOptions
+                {
+                    DueTime = dueTime,
+                    Period = dueTime,
+                    Interleave = true
+                });
         }
     }
 
-    private async Task OnTimerTickAsync(object? _)
+    private Task OnTimerTickAsync(object? state)
     {
         if (_registration is null)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        var grains = _registration.GrainReferences;
-        if (grains.IsDefaultOrEmpty)
+        var grainIds = _registration.GrainIds;
+        if (grainIds.IsDefaultOrEmpty)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         try
         {
-            foreach (var grainReference in grains)
+            foreach (var grainId in grainIds)
             {
-                var manager = grainReference.Cast<IObserverConnectionManager>();
-                await manager.Ping(_registration.Observer);
+                var grain = GrainFactory.GetGrain(grainId);
+                var manager = grain.AsReference<IObserverConnectionManager>();
+                _ = manager.Ping(_registration.Observer);
             }
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Heartbeat ping failed for connection grain {Key}.", this.GetPrimaryKeyString());
         }
+
+        return Task.CompletedTask;
     }
 }

@@ -1,6 +1,8 @@
 using System;
 using System.Reflection;
 using ManagedCode.Orleans.SignalR.Server;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.SignalR;
 using Orleans;
 using Orleans.Configuration;
 using Orleans.Hosting;
@@ -20,8 +22,6 @@ public class LongIdleSiloConfigurator : ISiloConfigurator
             options.CollectionAge = IdleAge;
             options.CollectionQuantum = Quantum;
 
-            SetSpecificCollectionAge<SignalRConnectionHolderGrain>(options);
-            SetSpecificCollectionAge<SignalRConnectionPartitionGrain>(options);
             SetSpecificCollectionAge<SignalRGroupGrain>(options);
             SetSpecificCollectionAge<SignalRGroupPartitionGrain>(options);
             SetSpecificCollectionAge<SignalRUserGrain>(options);

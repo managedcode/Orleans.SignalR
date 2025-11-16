@@ -43,7 +43,7 @@ public class TestWebApplication(
             builder.ConfigureLogging(logging =>
             {
                 logging.ClearProviders();
-                logging.SetMinimumLevel(LogLevel.Information);
+                logging.SetMinimumLevel(LogLevel.Debug);
                 logging.AddProvider(new XunitLoggerProvider(_loggerAccessor));
             });
         }
@@ -85,10 +85,14 @@ public class TestWebApplication(
         builder.WithAutomaticReconnect();
         configure?.Invoke(builder);
 
-        return builder.WithUrl(new Uri(baseUri, hubPath), options =>
+        var connection = builder.WithUrl(new Uri(baseUri, hubPath), options =>
         {
             configureConnection?.Invoke(options);
             options.HttpMessageHandlerFactory = _ => Server.CreateHandler();
         }).Build();
+
+        connection.ServerTimeout = TimeSpan.FromSeconds(30);
+        connection.KeepAliveInterval = TimeSpan.FromSeconds(1);
+        return connection;
     }
 }

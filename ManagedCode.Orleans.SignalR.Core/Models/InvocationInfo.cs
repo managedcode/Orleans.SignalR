@@ -20,13 +20,13 @@ public class InvocationInfo
     }
 
     [Id(0)]
-    public string ConnectionId { get; private set; }
+    public string ConnectionId { get; private set; } = string.Empty;
 
     [Id(1)]
-    public string InvocationId { get; private set; }
+    public string InvocationId { get; private set; } = string.Empty;
 
     [Id(2)]
-    public string Type { get; private set; }
+    public string Type { get; private set; } = string.Empty;
 
     public Type GetResultType()
     {

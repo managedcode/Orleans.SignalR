@@ -36,12 +36,8 @@ public static class OrleansDependencyInjectionExtensions
 
         void SetSpecificCollectionAge<T>(GrainCollectionOptions options)
         {
-            var attribute = typeof(T).GetCustomAttribute<GrainTypeAttribute>();
-            if (attribute is not null)
-            {
-                var grainType = attribute.GetGrainType(null, null).ToString();
-                options.ClassSpecificCollectionAge[grainType!] = timeSpan;
-            }
+            var grainClassName = typeof(T).FullName ?? typeof(T).Name;
+            options.ClassSpecificCollectionAge[grainClassName] = timeSpan;
         }
 
         return siloBuilder.Configure<GrainCollectionOptions>(options =>

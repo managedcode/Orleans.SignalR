@@ -511,7 +511,7 @@ public sealed class PerformanceScenarioHarness
         return apps;
     }
 
-    private async Task<HubConnection> CreateUserConnectionAsync(TestWebApplication app, string hubName, string userId)
+    private static async Task<HubConnection> CreateUserConnectionAsync(TestWebApplication app, string hubName, string userId)
     {
         using var client = app.CreateHttpClient();
         var response = await client.GetAsync($"/auth?user={userId}");

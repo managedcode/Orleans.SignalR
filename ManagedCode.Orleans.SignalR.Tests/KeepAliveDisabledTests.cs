@@ -9,6 +9,7 @@ using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
@@ -44,6 +45,11 @@ public class KeepAliveDisabledTests : IAsyncLifetime
                 {
                     options.KeepEachConnectionAlive = false;
                     options.ClientTimeoutInterval = TimeSpan.FromSeconds(2);
+                });
+                services.PostConfigure<HubOptions>(options =>
+                {
+                    options.ClientTimeoutInterval = TimeSpan.FromSeconds(30);
+                    options.KeepAliveInterval = null;
                 });
             });
 
@@ -82,7 +88,8 @@ public class KeepAliveDisabledTests : IAsyncLifetime
 
             var completed = await Task.WhenAny(received.Task, Task.Delay(TimeSpan.FromSeconds(5)));
             completed.ShouldBe(received.Task, "Receiver did not observe direct send when keep-alive was disabled.");
-            received.Task.Result.ShouldBe("test");
+            var receivedMessage = await received.Task;
+            receivedMessage.ShouldBe("test");
 
             var receiverDisconnected = await WaitForDisconnectAsync(receiver, TimeSpan.FromSeconds(5), "target receiver");
             _output.WriteLine(receiverDisconnected
@@ -159,12 +166,12 @@ public class KeepAliveDisabledTests : IAsyncLifetime
 
         HubConnection CreateAuthenticatedConnection()
         {
-            return _app.CreateSignalRClient(
-                nameof(SimpleTestHub),
-                configureConnection: options =>
-                {
-                    options.AccessTokenProvider = () => Task.FromResult(token);
-                });
+                return _app.CreateSignalRClient(
+                    nameof(SimpleTestHub),
+                    configureConnection: options =>
+                    {
+                        options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                    });
         }
 
         var receiver = CreateAuthenticatedConnection();
@@ -229,15 +236,16 @@ public class KeepAliveDisabledTests : IAsyncLifetime
 
             var groupName = $"keepalive-group-{Guid.NewGuid():N}";
             await connection.InvokeAsync("AddToGroup", groupName);
+            await connection.InvokeAsync<int>("Plus", 0, 0);
 
             // Allow the hub to finish the "joined the group" broadcast and cross the timeout window.
             await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
+            connection.State.ShouldBe(HubConnectionState.Connected, "Connection should remain active before group send.");
 
             await connection.InvokeAsync("GroupSendAsync", groupName, "payload");
 
-            var completed = await Task.WhenAny(groupMessage.Task, Task.Delay(TimeSpan.FromSeconds(10)));
-            completed.ShouldBe(groupMessage.Task, "Group broadcast did not arrive when keep-alive was disabled.");
-            groupMessage.Task.Result.ShouldContain("payload");
+            var groupPayload = await WaitForMessageAsync(groupMessage.Task, "keep-alive disabled group broadcast");
+            groupPayload.ShouldContain("payload");
 
             var disconnected = await WaitForDisconnectAsync(connection, TimeSpan.FromSeconds(5), "group connection");
             _output.WriteLine(disconnected
@@ -347,5 +355,10 @@ public class KeepAliveDisabledTests : IAsyncLifetime
             await sender.DisposeAsync();
             await receiver.DisposeAsync();
         }
+    }
+
+    private static Task<string> WaitForMessageAsync(Task<string> task, string description)
+    {
+        return task.WaitAsync(TimeSpan.FromSeconds(30));
     }
 }

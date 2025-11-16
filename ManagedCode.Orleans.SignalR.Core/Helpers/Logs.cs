@@ -31,17 +31,17 @@ public static partial class Logs
 
     [LoggerMessage(
         Level = LogLevel.Debug,
-        Message = "{grainType}:{grainId} SendToAllExcept")]
+        Message = "{grainType}:{grainId} SendToAllExcept {expectedConnectionIds}")]
     public static partial void SendToAllExcept(ILogger logger, string grainType, string grainId, string[] expectedConnectionIds);
 
     [LoggerMessage(
         Level = LogLevel.Debug,
-        Message = "{grainType}:{grainId} SendToConnection")]
+        Message = "{grainType}:{grainId} SendToConnection `{connectionId}`")]
     public static partial void SendToConnection(ILogger logger, string grainType, string grainId, string connectionId);
 
     [LoggerMessage(
         Level = LogLevel.Debug,
-        Message = "{grainType}:{grainId} SendToConnections")]
+        Message = "{grainType}:{grainId} SendToConnections {expectedConnectionIds}")]
     public static partial void SendToConnections(ILogger logger, string grainType, string grainId, string[] expectedConnectionIds);
 
     [LoggerMessage(
@@ -51,12 +51,12 @@ public static partial class Logs
 
     [LoggerMessage(
         Level = LogLevel.Debug,
-        Message = "{grainType}:{grainId} SendToGroupExcept")]
+        Message = "{grainType}:{grainId} SendToGroupExcept {expectedConnectionIds}")]
     public static partial void SendToGroupExcept(ILogger logger, string grainType, string grainId, string[] expectedConnectionIds);
 
     [LoggerMessage(
         Level = LogLevel.Debug,
-        Message = "{grainType}:{grainId} TryCompleteResult")]
+        Message = "{grainType}:{grainId} TryCompleteResult `{connectionId}`")]
     public static partial void TryCompleteResult(ILogger logger, string grainType, string grainId, string connectionId);
 
     [LoggerMessage(
@@ -66,7 +66,7 @@ public static partial class Logs
 
     [LoggerMessage(
         Level = LogLevel.Debug,
-        Message = "{grainType}:{grainId} AddInvocation")]
+        Message = "{grainType}:{grainId} AddInvocation `{invocationId}` `{connectionId}`")]
     public static partial void AddInvocation(ILogger logger, string grainType, string grainId, string invocationId, string connectionId);
 
     [LoggerMessage(

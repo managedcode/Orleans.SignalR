@@ -57,7 +57,7 @@ public class ReconnectionTests : IAsyncLifetime
                 nameof(SimpleTestHub),
                 configureConnection: options =>
                 {
-                    options.AccessTokenProvider = () => Task.FromResult(token);
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
                 });
         }
 

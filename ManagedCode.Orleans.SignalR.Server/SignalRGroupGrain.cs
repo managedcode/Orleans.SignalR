@@ -32,7 +32,7 @@ public class SignalRGroupGrain(
     {
         Logs.SendToGroup(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString());
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
             return;
@@ -45,7 +45,7 @@ public class SignalRGroupGrain(
     {
         Logs.SendToGroupExcept(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString(), excludedConnectionIds);
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);

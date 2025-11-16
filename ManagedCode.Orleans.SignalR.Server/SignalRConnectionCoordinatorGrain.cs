@@ -20,8 +20,7 @@ namespace ManagedCode.Orleans.SignalR.Server;
 [GrainType($"ManagedCode.{nameof(SignalRConnectionCoordinatorGrain)}")]
 public class SignalRConnectionCoordinatorGrain(
     ILogger<SignalRConnectionCoordinatorGrain> logger,
-    IOptions<OrleansSignalROptions> options,
-    IClusterClient _) : Grain, ISignalRConnectionCoordinatorGrain
+    IOptions<OrleansSignalROptions> options) : Grain, ISignalRConnectionCoordinatorGrain
 {
     private readonly Dictionary<string, int> _connectionPartitions = new(StringComparer.Ordinal);
     private readonly int _connectionsPerPartitionHint = Math.Max(1, options.Value.ConnectionsPerPartitionHint);

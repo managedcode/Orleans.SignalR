@@ -189,7 +189,8 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
             {
                 var completed = await Task.WhenAny(broadcastReceipts[i].Task, Task.Delay(TimeSpan.FromSeconds(10)));
                 completed.ShouldBe(broadcastReceipts[i].Task, $"Broadcast payload was not observed by device index {i} (state={devices[i].State}).");
-                broadcastReceipts[i].Task.Result.ShouldBe("iot-broadcast");
+                var broadcastPayload = await broadcastReceipts[i].Task;
+                broadcastPayload.ShouldBe("iot-broadcast");
             }
 
             for (var i = firstListenerIndex; i < deviceCount; i++)
@@ -202,7 +203,8 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
             {
                 var completed = await Task.WhenAny(groupReceipts[i].Task, Task.Delay(TimeSpan.FromSeconds(10)));
                 completed.ShouldBe(groupReceipts[i].Task, "Group payload did not reach every device.");
-                groupReceipts[i].Task.Result.ShouldContain("iot-group-payload");
+                var groupPayload = await groupReceipts[i].Task;
+                groupPayload.ShouldContain("iot-group-payload");
             }
 
             TestWebApplication.StaticLogs[nameof(SimpleTestHub.UploadStreamChannelReader)] = new ConcurrentQueue<string>();

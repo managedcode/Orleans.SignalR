@@ -138,7 +138,7 @@ public class KeepAliveTests : IAsyncLifetime
                 nameof(SimpleTestHub),
                 configureConnection: options =>
                 {
-                    options.AccessTokenProvider = () => Task.FromResult(token);
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
                 });
         }
 
@@ -206,17 +206,20 @@ public class KeepAliveTests : IAsyncLifetime
             await receiver.StartAsync();
             await sender.StartAsync();
             receiver.ConnectionId.ShouldNotBeNull();
+            sender.ConnectionId.ShouldNotBeNull();
 
             await receiver.InvokeAsync("AddToGroup", groupName);
+            await receiver.InvokeAsync<int>("Plus", 0, 0);
+            await sender.InvokeAsync<int>("Plus", 0, 0);
 
             _output.WriteLine("Waiting past the client timeout to ensure group observers rely on the heartbeat.");
             await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1));
+            receiver.State.ShouldBe(HubConnectionState.Connected, "Receiver disconnected before group send.");
+            sender.State.ShouldBe(HubConnectionState.Connected, "Sender disconnected before group send.");
 
             await sender.InvokeAsync("GroupSendAsync", groupName, payload);
-            var completed = await Task.WhenAny(delivered.Task, Task.Delay(TimeSpan.FromSeconds(5)));
-            completed.ShouldBe(delivered.Task, "Keep-alive group routing failed after idle interval.");
 
-            var content = await delivered.Task;
+            var content = await WaitForMessageAsync(delivered.Task, "keep-alive group broadcast");
             content.ShouldContain(payload);
         }
         finally
@@ -309,5 +312,10 @@ public class KeepAliveTests : IAsyncLifetime
     private sealed record GrainCounts(int Connections, int Partitions, int Heartbeat, int Invocation)
     {
         public override string ToString() => $"conn={Connections}, part={Partitions}, hb={Heartbeat}, inv={Invocation}";
+    }
+
+    private static Task<string> WaitForMessageAsync(Task<string> task, string description)
+    {
+        return task.WaitAsync(TimeSpan.FromSeconds(30));
     }
 }

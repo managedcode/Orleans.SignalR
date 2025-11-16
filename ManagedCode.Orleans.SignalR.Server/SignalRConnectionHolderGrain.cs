@@ -49,7 +49,7 @@ public class SignalRConnectionHolderGrain(
     {
         Logs.SendToAll(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString());
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
             return;
@@ -62,7 +62,7 @@ public class SignalRConnectionHolderGrain(
     {
         Logs.SendToAllExcept(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), excludedConnectionIds);
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
@@ -108,7 +108,7 @@ public class SignalRConnectionHolderGrain(
     {
         Logs.SendToConnections(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionIds);
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             List<ISignalRObserver>? targets = null;
             foreach (var connectionId in connectionIds)

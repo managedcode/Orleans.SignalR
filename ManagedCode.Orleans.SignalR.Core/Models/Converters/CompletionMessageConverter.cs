@@ -9,11 +9,13 @@ public sealed class CompletionMessageConverter : IConverter<CompletionMessage, C
 {
     public CompletionMessage ConvertFromSurrogate(in CompletionMessageSurrogate surrogate)
     {
-        return new CompletionMessage(surrogate.InvocationId, surrogate.Error, surrogate.Result, surrogate.HasResult);
+        var invocationId = surrogate.InvocationId ?? string.Empty;
+        return new CompletionMessage(invocationId, surrogate.Error, surrogate.Result, surrogate.HasResult);
     }
 
     public CompletionMessageSurrogate ConvertToSurrogate(in CompletionMessage value)
     {
-        return new CompletionMessageSurrogate(value.InvocationId, value.Error, value.Result, value.HasResult);
+        var invocationId = value.InvocationId ?? string.Empty;
+        return new CompletionMessageSurrogate(invocationId, value.Error, value.Result, value.HasResult);
     }
 }

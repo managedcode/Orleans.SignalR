@@ -13,4 +13,4 @@ public sealed record ConnectionHeartbeatRegistration(
     [property: Id(2)] int PartitionId,
     [property: Id(3)] ISignalRObserver Observer,
     [property: Id(4)] TimeSpan Interval,
-    [property: Id(5)] ImmutableArray<GrainReference> GrainReferences);
+    [property: Id(5)] ImmutableArray<GrainId> GrainIds);

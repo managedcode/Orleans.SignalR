@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
@@ -9,6 +10,7 @@ using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
+using Orleans.Runtime;
 using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
@@ -30,7 +32,9 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
         var timeout = TimeIntervalHelper.GetClientTimeoutInterval(orleansSignalOptions, hubOptions);
         _observerRefreshInterval = timeout;
-        _idleExtension = TimeIntervalHelper.AddExpirationIntervalBuffer(timeout);
+        _idleExtension = KeepEachConnectionAlive
+            ? TimeIntervalHelper.AddExpirationIntervalBuffer(timeout)
+            : Timeout.InfiniteTimeSpan;
         var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeout);
         ObserverManager = new ObserverManager<ISignalRObserver>(expiration, Logger);
     }
@@ -110,13 +114,19 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         foreach (var observer in observers)
         {
             var pending = observer.OnNextAsync(message);
-            _ = pending.ContinueWith(t =>
-            {
-                if (t.Exception is not null)
-                {
-                    OnLiveObserverDispatchFailure(t.Exception);
-                }
-            }, TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted);
+            _ = ObserveLiveObserverAsync(pending);
+        }
+    }
+
+    private async Task ObserveLiveObserverAsync(Task pending)
+    {
+        try
+        {
+            await pending;
+        }
+        catch (Exception exception)
+        {
+            OnLiveObserverDispatchFailure(exception);
         }
     }
 
@@ -162,7 +172,14 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         }
 
         var dueTime = TimeSpan.FromMilliseconds(Math.Max(500, _observerRefreshInterval.TotalMilliseconds / 2));
-        _observerRefreshTimer = RegisterTimer(_ => RefreshObserversAsync(), null, dueTime, dueTime);
+        _observerRefreshTimer = this.RegisterGrainTimer(
+            () => RefreshObserversAsync(),
+            new GrainTimerCreationOptions
+            {
+                DueTime = dueTime,
+                Period = dueTime,
+                Interleave = true
+            });
     }
 
     private Task RefreshObserversAsync()

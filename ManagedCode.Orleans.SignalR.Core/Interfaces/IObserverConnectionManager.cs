@@ -1,9 +1,10 @@
 using System.Threading.Tasks;
+using Orleans;
 using Orleans.Concurrency;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
-public interface IObserverConnectionManager
+public interface IObserverConnectionManager : IGrain
 {
     [OneWay]
     Task AddConnection(string connectionId, ISignalRObserver observer);

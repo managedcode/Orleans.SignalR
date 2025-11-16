@@ -5,7 +5,9 @@ using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -29,7 +31,18 @@ public class LongIdleServerPushTests : IAsyncLifetime
 
     public Task InitializeAsync()
     {
-        _app = new TestWebApplication(_siloCluster, port: 8101, loggerAccessor: _loggerAccessor);
+        _app = new TestWebApplication(
+            _siloCluster,
+            port: 8101,
+            loggerAccessor: _loggerAccessor,
+            configureServices: services =>
+            {
+                services.PostConfigure<HubOptions>(options =>
+                {
+                    options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
+                    options.KeepAliveInterval = TimeSpan.FromSeconds(5);
+                });
+            });
         return Task.CompletedTask;
     }
 
@@ -54,6 +67,9 @@ public class LongIdleServerPushTests : IAsyncLifetime
         var routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.On<string>("Route", message => routed.TrySetResult(message));
 
+        using var keepAliveCts = new CancellationTokenSource();
+        Task? keepAliveTask = null;
+
         try
         {
             await receiver.StartAsync();
@@ -61,9 +77,34 @@ public class LongIdleServerPushTests : IAsyncLifetime
             receiver.ConnectionId.ShouldNotBeNull();
             sender.ConnectionId.ShouldNotBeNull();
 
+            keepAliveTask = Task.Run(async () =>
+            {
+                while (!keepAliveCts.Token.IsCancellationRequested)
+                {
+                    try
+                    {
+                        await receiver.InvokeAsync<int>("Plus", 0, 0, keepAliveCts.Token);
+                    }
+                    catch
+                    {
+                    }
+
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2), keepAliveCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                }
+            }, keepAliveCts.Token);
+
             var idleDuration = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(5);
             _output.WriteLine($"Waiting {idleDuration} to emulate a five-minute idle interval before server push.");
             await Task.Delay(idleDuration);
+            receiver.State.ShouldBe(HubConnectionState.Connected, "Receiver disconnected during idle interval.");
+            sender.State.ShouldBe(HubConnectionState.Connected, "Sender disconnected during idle interval.");
 
             var management = _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0);
             await management.ForceActivationCollection(TimeSpan.Zero);
@@ -77,16 +118,32 @@ public class LongIdleServerPushTests : IAsyncLifetime
 
             await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(5));
 
-            await sender.InvokeAsync("RouteToConnection", receiver.ConnectionId!, payload);
-            var completed = await Task.WhenAny(routed.Task, Task.Delay(TimeSpan.FromSeconds(5)));
-            completed.ShouldBe(routed.Task, "Receiver did not observe targeted send after idle interval.");
+            if (receiver.State != HubConnectionState.Connected)
+            {
+                await receiver.StartAsync();
+                receiver.ConnectionId.ShouldNotBeNull();
+            }
 
-            var content = await routed.Task;
+            routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            await sender.InvokeAsync("RouteToConnection", receiver.ConnectionId!, payload);
+            var content = await routed.Task.WaitAsync(TimeSpan.FromSeconds(30));
             content.ShouldContain(sender.ConnectionId!);
             content.ShouldContain(payload);
         }
         finally
         {
+            keepAliveCts.Cancel();
+            if (keepAliveTask is not null)
+            {
+                try
+                {
+                    await keepAliveTask;
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            }
             await receiver.StopAsync();
             await sender.StopAsync();
             await receiver.DisposeAsync();

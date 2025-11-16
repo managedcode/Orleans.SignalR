@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,7 +41,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.AddConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
+        Logs.AddConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
         _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
         TrackConnection(connectionId, observer);
         return Task.CompletedTask;
@@ -48,7 +49,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.RemoveConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
+        Logs.RemoveConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
         _stateStorage.State.ConnectionIds.Remove(connectionId);
         UntrackConnection(connectionId, observer);
         return Task.CompletedTask;
@@ -56,9 +57,9 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public async Task SendToPartition(HubMessage message)
     {
-        Logs.SendToAll(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
+        Logs.SendToAll(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
             return;
@@ -69,9 +70,9 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public async Task SendToPartitionExcept(HubMessage message, string[] excludedConnectionIds)
     {
-        Logs.SendToAllExcept(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), excludedConnectionIds);
+        Logs.SendToAllExcept(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), excludedConnectionIds);
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
@@ -94,7 +95,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public async Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
-        Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionId);
+        Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
 
         if (!_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
         {
@@ -115,9 +116,9 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public async Task SendToConnections(HubMessage message, string[] connectionIds)
     {
-        Logs.SendToConnections(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(), connectionIds);
+        Logs.SendToConnections(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionIds);
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             List<ISignalRObserver>? targets = null;
             foreach (var connectionId in connectionIds)
@@ -151,14 +152,14 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
 
     public Task Ping(ISignalRObserver observer)
     {
-        Logs.Ping(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
+        Logs.Ping(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
         TouchObserver(observer);
         return Task.CompletedTask;
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
-        Logs.OnDeactivateAsync(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString());
+        Logs.OnDeactivateAsync(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
         ClearObserverTracking();
 
         if (ObserverManager.Count == 0 || _stateStorage.State.ConnectionIds.Count == 0)

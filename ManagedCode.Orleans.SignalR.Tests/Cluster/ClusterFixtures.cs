@@ -62,6 +62,7 @@ public sealed class KeepAliveDisabledClusterFixture : ClusterFixtureBase
         : base(builder =>
         {
             builder.Options.InitialSilosCount = 2;
+            builder.AddSiloBuilderConfigurator<KeepAliveDisabledSiloConfigurator>();
         })
     {
     }

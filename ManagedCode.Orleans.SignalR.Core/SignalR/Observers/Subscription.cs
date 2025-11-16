@@ -9,6 +9,7 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 public class Subscription(SignalRObserver observer) : IDisposable
 {
     private readonly HashSet<IObserverConnectionManager> _grains = new();
+    private readonly HashSet<GrainId> _heartbeatGrainIds = new();
     private bool _disposed;
 
     ~Subscription()
@@ -35,7 +36,8 @@ public class Subscription(SignalRObserver observer) : IDisposable
 
         _disposed = true;
         observer?.Dispose();
-        _grains?.Clear();
+        _grains.Clear();
+        _heartbeatGrainIds.Clear();
         Reference = null!;
         HubKey = null;
         UsePartitioning = false;
@@ -45,11 +47,13 @@ public class Subscription(SignalRObserver observer) : IDisposable
     public void AddGrain(IObserverConnectionManager grain)
     {
         _grains.Add(grain);
+        _heartbeatGrainIds.Add(((GrainReference)grain).GrainId);
     }
 
     public void RemoveGrain(IObserverConnectionManager grain)
     {
         _grains.Remove(grain);
+        _heartbeatGrainIds.Remove(((GrainReference)grain).GrainId);
     }
 
     public void SetReference(ISignalRObserver reference)
@@ -69,17 +73,17 @@ public class Subscription(SignalRObserver observer) : IDisposable
         return observer;
     }
 
-    public ImmutableArray<GrainReference> GetGrainSnapshot()
+    public ImmutableArray<GrainId> GetHeartbeatGrainIds()
     {
-        if (_grains.Count == 0)
+        if (_heartbeatGrainIds.Count == 0)
         {
-            return ImmutableArray<GrainReference>.Empty;
+            return ImmutableArray<GrainId>.Empty;
         }
 
-        var builder = ImmutableArray.CreateBuilder<GrainReference>(_grains.Count);
-        foreach (var grain in _grains)
+        var builder = ImmutableArray.CreateBuilder<GrainId>(_heartbeatGrainIds.Count);
+        foreach (var grainId in _heartbeatGrainIds)
         {
-            builder.Add((GrainReference)grain);
+            builder.Add(grainId);
         }
 
         return builder.MoveToImmutable();

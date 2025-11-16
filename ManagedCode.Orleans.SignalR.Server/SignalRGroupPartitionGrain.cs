@@ -46,7 +46,14 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
 
     public async Task SendToGroups(HubMessage message, string[] groupNames)
     {
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
+            this.GetPrimaryKeyLong(),
+            string.Join(",", groupNames),
+            KeepEachConnectionAlive,
+            LiveObservers.Count,
+            TrackedConnectionCount);
+
+        if (LiveObservers.Count > 0)
         {
             var targetConnections = CollectConnectionIds(groupNames, excludedConnections: null);
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
@@ -62,7 +69,15 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
 
     public async Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
     {
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        Logger.LogDebug("SendToGroupsExcept invoked for partition {PartitionId} with groups {Groups}, excluded {Excluded} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
+            this.GetPrimaryKeyLong(),
+            string.Join(",", groupNames),
+            string.Join(",", excludedConnectionIds),
+            KeepEachConnectionAlive,
+            LiveObservers.Count,
+            TrackedConnectionCount);
+
+        if (LiveObservers.Count > 0)
         {
             var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
@@ -286,13 +301,19 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         }
 
         var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain(GrainFactory, _hubKey);
-        _ = coordinator.NotifyGroupRemoved(groupName).ContinueWith(t =>
+        _ = NotifyCoordinatorAsync(coordinator, groupName);
+    }
+
+    private async Task NotifyCoordinatorAsync(ISignalRGroupCoordinatorGrain coordinator, string groupName)
+    {
+        try
         {
-            if (t.IsFaulted)
-            {
-                Logger.LogError(t.Exception, "Failed to notify coordinator about group {GroupName} removal.", groupName);
-            }
-        }, TaskContinuationOptions.OnlyOnFaulted);
+            await coordinator.NotifyGroupRemoved(groupName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to notify coordinator about group {GroupName} removal.", groupName);
+        }
     }
 
     protected override void OnLiveObserverDispatchFailure(Exception exception)

@@ -87,7 +87,7 @@ public class SimpleTestHub : Hub
     private static async Task WriteItemsAsync(ChannelWriter<int> writer, int count, int delay,
         CancellationToken cancellationToken)
     {
-        Exception localException = null;
+        Exception? localException = null;
         try
         {
             for (var i = 0; i < count; i++)

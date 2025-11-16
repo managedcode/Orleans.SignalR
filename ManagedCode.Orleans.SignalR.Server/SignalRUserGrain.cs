@@ -52,7 +52,7 @@ public class SignalRUserGrain(
     {
         Logs.SendToUser(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
 
-        if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+        if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
             return;
@@ -79,7 +79,7 @@ public class SignalRUserGrain(
         {
             if (message.Value >= currentDateTime)
             {
-                if (!KeepEachConnectionAlive && LiveObservers.Count > 0)
+                if (LiveObservers.Count > 0)
                 {
                     DispatchToLiveObservers(LiveObservers.Values, message.Key);
                 }

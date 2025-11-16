@@ -34,7 +34,7 @@ public class SignalRGroupCoordinatorGrain(
         _currentPartitionCount = (int)_basePartitionCount;
         _hubKey = this.GetPrimaryKeyString();
 
-        logger.LogInformation("Group coordinator activated with base partition count {PartitionCount} and hint {GroupsPerPartition}", _basePartitionCount, _groupsPerPartitionHint);
+        _logger.LogInformation("Group coordinator activated with base partition count {PartitionCount} and hint {GroupsPerPartition}", _basePartitionCount, _groupsPerPartitionHint);
         return base.OnActivateAsync(cancellationToken);
     }
 
