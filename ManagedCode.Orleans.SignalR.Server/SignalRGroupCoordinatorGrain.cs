@@ -16,7 +16,6 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
-[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRGroupCoordinatorGrain)}")]
 public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinatorGrain
 {
@@ -39,18 +38,30 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         _logger = logger;
         _options = options;
         _state = state;
-        _state.State ??= new GroupCoordinatorState();
-
-        _groupPartitions = EnsureOrdinalDictionary(_state.State.GroupPartitions);
-        _groupMembership = EnsureOrdinalDictionary(_state.State.GroupMembership);
-        _state.State.GroupPartitions = _groupPartitions;
-        _state.State.GroupMembership = _groupMembership;
-
+        _groupPartitions = new Dictionary<string, int>(StringComparer.Ordinal);
+        _groupMembership = new Dictionary<string, int>(StringComparer.Ordinal);
         _groupsPerPartitionHint = Math.Max(1, _options.Value.GroupsPerPartitionHint);
     }
 
-    public override Task OnActivateAsync(CancellationToken cancellationToken)
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
+        await _state.ReadStateAsync(cancellationToken);
+        _state.State ??= new GroupCoordinatorState();
+        var partitions = EnsureOrdinalDictionary(_state.State.GroupPartitions);
+        _groupPartitions.Clear();
+        foreach (var kvp in partitions)
+        {
+            _groupPartitions[kvp.Key] = kvp.Value;
+        }
+        _state.State.GroupPartitions = _groupPartitions;
+
+        var membership = EnsureOrdinalDictionary(_state.State.GroupMembership);
+        _groupMembership.Clear();
+        foreach (var kvp in membership)
+        {
+            _groupMembership[kvp.Key] = kvp.Value;
+        }
+        _state.State.GroupMembership = _groupMembership;
         _basePartitionCount = Math.Max(1u, _options.Value.GroupPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
         if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
@@ -58,10 +69,15 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
         }
+        else if (_groupPartitions.Count == 0 && _currentPartitionCount > _basePartitionCount)
+        {
+            _currentPartitionCount = (int)_basePartitionCount;
+            _state.State.CurrentPartitionCount = _currentPartitionCount;
+        }
         _hubKey = this.GetPrimaryKeyString();
 
         _logger.LogInformation("Group coordinator activated with base partition count {PartitionCount} and hint {GroupsPerPartition}", _basePartitionCount, _groupsPerPartitionHint);
-        return base.OnActivateAsync(cancellationToken);
+        await base.OnActivateAsync(cancellationToken);
     }
 
     public Task<int> GetPartitionCount()
@@ -239,8 +255,13 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         }
     }
 
-    private static Dictionary<string, int> EnsureOrdinalDictionary(Dictionary<string, int> dictionary)
+    private static Dictionary<string, int> EnsureOrdinalDictionary(Dictionary<string, int>? dictionary)
     {
+        if (dictionary is null)
+        {
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+        }
+
         if (dictionary.Comparer == StringComparer.Ordinal)
         {
             return dictionary;

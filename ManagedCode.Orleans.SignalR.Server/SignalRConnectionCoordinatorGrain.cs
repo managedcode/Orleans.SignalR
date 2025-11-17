@@ -18,7 +18,6 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
-[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionCoordinatorGrain)}")]
 public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectionCoordinatorGrain
 {
@@ -39,24 +38,29 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         _logger = logger;
         _options = options;
         _state = state;
-        _state.State ??= new ConnectionCoordinatorState();
-
-        var partitions = _state.State.ConnectionPartitions;
-        if (partitions.Comparer != StringComparer.Ordinal)
-        {
-            partitions = new Dictionary<string, int>(partitions, StringComparer.Ordinal);
-            _state.State.ConnectionPartitions = partitions;
-        }
-
-        _connectionPartitions = partitions;
+        _connectionPartitions = new Dictionary<string, int>(StringComparer.Ordinal);
         _connectionsPerPartitionHint = Math.Max(1, _options.Value.ConnectionsPerPartitionHint);
     }
 
-    public override Task OnActivateAsync(CancellationToken cancellationToken)
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
+        await _state.ReadStateAsync(cancellationToken);
+        _state.State ??= new ConnectionCoordinatorState();
+        var partitions = EnsureOrdinalDictionary(_state.State.ConnectionPartitions);
+        _connectionPartitions.Clear();
+        foreach (var kvp in partitions)
+        {
+            _connectionPartitions[kvp.Key] = kvp.Value;
+        }
+        _state.State.ConnectionPartitions = _connectionPartitions;
         _basePartitionCount = Math.Max(1u, _options.Value.ConnectionPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
         if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
+        {
+            _currentPartitionCount = (int)_basePartitionCount;
+            _state.State.CurrentPartitionCount = _currentPartitionCount;
+        }
+        else if (_connectionPartitions.Count == 0 && _currentPartitionCount > _basePartitionCount)
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
@@ -66,7 +70,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             "Connection coordinator activated with base partition count {PartitionCount} and hint {ConnectionsPerPartition}",
             _basePartitionCount,
             _connectionsPerPartitionHint);
-        return base.OnActivateAsync(cancellationToken);
+        await base.OnActivateAsync(cancellationToken);
     }
 
     public Task<int> GetPartitionCount()
@@ -259,5 +263,20 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         }
 
         return _currentPartitionCount;
+    }
+
+    private static Dictionary<string, int> EnsureOrdinalDictionary(Dictionary<string, int>? dictionary)
+    {
+        if (dictionary is null)
+        {
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+        }
+
+        if (dictionary.Comparer == StringComparer.Ordinal)
+        {
+            return dictionary;
+        }
+
+        return new Dictionary<string, int>(dictionary, StringComparer.Ordinal);
     }
 }

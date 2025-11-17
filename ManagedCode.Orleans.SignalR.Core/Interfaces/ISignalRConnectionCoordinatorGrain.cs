@@ -7,23 +7,30 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRConnectionCoordinatorGrain : IGrainWithStringKey
 {
-    [ReadOnly]
+    [OneWay]
+    [AlwaysInterleave]
     Task<int> GetPartitionCount();
 
-    [ReadOnly]
+    [OneWay]
+    [AlwaysInterleave]
     Task<int> GetPartitionForConnection(string connectionId);
 
     [OneWay]
+    [AlwaysInterleave]
     Task SendToAll(HubMessage message);
 
     [OneWay]
+    [AlwaysInterleave]
     Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds);
 
+    [AlwaysInterleave]
     Task<bool> SendToConnection(HubMessage message, string connectionId);
 
     [OneWay]
+    [AlwaysInterleave]
     Task SendToConnections(HubMessage message, string[] connectionIds);
 
     [OneWay]
+    [AlwaysInterleave]
     Task NotifyConnectionRemoved(string connectionId);
 }

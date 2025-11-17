@@ -8,6 +8,7 @@ using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -18,7 +19,6 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
-[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionPartitionGrain)}")]
 public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRConnectionPartitionGrain>, ISignalRConnectionPartitionGrain
 {
@@ -33,26 +33,44 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
         : base(logger, orleansSignalOptions, hubOptions)
     {
         _stateStorage = stateStorage;
-
-        _stateStorage.State ??= new ConnectionState();
     }
 
     protected override int TrackedConnectionCount => _stateStorage.State.ConnectionIds.Count;
 
-    public Task AddConnection(string connectionId, ISignalRObserver observer)
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
-        Logs.AddConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
-        _stateStorage.State.ConnectionIds.Add(connectionId, observer.GetPrimaryKeyString());
-        TrackConnection(connectionId, observer);
-        return Task.CompletedTask;
+        await _stateStorage.ReadStateAsync(cancellationToken);
+        _stateStorage.State ??= new ConnectionState();
+        await base.OnActivateAsync(cancellationToken);
     }
 
-    public Task RemoveConnection(string connectionId, ISignalRObserver observer)
+    public async Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        Logs.RemoveConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
-        _stateStorage.State.ConnectionIds.Remove(connectionId);
+        TrackConnection(connectionId, observer);
+        var observerKey = observer.GetPrimaryKeyString();
+        var persisted = await _stateStorage.WriteStateSafeAsync(state =>
+        {
+            var hasExisting = state.ConnectionIds.TryGetValue(connectionId, out var existing);
+            var changed = !hasExisting || !string.Equals(existing, observerKey, StringComparison.Ordinal);
+            state.ConnectionIds[connectionId] = observerKey;
+            return changed;
+        });
+
+        if (persisted)
+        {
+            Logs.AddConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
+        }
+    }
+
+    public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
+    {
         UntrackConnection(connectionId, observer);
-        return Task.CompletedTask;
+        var removed = await _stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId));
+
+        if (removed)
+        {
+            Logs.RemoveConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
+        }
     }
 
     public async Task SendToPartition(HubMessage message)

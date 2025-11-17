@@ -7,6 +7,7 @@ using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -17,7 +18,6 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
-[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRGroupPartitionGrain)}")]
 public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupPartitionGrain>, ISignalRGroupPartitionGrain
 {
@@ -33,15 +33,16 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         : base(logger, orleansSignalOptions, hubOptions)
     {
         _state = state;
-        _state.State ??= new GroupPartitionState();
     }
 
     protected override int TrackedConnectionCount => _state.State.ConnectionObservers.Count;
 
-    public override Task OnActivateAsync(CancellationToken cancellationToken)
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
+        await _state.ReadStateAsync(cancellationToken);
+        _state.State ??= new GroupPartitionState();
         _hubKey = _state.State.HubKey;
-        return base.OnActivateAsync(cancellationToken);
+        await base.OnActivateAsync(cancellationToken);
     }
 
     public async Task SendToGroups(HubMessage message, string[] groupNames)
@@ -92,25 +93,37 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
             observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
     }
 
-    public Task AddConnection(string connectionId, ISignalRObserver observer)
+    public async Task AddConnection(string connectionId, ISignalRObserver observer)
     {
-        Logger.LogDebug("Registering connection {ConnectionId} in partition {PartitionId}", connectionId,
-            this.GetPrimaryKeyLong());
-
-        _state.State.ConnectionObservers[connectionId] = observer.GetPrimaryKeyString();
-        _state.State.ConnectionGroups.TryAdd(connectionId, new HashSet<string>());
         TrackConnection(connectionId, observer);
+        var observerKey = observer.GetPrimaryKeyString();
+        var persisted = await _state.WriteStateSafeAsync(state =>
+        {
+            var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existing) ||
+                                  !string.Equals(existing, observerKey, StringComparison.Ordinal);
+            state.ConnectionObservers[connectionId] = observerKey;
+            var groupsRegistered = state.ConnectionGroups.TryAdd(connectionId, new HashSet<string>());
+            return observerChanged || groupsRegistered;
+        });
 
-        return Task.CompletedTask;
+        if (persisted)
+        {
+            Logger.LogDebug("Registering connection {ConnectionId} in partition {PartitionId}", connectionId,
+                this.GetPrimaryKeyLong());
+        }
     }
 
-    public Task RemoveConnection(string connectionId, ISignalRObserver observer)
+    public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
-        Logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
-            this.GetPrimaryKeyLong());
-
-        RemoveConnectionInternal(connectionId, observer);
-        return Task.CompletedTask;
+        UntrackConnection(connectionId, observer);
+        List<string>? emptiedGroups = null;
+        var removed = await _state.WriteStateSafeAsync(state => RemoveConnectionState(state, connectionId, out emptiedGroups));
+        if (removed)
+        {
+            Logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
+                this.GetPrimaryKeyLong());
+            NotifyRemovedGroups(emptiedGroups);
+        }
     }
 
     public Task Ping(ISignalRObserver observer)
@@ -119,62 +132,103 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         return Task.CompletedTask;
     }
 
-    public Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer)
+    public async Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        Logger.LogDebug("Adding connection {ConnectionId} to group {GroupName} in partition {PartitionId}",
-            connectionId, groupName, this.GetPrimaryKeyLong());
-
+        TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
 
-        _state.State.ConnectionObservers[connectionId] = observerKey;
-        TrackConnection(connectionId, observer);
-
-        if (!_state.State.Groups.TryGetValue(groupName, out var connections))
+        var persisted = await _state.WriteStateSafeAsync(state =>
         {
-            connections = new Dictionary<string, string>();
-            _state.State.Groups[groupName] = connections;
-        }
+            var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existingObserver) ||
+                                  !string.Equals(existingObserver, observerKey, StringComparison.Ordinal);
+            state.ConnectionObservers[connectionId] = observerKey;
 
-        connections[connectionId] = observerKey;
+            if (!state.Groups.TryGetValue(groupName, out var connections))
+            {
+                connections = new Dictionary<string, string>();
+                state.Groups[groupName] = connections;
+            }
 
-        if (!_state.State.ConnectionGroups.TryGetValue(connectionId, out var groups))
+            var groupUpdated = !connections.TryGetValue(connectionId, out var mappedObserver) ||
+                               !string.Equals(mappedObserver, observerKey, StringComparison.Ordinal);
+            connections[connectionId] = observerKey;
+
+            if (!state.ConnectionGroups.TryGetValue(connectionId, out var groups))
+            {
+                groups = new HashSet<string>();
+                state.ConnectionGroups[connectionId] = groups;
+            }
+
+            var membershipAdded = groups.Add(groupName);
+
+            return observerChanged || groupUpdated || membershipAdded;
+        });
+
+        if (persisted)
         {
-            groups = new HashSet<string>();
-            _state.State.ConnectionGroups[connectionId] = groups;
+            Logger.LogDebug("Adding connection {ConnectionId} to group {GroupName} in partition {PartitionId}",
+                connectionId, groupName, this.GetPrimaryKeyLong());
         }
-
-        groups.Add(groupName);
-
-        return Task.CompletedTask;
     }
 
-    public Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
+    public async Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        Logger.LogDebug("Removing connection {ConnectionId} from group {GroupName} in partition {PartitionId}",
-            connectionId, groupName, this.GetPrimaryKeyLong());
+        List<string>? emptiedGroups = null;
+        var connectionRemoved = false;
 
-        if (_state.State.Groups.TryGetValue(groupName, out var members))
+        var stateChanged = await _state.WriteStateSafeAsync(state =>
         {
-            members.Remove(connectionId);
+            emptiedGroups = null;
+            connectionRemoved = false;
+            var changed = false;
 
-            if (members.Count == 0)
+            if (state.Groups.TryGetValue(groupName, out var members) && members.Remove(connectionId))
             {
-                _state.State.Groups.Remove(groupName);
-                NotifyCoordinatorGroupRemoved(groupName);
+                changed = true;
+                if (members.Count == 0)
+                {
+                    state.Groups.Remove(groupName);
+                    emptiedGroups ??= new List<string>();
+                    emptiedGroups.Add(groupName);
+                }
             }
-        }
 
-        if (_state.State.ConnectionGroups.TryGetValue(connectionId, out var groups))
+            if (state.ConnectionGroups.TryGetValue(connectionId, out var groups) && groups.Remove(groupName))
+            {
+                changed = true;
+                if (groups.Count == 0)
+                {
+                    state.ConnectionGroups.Remove(connectionId);
+                    connectionRemoved = RemoveConnectionState(state, connectionId, out var additionalGroups);
+                    if (additionalGroups is not null)
+                    {
+                        if (emptiedGroups is null)
+                        {
+                            emptiedGroups = additionalGroups;
+                        }
+                        else
+                        {
+                            emptiedGroups.AddRange(additionalGroups);
+                        }
+                    }
+                }
+            }
+
+            return changed || connectionRemoved;
+        });
+
+        if (stateChanged)
         {
-            groups.Remove(groupName);
-            if (groups.Count == 0)
-            {
-                _state.State.ConnectionGroups.Remove(connectionId);
-                RemoveConnectionInternal(connectionId, observer);
-            }
-        }
+            Logger.LogDebug("Removing connection {ConnectionId} from group {GroupName} in partition {PartitionId}",
+                connectionId, groupName, this.GetPrimaryKeyLong());
 
-        return Task.CompletedTask;
+            if (connectionRemoved)
+            {
+                UntrackConnection(connectionId, observer);
+            }
+
+            NotifyRemovedGroups(emptiedGroups);
+        }
     }
 
     public Task<bool> HasConnection(string connectionId)
@@ -248,39 +302,39 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         return connections;
     }
 
-    private void RemoveConnectionInternal(string connectionId, ISignalRObserver observer)
+    private static bool RemoveConnectionState(GroupPartitionState state, string connectionId, out List<string>? emptiedGroups)
     {
-        List<string>? emptiedGroups = null;
+        var stateChanged = false;
+        emptiedGroups = null;
 
-        if (_state.State.ConnectionGroups.TryGetValue(connectionId, out var groups))
+        if (state.ConnectionGroups.TryGetValue(connectionId, out var groups))
         {
             foreach (var group in groups)
             {
-                if (_state.State.Groups.TryGetValue(group, out var members))
+                if (state.Groups.TryGetValue(group, out var members))
                 {
                     members.Remove(connectionId);
 
                     if (members.Count == 0)
                     {
-                        _state.State.Groups.Remove(group);
+                        state.Groups.Remove(group);
                         emptiedGroups ??= new List<string>();
                         emptiedGroups.Add(group);
+                        stateChanged = true;
                     }
                 }
             }
 
-            _state.State.ConnectionGroups.Remove(connectionId);
+            state.ConnectionGroups.Remove(connectionId);
+            stateChanged = true;
         }
 
-        _state.State.ConnectionObservers.Remove(connectionId);
-        UntrackConnection(connectionId, observer);
-        if (emptiedGroups is not null)
+        if (state.ConnectionObservers.Remove(connectionId))
         {
-            foreach (var group in emptiedGroups)
-            {
-                NotifyCoordinatorGroupRemoved(group);
-            }
+            stateChanged = true;
         }
+
+        return stateChanged;
     }
 
     public Task EnsureInitialized(string hubKey)
@@ -292,6 +346,19 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         }
 
         return Task.CompletedTask;
+    }
+
+    private void NotifyRemovedGroups(List<string>? groups)
+    {
+        if (groups is null)
+        {
+            return;
+        }
+
+        foreach (var group in groups)
+        {
+            NotifyCoordinatorGroupRemoved(group);
+        }
     }
 
     private void NotifyCoordinatorGroupRemoved(string groupName)

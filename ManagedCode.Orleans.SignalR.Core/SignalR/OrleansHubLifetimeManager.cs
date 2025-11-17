@@ -575,7 +575,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             subscription.PartitionId,
             subscription.Reference,
             heartbeatInterval,
-            targets);
+            targets,
+            connectionId);
 
         return heartbeatGrain.Start(registration);
     }

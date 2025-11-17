@@ -14,6 +14,8 @@ public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBa
     [HttpGet]
     public async Task<ActionResult<string>> OkAction([FromQuery] string? user = null)
     {
+        await Task.Yield();
+
         if (string.IsNullOrEmpty(user))
         {
             user = Guid.NewGuid().ToString("N");
