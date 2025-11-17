@@ -19,28 +19,22 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
+[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionPartitionGrain)}")]
-public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRConnectionPartitionGrain>, ISignalRConnectionPartitionGrain
+public class SignalRConnectionPartitionGrain(
+    ILogger<SignalRConnectionPartitionGrain> logger,
+    IOptions<OrleansSignalROptions> orleansSignalOptions,
+    IOptions<HubOptions> hubOptions,
+    [PersistentState(nameof(SignalRConnectionPartitionGrain), OrleansSignalROptions.OrleansSignalRStorage)]
+    IPersistentState<ConnectionState> stateStorage)
+    : SignalRObserverGrainBase<SignalRConnectionPartitionGrain>(logger, orleansSignalOptions, hubOptions), ISignalRConnectionPartitionGrain
 {
-    private readonly IPersistentState<ConnectionState> _stateStorage;
-
-    public SignalRConnectionPartitionGrain(
-        ILogger<SignalRConnectionPartitionGrain> logger,
-        IOptions<OrleansSignalROptions> orleansSignalOptions,
-        IOptions<HubOptions> hubOptions,
-        [PersistentState(nameof(SignalRConnectionPartitionGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<ConnectionState> stateStorage)
-        : base(logger, orleansSignalOptions, hubOptions)
-    {
-        _stateStorage = stateStorage;
-    }
-
-    protected override int TrackedConnectionCount => _stateStorage.State.ConnectionIds.Count;
+    protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
-        await _stateStorage.ReadStateAsync(cancellationToken);
-        _stateStorage.State ??= new ConnectionState();
+        await stateStorage.ReadStateAsync(cancellationToken);
+        stateStorage.State ??= new ConnectionState();
         await base.OnActivateAsync(cancellationToken);
     }
 
@@ -48,7 +42,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
     {
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
-        var persisted = await _stateStorage.WriteStateSafeAsync(state =>
+        var persisted = await stateStorage.WriteStateSafeAsync(state =>
         {
             var hasExisting = state.ConnectionIds.TryGetValue(connectionId, out var existing);
             var changed = !hasExisting || !string.Equals(existing, observerKey, StringComparison.Ordinal);
@@ -65,7 +59,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         UntrackConnection(connectionId, observer);
-        var removed = await _stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId));
+        var removed = await stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId));
 
         if (removed)
         {
@@ -101,7 +95,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
         var hashSet = new HashSet<string>();
         foreach (var connectionId in excludedConnectionIds)
         {
-            if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            if (stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
             {
                 hashSet.Add(observer);
             }
@@ -115,8 +109,13 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
     {
         Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
 
-        if (!_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+        if (!stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
         {
+            Logger.LogWarning("Partition {PartitionId} missing connection {ConnectionId} (tracked={TrackedConnectionCount}, live={LiveObservers}).",
+                this.GetPrimaryKeyLong(),
+                connectionId,
+                stateStorage.State.ConnectionIds.Count,
+                LiveObservers.Count);
             return false;
         }
 
@@ -125,6 +124,11 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
             _ = live.OnNextAsync(message);
             return true;
         }
+
+        Logger.LogDebug("Partition {PartitionId} falling back to observer manager for {ConnectionId} (live={LiveObserversCount}).",
+            this.GetPrimaryKeyLong(),
+            connectionId,
+            LiveObservers.Count);
 
         await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
             connection => connection.GetPrimaryKeyString() == observer));
@@ -158,7 +162,7 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
         var hashSet = new HashSet<string>();
         foreach (var connectionId in connectionIds)
         {
-            if (_stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
+            if (stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
             {
                 hashSet.Add(observer);
             }
@@ -178,16 +182,16 @@ public class SignalRConnectionPartitionGrain : SignalRObserverGrainBase<SignalRC
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         Logs.OnDeactivateAsync(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
-        var hasConnections = _stateStorage.State.ConnectionIds.Count > 0;
+        var hasConnections = stateStorage.State.ConnectionIds.Count > 0;
         ClearObserverTracking();
 
         if (!hasConnections)
         {
-            await _stateStorage.ClearStateAsync(cancellationToken);
+            await stateStorage.ClearStateAsync(cancellationToken);
         }
         else
         {
-            await _stateStorage.WriteStateAsync(cancellationToken);
+            await stateStorage.WriteStateAsync(cancellationToken);
         }
     }
 

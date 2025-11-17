@@ -658,7 +658,7 @@ public sealed record PerformanceScenarioSettings(
         GroupSize: 60,
         GroupMessagesPerGroup: 70,
         GroupBroadcastersPerGroup: 4,
-        GroupPasses: 4,
+        GroupPasses: 1,
         StreamConnections: 120,
         StreamItemsPerConnection: 120,
         StreamPasses: 4,

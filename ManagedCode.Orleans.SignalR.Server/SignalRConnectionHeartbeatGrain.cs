@@ -12,6 +12,7 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
+[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionHeartbeatGrain)}")]
 public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionHeartbeatGrain
 {

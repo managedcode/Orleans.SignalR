@@ -18,6 +18,7 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
+[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRConnectionHolderGrain)}")]
 public class SignalRConnectionHolderGrain(
     ILogger<SignalRConnectionHolderGrain> logger,
@@ -25,7 +26,7 @@ public class SignalRConnectionHolderGrain(
     IOptions<HubOptions> hubOptions,
     [PersistentState(nameof(SignalRConnectionHolderGrain), OrleansSignalROptions.OrleansSignalRStorage)]
     IPersistentState<ConnectionState> stateStorage)
-    : SignalRObserverGrainBase<SignalRConnectionHolderGrain>(logger, orleansSignalOptions, hubOptions), ISignalRConnectionHolderGrain
+: SignalRObserverGrainBase<SignalRConnectionHolderGrain>(logger, orleansSignalOptions, hubOptions), ISignalRConnectionHolderGrain
 {
     protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 

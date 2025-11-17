@@ -44,7 +44,7 @@ public class PartitioningTests
     public async Task Default_Configuration_Should_Use_Connection_Partitioning()
     {
         // Arrange
-        var connection = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
+        var connection = _apps[0].CreateSignalRClient(nameof(PartitionTestHub));
         await connection.StartAsync();
         connection.State.ShouldBe(HubConnectionState.Connected);
 
@@ -54,7 +54,7 @@ public class PartitioningTests
         // Assert
         result.ShouldBeGreaterThan(0);
 
-        var coordinatorGrain = NameHelperGenerator.GetConnectionCoordinatorGrain<SimpleTestHub>(_siloCluster.Cluster.Client);
+        var coordinatorGrain = NameHelperGenerator.GetConnectionCoordinatorGrain<PartitionTestHub>(_siloCluster.Cluster.Client);
         var partitionCount = await coordinatorGrain.GetPartitionCount();
         var defaultPartitions = (int)new OrleansSignalROptions().ConnectionPartitionCount;
 

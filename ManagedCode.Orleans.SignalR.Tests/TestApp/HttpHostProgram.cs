@@ -82,6 +82,8 @@ public class HttpHostProgram
         app.UseCookiePolicy();
         app.MapControllers();
         app.MapHub<SimpleTestHub>(nameof(SimpleTestHub));
+        app.MapHub<PartitionTestHub>(nameof(PartitionTestHub));
+        app.MapHub<ScalingTestHub>(nameof(ScalingTestHub));
         app.MapHub<InterfaceTestHub>(nameof(InterfaceTestHub));
         app.MapHub<StressTestHub>(nameof(StressTestHub));
 

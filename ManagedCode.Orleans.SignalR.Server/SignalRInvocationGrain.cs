@@ -15,6 +15,7 @@ using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
+[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRInvocationGrain)}")]
 public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 {

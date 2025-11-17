@@ -58,12 +58,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain<THub>(_clusterClient, partitionId);
             subscription.AddGrain(partitionGrain);
             await partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference);
+            await partitionGrain.Ping(subscription.Reference);
         }
         else
         {
             var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
             subscription.AddGrain(connectionHolderGrain);
             await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference);
+            await connectionHolderGrain.Ping(subscription.Reference);
         }
 
         subscription.SetConnectionMetadata(hubKey, usePartitions, partitionId);

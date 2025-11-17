@@ -7,10 +7,8 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRConnectionHeartbeatGrain : IGrainWithStringKey
 {
-    [AlwaysInterleave]
     Task Start(ConnectionHeartbeatRegistration registration);
 
     [OneWay]
-    [AlwaysInterleave]
     Task Stop();
 }

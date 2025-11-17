@@ -18,30 +18,23 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
+[Reentrant]
 [GrainType($"ManagedCode.{nameof(SignalRGroupPartitionGrain)}")]
-public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupPartitionGrain>, ISignalRGroupPartitionGrain
+public class SignalRGroupPartitionGrain(
+    ILogger<SignalRGroupPartitionGrain> logger,
+    IOptions<OrleansSignalROptions> orleansSignalOptions,
+    IOptions<HubOptions> hubOptions,
+    [PersistentState(nameof(SignalRGroupPartitionGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<GroupPartitionState> state)
+    : SignalRObserverGrainBase<SignalRGroupPartitionGrain>(logger, orleansSignalOptions, hubOptions), ISignalRGroupPartitionGrain
 {
-    private readonly IPersistentState<GroupPartitionState> _state;
     private string? _hubKey;
-
-    public SignalRGroupPartitionGrain(
-        ILogger<SignalRGroupPartitionGrain> logger,
-        IOptions<OrleansSignalROptions> orleansSignalOptions,
-        IOptions<HubOptions> hubOptions,
-        [PersistentState(nameof(SignalRGroupPartitionGrain), OrleansSignalROptions.OrleansSignalRStorage)]
-        IPersistentState<GroupPartitionState> state)
-        : base(logger, orleansSignalOptions, hubOptions)
-    {
-        _state = state;
-    }
-
-    protected override int TrackedConnectionCount => _state.State.ConnectionObservers.Count;
+    protected override int TrackedConnectionCount => state.State.ConnectionObservers.Count;
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
-        await _state.ReadStateAsync(cancellationToken);
-        _state.State ??= new GroupPartitionState();
-        _hubKey = _state.State.HubKey;
+        await state.ReadStateAsync(cancellationToken);
+        state.State ??= new GroupPartitionState();
+        _hubKey = state.State.HubKey;
         await base.OnActivateAsync(cancellationToken);
     }
 
@@ -97,7 +90,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
     {
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
-        var persisted = await _state.WriteStateSafeAsync(state =>
+        var persisted = await state.WriteStateSafeAsync(state =>
         {
             var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existing) ||
                                   !string.Equals(existing, observerKey, StringComparison.Ordinal);
@@ -117,7 +110,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
     {
         UntrackConnection(connectionId, observer);
         List<string>? emptiedGroups = null;
-        var removed = await _state.WriteStateSafeAsync(state => RemoveConnectionState(state, connectionId, out emptiedGroups));
+        var removed = await state.WriteStateSafeAsync(state => RemoveConnectionState(state, connectionId, out emptiedGroups));
         if (removed)
         {
             Logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
@@ -137,7 +130,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
 
-        var persisted = await _state.WriteStateSafeAsync(state =>
+        var persisted = await state.WriteStateSafeAsync(state =>
         {
             var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existingObserver) ||
                                   !string.Equals(existingObserver, observerKey, StringComparison.Ordinal);
@@ -176,7 +169,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         List<string>? emptiedGroups = null;
         var connectionRemoved = false;
 
-        var stateChanged = await _state.WriteStateSafeAsync(state =>
+        var stateChanged = await state.WriteStateSafeAsync(state =>
         {
             emptiedGroups = null;
             connectionRemoved = false;
@@ -233,7 +226,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
 
     public Task<bool> HasConnection(string connectionId)
     {
-        var tracked = _state.State.ConnectionGroups.TryGetValue(connectionId, out var groups) && groups.Count > 0;
+        var tracked = state.State.ConnectionGroups.TryGetValue(connectionId, out var groups) && groups.Count > 0;
         return Task.FromResult(tracked);
     }
 
@@ -241,15 +234,15 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
     {
         Logger.LogDebug("Deactivating group partition grain {PartitionId}", this.GetPrimaryKeyLong());
 
-        var hasState = !_state.State.IsEmpty;
+        var hasState = !state.State.IsEmpty;
         ClearObserverTracking();
 
         if (!hasState)
         {
-            return _state.ClearStateAsync(cancellationToken);
+            return state.ClearStateAsync(cancellationToken);
         }
 
-        return _state.WriteStateAsync(cancellationToken);
+        return state.WriteStateAsync(cancellationToken);
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)
@@ -258,7 +251,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
 
         foreach (var groupName in groupNames)
         {
-            if (!_state.State.Groups.TryGetValue(groupName, out var connections))
+            if (!state.State.Groups.TryGetValue(groupName, out var connections))
             {
                 continue;
             }
@@ -283,7 +276,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
 
         foreach (var groupName in groupNames)
         {
-            if (!_state.State.Groups.TryGetValue(groupName, out var members))
+            if (!state.State.Groups.TryGetValue(groupName, out var members))
             {
                 continue;
             }
@@ -342,7 +335,7 @@ public class SignalRGroupPartitionGrain : SignalRObserverGrainBase<SignalRGroupP
         if (string.IsNullOrEmpty(_hubKey) || !string.Equals(_hubKey, hubKey, StringComparison.Ordinal))
         {
             _hubKey = hubKey;
-            _state.State.HubKey = hubKey;
+            state.State.HubKey = hubKey;
         }
 
         return Task.CompletedTask;
