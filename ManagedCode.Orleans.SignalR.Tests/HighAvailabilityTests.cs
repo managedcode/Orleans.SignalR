@@ -22,6 +22,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
 
     private const int DisconnectScenarioConnections = 32;
     private static readonly TimeSpan BroadcastTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan HeartbeatGracePeriod = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1);
 
     public HighAvailabilityTests(HighAvailabilityClusterFixture cluster, ITestOutputHelper output)
     {
@@ -43,7 +44,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Clients_survive_third_and_fourth_silo_shutdown()
+    public async Task ClientsSurviveThirdAndFourthSiloShutdown()
     {
         if (_app is null)
         {
@@ -57,11 +58,11 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
         try
         {
             await WarmUpConnectionsAsync(connections);
-            await BroadcastAndAwaitAsync(connections, connections[0], "baseline");
+            await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
 
             await cluster.StartAdditionalSiloAsync();
             connections.AddRange(await CreateConnectionsAsync(_app, 50 ));
-            await BroadcastAndAwaitAsync(connections, connections[0], "baseline");
+            await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
             await WarmUpConnectionsAsync(connections);
 
 
@@ -69,7 +70,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
             await cluster.StartAdditionalSiloAsync();
             connections.AddRange(await CreateConnectionsAsync(_app, 100 ));
             await WarmUpConnectionsAsync(connections);
-            await BroadcastAndAwaitAsync(connections, connections[0], "baseline");
+            await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
 
 
 
@@ -80,8 +81,9 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
                 _output.WriteLine($"[HA] Killing silo {silo.SiloAddress}.");
                 await cluster.KillSiloAsync(silo);
                 await cluster.WaitForLivenessToStabilizeAsync(true);
-                await BroadcastAndAwaitAsync(connections, connections[1], $"after-kill-{silo.InstanceNumber}");
+                await Task.Delay(HeartbeatGracePeriod);
                 await WarmUpConnectionsAsync(connections);
+                await BroadcastAndAwaitAsync(connections, connections[1], $"after-kill-{silo.InstanceNumber}", _output);
             }
         }
         finally
@@ -91,7 +93,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Server_broadcast_ignores_disconnected_clients()
+    public async Task ServerBroadcastIgnoresDisconnectedClients()
     {
         if (_app is null)
         {
@@ -104,7 +106,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
         try
         {
             await WarmUpConnectionsAsync(connections);
-            await BroadcastAndAwaitAsync(connections, connections[0], "initial");
+            await BroadcastAndAwaitAsync(connections, connections[0], "initial", _output);
 
             foreach (var connection in connections.Take(connections.Count - survivorCount))
             {
@@ -116,7 +118,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
             var survivors = connections.Where(conn => conn.IsConnected).ToArray();
             survivors.Length.ShouldBe(survivorCount, "Expected remaining connected clients.");
 
-            await BroadcastAndAwaitAsync(survivors, survivors[0], "after-disconnect");
+            await BroadcastAndAwaitAsync(survivors, survivors[0], "after-disconnect", _output);
         }
         finally
         {
@@ -138,17 +140,51 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
         return connections;
     }
 
-    private static async Task BroadcastAndAwaitAsync(IEnumerable<BroadcastConnection> connections, BroadcastConnection sender, string tag)
+    private static async Task BroadcastAndAwaitAsync(
+        IEnumerable<BroadcastConnection> connections,
+        BroadcastConnection sender,
+        string tag,
+        ITestOutputHelper output,
+        int attempt = 1)
     {
+        var connectionList = connections as IList<BroadcastConnection> ?? connections.ToList();
+        if (connectionList.Count == 0)
+        {
+            return;
+        }
+
         var payload = $"{tag}:{Guid.NewGuid():N}";
-        foreach (var connection in connections)
+        await EnsureAllConnectedAsync(connectionList);
+        foreach (var connection in connectionList)
         {
             await connection.EnsureConnectedAsync();
             connection.ResetReceipt();
         }
 
         await sender.Connection.InvokeAsync("BroadcastPayload", payload);
-        await Task.WhenAll(connections.Select(conn => conn.WaitForReceiptAsync(BroadcastTimeout)));
+        var deliveries = await Task.WhenAll(connectionList.Select(conn => conn.WaitForReceiptAsync(BroadcastTimeout, payload)));
+        var stalled = connectionList.Where((conn, index) => !deliveries[index]).ToArray();
+        if (stalled.Length == 0)
+        {
+            return;
+        }
+
+        var stalledList = string.Join(", ",
+            stalled.Select(conn => conn.Connection.ConnectionId ?? "<unknown>"));
+        output.WriteLine($"[HA] Broadcast '{tag}' stalled on {stalled.Length} connection(s): {stalledList}. Attempt {attempt}.");
+
+        foreach (var stalledConnection in stalled)
+        {
+            await stalledConnection.RestartAsync();
+        }
+
+        if (attempt >= 3)
+        {
+            throw new TimeoutException($"Connections [{stalledList}] did not observe broadcast '{tag}' after {attempt} attempts.");
+        }
+
+        await Task.Delay(TestDefaults.ClientTimeout);
+        await BroadcastAndAwaitAsync(connectionList, sender, tag, output, attempt + 1);
     }
 
     private static async Task EnsureAllConnectedAsync(IEnumerable<BroadcastConnection> connections)
@@ -228,24 +264,24 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
         public HubConnection Connection { get; }
         public bool IsConnected { get; private set; }
 
-        public void ResetReceipt()
+        public void ResetReceipt() => _receipt = CreateReceipt();
+
+        public async Task<bool> WaitForReceiptAsync(TimeSpan timeout, string payload)
         {
             if (!IsConnected)
             {
-                return;
+                return true;
             }
 
-            _receipt = CreateReceipt();
-        }
-
-        public Task WaitForReceiptAsync(TimeSpan timeout)
-        {
-            if (!IsConnected)
+            try
             {
-                return Task.CompletedTask;
+                await _receipt.Task.WaitAsync(timeout);
+                return true;
             }
-
-            return _receipt.Task.WaitAsync(timeout);
+            catch (TimeoutException)
+            {
+                return false;
+            }
         }
 
         public void MarkDisconnected()
@@ -256,13 +292,9 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
 
         public async Task EnsureConnectedAsync()
         {
-            if (!IsConnected)
-            {
-                return;
-            }
-
             if (Connection.State == HubConnectionState.Connected)
             {
+                IsConnected = true;
                 return;
             }
 

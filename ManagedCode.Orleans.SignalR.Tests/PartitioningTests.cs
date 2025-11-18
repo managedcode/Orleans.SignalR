@@ -41,7 +41,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task Default_Configuration_Should_Use_Connection_Partitioning()
+    public async Task DefaultConfigurationShouldUseConnectionPartitioning()
     {
         // Arrange
         var connection = _apps[0].CreateSignalRClient(nameof(PartitionTestHub));
@@ -66,7 +66,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task Default_Group_Configuration_Should_Use_Group_Partitioning()
+    public async Task DefaultGroupConfigurationShouldUseGroupPartitioning()
     {
         // Arrange
         const int groupCount = 100;
@@ -100,7 +100,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task Partitioned_SendToAll_Should_Reach_All_Connections()
+    public async Task PartitionedSendToAllShouldReachAllConnections()
     {
         // Arrange
         const int connectionsPerApp = 100;
@@ -197,7 +197,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task Partitioned_SendToGroup_Should_Only_Reach_Group_Members()
+    public async Task PartitionedSendToGroupShouldOnlyReachGroupMembers()
     {
         // Arrange
         var connection1 = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
@@ -265,7 +265,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task Partitioned_Group_Membership_Cleans_Up_On_Disconnect()
+    public async Task PartitionedGroupMembershipCleansUpOnDisconnect()
     {
         const string groupName = "cleanup-group";
 

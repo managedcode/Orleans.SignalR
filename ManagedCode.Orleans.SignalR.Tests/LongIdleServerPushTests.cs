@@ -53,7 +53,7 @@ public class LongIdleServerPushTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Server_can_push_after_simulated_five_minute_idle()
+    public async Task ServerCanPushAfterSimulatedFiveMinuteIdle()
     {
         if (_app is null)
         {

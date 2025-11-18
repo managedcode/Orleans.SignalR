@@ -42,7 +42,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAlive_should_prevent_idle_disconnect()
+    public async Task KeepAliveShouldPreventIdleDisconnect()
     {
         if (_app is null)
         {
@@ -79,7 +79,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAlive_should_allow_direct_sends_after_idle_interval()
+    public async Task KeepAliveShouldAllowDirectSendsAfterIdleInterval()
     {
         if (_app is null)
         {
@@ -121,7 +121,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAlive_should_preserve_user_delivery_after_idle_interval()
+    public async Task KeepAliveShouldPreserveUserDeliveryAfterIdleInterval()
     {
         if (_app is null)
         {
@@ -180,7 +180,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAlive_should_preserve_group_delivery_after_idle_interval()
+    public async Task KeepAliveShouldPreserveGroupDeliveryAfterIdleInterval()
     {
         if (_app is null)
         {
@@ -232,7 +232,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAlive_should_cleanup_grains_after_disconnect()
+    public async Task KeepAliveShouldCleanupGrainsAfterDisconnect()
     {
         if (_app is null)
         {

@@ -40,7 +40,7 @@ public class ReconnectionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Reconnected_user_should_receive_pending_messages()
+    public async Task ReconnectedUserShouldReceivePendingMessages()
     {
         if (_app is null)
         {

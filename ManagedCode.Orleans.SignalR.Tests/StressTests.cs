@@ -140,7 +140,7 @@ public sealed class StressUserRoundtripTests : StressTestBase<LoadClusterDeviceF
     }
 
     [Fact]
-    public async Task Stress_User_Roundtrip()
+    public async Task StressUserRoundtrip()
     {
         var harness = CreateHarness();
         await harness.RunDeviceEchoAsync(useOrleans: true, basePort: 30_000);
@@ -157,7 +157,7 @@ public sealed class StressBroadcastFanoutTests : StressTestBase<LoadClusterBroad
     }
 
     [Fact]
-    public async Task Stress_Broadcast_Fanout()
+    public async Task StressBroadcastFanout()
     {
         var harness = CreateHarness();
         await harness.RunBroadcastFanoutAsync(useOrleans: true, basePort: 31_000);
@@ -174,7 +174,7 @@ public sealed class StressGroupBroadcastTests : StressTestBase<LoadClusterGroupF
     }
 
     [Fact]
-    public async Task Stress_Group_Broadcast()
+    public async Task StressGroupBroadcast()
     {
         var harness = CreateHarness();
         await harness.RunGroupScenarioAsync(useOrleans: true, basePort: 32_000);
@@ -191,7 +191,7 @@ public sealed class StressStreamingTests : StressTestBase<LoadClusterStreamingFi
     }
 
     [Fact]
-    public async Task Stress_Streaming()
+    public async Task StressStreaming()
     {
         var harness = CreateHarness();
         await harness.RunStreamingScenarioAsync(useOrleans: true, basePort: 33_000);
@@ -208,7 +208,7 @@ public sealed class StressInvocationTests : StressTestBase<LoadClusterInvocation
     }
 
     [Fact]
-    public async Task Stress_Invocation()
+    public async Task StressInvocation()
     {
         var harness = CreateHarness();
         await harness.RunInvocationScenarioAsync(useOrleans: true, basePort: 34_000);
@@ -225,7 +225,7 @@ public sealed class StressCascadeTests : StressTestBase<LoadClusterCascadeFixtur
     }
 
     [Fact]
-    public async Task Stress_All_Scenarios()
+    public async Task StressAllScenarios()
     {
         var harness = CreateHarness();
         var device = await harness.RunDeviceEchoAsync(true, 40_000);

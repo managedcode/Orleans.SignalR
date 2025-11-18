@@ -23,7 +23,7 @@ public class PerformanceComparisonTests
     }
 
     [Fact]
-    public async Task Device_Echo_Performance_Comparison()
+    public async Task DeviceEchoPerformanceComparison()
     {
         var orleans = await _harness.RunDeviceEchoAsync(useOrleans: true, basePort: 9400);
         var inMemory = await _harness.RunDeviceEchoAsync(useOrleans: false, basePort: 9500);
@@ -32,7 +32,7 @@ public class PerformanceComparisonTests
     }
 
     [Fact]
-    public async Task Broadcast_Fanout_Performance_Comparison()
+    public async Task BroadcastFanoutPerformanceComparison()
     {
         var orleans = await _harness.RunBroadcastFanoutAsync(useOrleans: true, basePort: 9600);
         var inMemory = await _harness.RunBroadcastFanoutAsync(useOrleans: false, basePort: 9700);
@@ -41,7 +41,7 @@ public class PerformanceComparisonTests
     }
 
     [Fact]
-    public async Task Group_Broadcast_Performance_Comparison()
+    public async Task GroupBroadcastPerformanceComparison()
     {
         var orleans = await _harness.RunGroupScenarioAsync(useOrleans: true, basePort: 9800);
         var inMemory = await _harness.RunGroupScenarioAsync(useOrleans: false, basePort: 9900);
@@ -50,7 +50,7 @@ public class PerformanceComparisonTests
     }
 
     [Fact]
-    public async Task Streaming_Performance_Comparison()
+    public async Task StreamingPerformanceComparison()
     {
         var orleans = await _harness.RunStreamingScenarioAsync(useOrleans: true, basePort: 10_000);
         var inMemory = await _harness.RunStreamingScenarioAsync(useOrleans: false, basePort: 10_100);
@@ -59,7 +59,7 @@ public class PerformanceComparisonTests
     }
 
     [Fact]
-    public async Task Invocation_Performance_Comparison()
+    public async Task InvocationPerformanceComparison()
     {
         var orleans = await _harness.RunInvocationScenarioAsync(useOrleans: true, basePort: 10_200);
         var inMemory = await _harness.RunInvocationScenarioAsync(useOrleans: false, basePort: 10_300);

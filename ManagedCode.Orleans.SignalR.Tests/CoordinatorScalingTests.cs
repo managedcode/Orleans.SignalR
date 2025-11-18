@@ -15,7 +15,7 @@ public class CoordinatorScalingTests(SmokeClusterFixture cluster, ITestOutputHel
     private readonly ITestOutputHelper _output = output;
 
     [Fact]
-    public async Task ConnectionCoordinator_Scales_With_Connection_Load()
+    public async Task ConnectionCoordinatorScalesWithConnectionLoad()
     {
         var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<ScalingTestHub>(_cluster.Cluster.Client);
         var baseline = await coordinator.GetPartitionCount();
@@ -45,7 +45,7 @@ public class CoordinatorScalingTests(SmokeClusterFixture cluster, ITestOutputHel
     }
 
     [Fact]
-    public async Task GroupCoordinator_Scales_With_Group_Load()
+    public async Task GroupCoordinatorScalesWithGroupLoad()
     {
         var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<ScalingTestHub>(_cluster.Cluster.Client);
         var baseline = await coordinator.GetPartitionCount();

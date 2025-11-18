@@ -39,7 +39,7 @@ public class LongIdleClientInvocationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Client_can_invoke_after_simulated_five_minute_idle()
+    public async Task ClientCanInvokeAfterSimulatedFiveMinuteIdle()
     {
         if (_app is null)
         {

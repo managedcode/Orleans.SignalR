@@ -76,7 +76,7 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Targeted_send_should_survive_idle_with_user_configuration()
+    public async Task TargetedSendShouldSurviveIdleWithUserConfiguration()
     {
         if (_app is null)
         {
@@ -121,7 +121,7 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Iot_workload_should_process_group_broadcast_and_streaming_after_idle()
+    public async Task IotWorkloadShouldProcessGroupBroadcastAndStreamingAfterIdle()
     {
         if (_app is null)
         {

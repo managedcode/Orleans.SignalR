@@ -51,7 +51,7 @@ public sealed class PerformanceScenarioHarness
                 var app = apps[appIndex];
                 var connectionIndex = index;
                 var userId = $"device-{index:D4}";
-                var connection = await CreateUserConnectionAsync(app, nameof(SimpleTestHub), userId);
+                var connection = await CreateUserConnectionAsync(app, nameof(StressTestHub), userId);
 
                 connection.On<string>("SendAll", _ =>
                 {
@@ -130,7 +130,7 @@ public sealed class PerformanceScenarioHarness
                 var appIndex = index % apps.Count;
                 var connectionIndex = index;
                 var app = apps[appIndex];
-                var connection = app.CreateSignalRClient(nameof(SimpleTestHub));
+                var connection = app.CreateSignalRClient(nameof(StressTestHub));
                 connection.On<string>("PerfBroadcast", _ =>
                 {
                     Interlocked.Increment(ref receipts[connectionIndex]);
@@ -253,7 +253,7 @@ public sealed class PerformanceScenarioHarness
 
                 var marker = $"group:{groupName}|payload|";
                 groupMarkers[connectionIndex] = marker;
-                var connection = app.CreateSignalRClient(nameof(SimpleTestHub));
+                var connection = app.CreateSignalRClient(nameof(StressTestHub));
                 connection.On<string>("SendAll", message =>
                 {
                     if (message.Contains(marker, StringComparison.Ordinal))
@@ -270,8 +270,11 @@ public sealed class PerformanceScenarioHarness
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} group";
             _output.WriteLine($"{scenarioLabel}: {connections.Count} connections across {groupMembers.Count} groups (size {Settings.GroupSize}) for {Math.Max(1, Settings.GroupPasses)} passes.");
 
-            await Task.WhenAll(connections.Select((connection, index) => connection.InvokeAsync("AddToGroup", groupAssignments[index])));
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            for (var index = 0; index < connections.Count; index++)
+            {
+                await connections[index].InvokeAsync("AddToGroup", groupAssignments[index]);
+            }
+            await Task.Delay(TimeSpan.FromSeconds(2));
 
             foreach (var (groupName, members) in groupMembers)
             {
@@ -350,6 +353,18 @@ public sealed class PerformanceScenarioHarness
 
             var expected = expectedPerConnection.Sum();
             var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalDelivered), expected, Settings.GroupTimeout, scenarioLabel);
+            if (!completed)
+            {
+                var preview = perConnection
+                    .Select((count, index) => (index, actual: count, expectedCount: expectedPerConnection[index]))
+                    .Where(tuple => tuple.actual != tuple.expectedCount)
+                    .Take(10)
+                    .Select(tuple => $"conn#{tuple.index}: actual={tuple.actual}, expected={tuple.expectedCount}, group={groupAssignments[tuple.index]}");
+                foreach (var line in preview)
+                {
+                    _output.WriteLine(line);
+                }
+            }
             completed.ShouldBeTrue($"Timed out awaiting {scenarioLabel} deliveries.");
             sendStopwatch.Stop();
 
@@ -388,7 +403,7 @@ public sealed class PerformanceScenarioHarness
             for (var index = 0; index < Settings.StreamConnections; index++)
             {
                 var app = apps[index % apps.Count];
-                var connection = app.CreateSignalRClient(nameof(SimpleTestHub));
+                var connection = app.CreateSignalRClient(nameof(StressTestHub));
                 await connection.StartAsync();
                 connections.Add(connection);
             }
@@ -457,7 +472,7 @@ public sealed class PerformanceScenarioHarness
             for (var index = 0; index < Settings.InvocationConnections; index++)
             {
                 var app = apps[index % apps.Count];
-                var connection = app.CreateSignalRClient(nameof(SimpleTestHub));
+                var connection = app.CreateSignalRClient(nameof(StressTestHub));
                 await connection.StartAsync();
                 connections.Add(connection);
             }

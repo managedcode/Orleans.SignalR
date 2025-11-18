@@ -34,7 +34,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task SingleConnection_CanInvokeServerMethod()
+    public async Task SingleConnectionCanInvokeServerMethod()
     {
         var connection = _firstApp.CreateSignalRClient(HubName);
 
@@ -49,7 +49,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task Broadcast_ReachesBothServers()
+    public async Task BroadcastReachesBothServers()
     {
         var message1 = string.Empty;
         var message2 = string.Empty;
@@ -69,7 +69,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task GroupBroadcast_ReachesMembersAcrossSilos()
+    public async Task GroupBroadcastReachesMembersAcrossSilos()
     {
         var messages = new ConcurrentDictionary<string, string>();
 
@@ -90,7 +90,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task UserMessage_IsDeliveredToSpecificUser()
+    public async Task UserMessageIsDeliveredToSpecificUser()
     {
         var httpClient = _firstApp.CreateHttpClient();
         var response = await httpClient.GetAsync("/auth?user=SmokeUser");
@@ -112,7 +112,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task ServerStreaming_CompletesWithinTimeout()
+    public async Task ServerStreamingCompletesWithinTimeout()
     {
         var connection = _firstApp.CreateSignalRClient(HubName);
         await connection.StartAsync();

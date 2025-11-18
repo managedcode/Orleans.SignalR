@@ -63,7 +63,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Targeted_connection_send_should_work_when_keep_alive_disabled()
+    public async Task TargetedConnectionSendShouldWorkWhenKeepAliveDisabled()
     {
         if (_app is null)
         {
@@ -111,7 +111,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Idle_connection_should_receive_direct_send_after_idle_window()
+    public async Task IdleConnectionShouldReceiveDirectSendAfterIdleWindow()
     {
         if (_app is null)
         {
@@ -153,7 +153,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAlive_disabled_should_preserve_user_delivery_after_idle_interval()
+    public async Task KeepAliveDisabledShouldPreserveUserDeliveryAfterIdleInterval()
     {
         if (_app is null)
         {
@@ -211,7 +211,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Group_send_should_work_when_keep_alive_disabled()
+    public async Task GroupSendShouldWorkWhenKeepAliveDisabled()
     {
         if (_app is null)
         {
@@ -300,7 +300,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Active_targeted_send_should_not_drop_when_keep_alive_disabled()
+    public async Task ActiveTargetedSendShouldNotDropWhenKeepAliveDisabled()
     {
         if (_app is null)
         {

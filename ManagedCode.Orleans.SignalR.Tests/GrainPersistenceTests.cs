@@ -27,7 +27,7 @@ public sealed class GrainPersistenceTests
     }
 
     [Fact]
-    public async Task Connection_partition_persists_connection_state_after_deactivation()
+    public async Task ConnectionPartitionPersistsConnectionStateAfterDeactivation()
     {
         var client = _cluster.Cluster.Client;
         var management = client.GetGrain<IManagementGrain>(0);
@@ -58,7 +58,7 @@ public sealed class GrainPersistenceTests
     }
 
     [Fact]
-    public async Task Connection_partition_retains_multiple_connections_through_sequential_evictions()
+    public async Task ConnectionPartitionRetainsMultipleConnectionsThroughSequentialEvictions()
     {
         var client = _cluster.Cluster.Client;
         var management = client.GetGrain<IManagementGrain>(0);
@@ -108,7 +108,7 @@ public sealed class GrainPersistenceTests
     }
 
     [Fact]
-    public async Task Connections_for_distinct_hubs_do_not_interfere()
+    public async Task ConnectionsForDistinctHubsDoNotInterfere()
     {
         var client = _cluster.Cluster.Client;
         var sharedConnectionId = $"conn-shared-{Guid.NewGuid():N}";
