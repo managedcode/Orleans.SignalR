@@ -591,8 +591,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private void OnApplicationStopping()
     {
-        var tasks = new List<Task>(_connections.Count);
-
         foreach (var connection in _connections)
         {
             var subscription = connection.Features.Get<Subscription>();
