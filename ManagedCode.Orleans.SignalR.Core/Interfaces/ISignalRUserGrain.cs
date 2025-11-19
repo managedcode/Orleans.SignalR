@@ -7,11 +7,11 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRUserGrain : IGrainWithStringKey, IObserverConnectionManager
 {
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToUser(HubMessage message);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task RequestMessage();
 }

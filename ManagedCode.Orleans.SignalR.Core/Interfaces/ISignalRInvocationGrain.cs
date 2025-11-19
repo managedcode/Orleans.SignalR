@@ -8,8 +8,8 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRInvocationGrain : IGrainWithStringKey, IObserverConnectionManager
 {
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task TryCompleteResult(string connectionId, HubMessage message);
 
     [AlwaysInterleave]

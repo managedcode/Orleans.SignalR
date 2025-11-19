@@ -10,7 +10,7 @@ public interface ISignalRConnectionHeartbeatGrain : IGrainWithStringKey
     [AlwaysInterleave]
     Task Start(ConnectionHeartbeatRegistration registration);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task Stop();
 }

@@ -7,12 +7,12 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRGroupPartitionGrain : IGrainWithIntegerKey, IObserverConnectionManager
 {
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToGroups(HubMessage message, string[] groupNames);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds);
 
     [AlwaysInterleave]

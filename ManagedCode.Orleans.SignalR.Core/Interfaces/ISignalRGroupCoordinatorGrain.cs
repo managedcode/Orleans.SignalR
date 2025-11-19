@@ -19,12 +19,12 @@ public interface ISignalRGroupCoordinatorGrain : IGrainWithStringKey
     [OneWay]
     Task SendToGroup(string groupName, HubMessage message);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToGroupExcept(string groupName, HubMessage message, string[] excludedConnectionIds);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToGroups(string[] groupNames, HubMessage message);
 
     [AlwaysInterleave]

@@ -599,15 +599,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
             if (subscription is null)
             {
-                return;
+                continue;
             }
 
             foreach (var grain in subscription.Grains)
             {
-                tasks.Add(grain.RemoveConnection(connection.ConnectionId, subscription.Reference));
+                _ = grain.RemoveConnection(connection.ConnectionId, subscription.Reference);
             }
         }
-
-        _ = Task.Run(() => Task.WhenAll(tasks));
     }
 }

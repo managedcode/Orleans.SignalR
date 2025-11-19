@@ -9,10 +9,11 @@ public interface IObserverConnectionManager : IGrain
     [AlwaysInterleave]
     Task AddConnection(string connectionId, ISignalRObserver observer);
 
+    [OneWay]
     [AlwaysInterleave]
     Task RemoveConnection(string connectionId, ISignalRObserver observer);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task Ping(ISignalRObserver observer);
 }

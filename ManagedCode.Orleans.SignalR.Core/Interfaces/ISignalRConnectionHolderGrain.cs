@@ -7,18 +7,18 @@ namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 
 public interface ISignalRConnectionHolderGrain : IGrainWithStringKey, IObserverConnectionManager
 {
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToAll(HubMessage message);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds);
 
     [AlwaysInterleave]
     Task<bool> SendToConnection(HubMessage message, string connectionId);
 
-    [AlwaysInterleave]
     [OneWay]
+    [AlwaysInterleave]
     Task SendToConnections(HubMessage message, string[] connectionIds);
 }
