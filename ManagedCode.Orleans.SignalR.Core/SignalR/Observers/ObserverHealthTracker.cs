@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using Microsoft.AspNetCore.SignalR.Protocol;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
 /// <summary>
 /// Tracks observer health by monitoring delivery failures with circuit breaker support.
 /// Observers exceeding the failure threshold have their circuit opened to prevent cascade failures.
+/// Supports graceful expiration with message buffering for timing edge cases.
 /// </summary>
 public sealed class ObserverHealthTracker
 {
@@ -16,6 +18,7 @@ public sealed class ObserverHealthTracker
     private readonly bool _circuitBreakerEnabled;
     private readonly TimeSpan _circuitOpenDuration;
     private readonly TimeSpan _halfOpenTestInterval;
+    private readonly ExpiringObserverBuffer _gracePeriodBuffer;
     private readonly object _lock = new();
 
     public ObserverHealthTracker(
@@ -23,13 +26,18 @@ public sealed class ObserverHealthTracker
         TimeSpan failureWindow,
         bool circuitBreakerEnabled = true,
         TimeSpan? circuitOpenDuration = null,
-        TimeSpan? halfOpenTestInterval = null)
+        TimeSpan? halfOpenTestInterval = null,
+        TimeSpan? gracePeriod = null,
+        int maxBufferedMessages = 50)
     {
         _failureThreshold = Math.Max(1, failureThreshold);
         _failureWindow = failureWindow;
         _circuitBreakerEnabled = circuitBreakerEnabled;
         _circuitOpenDuration = circuitOpenDuration ?? TimeSpan.FromSeconds(30);
         _halfOpenTestInterval = halfOpenTestInterval ?? TimeSpan.FromSeconds(5);
+        _gracePeriodBuffer = new ExpiringObserverBuffer(
+            gracePeriod ?? TimeSpan.Zero,
+            maxBufferedMessages);
     }
 
     /// <summary>
@@ -41,6 +49,11 @@ public sealed class ObserverHealthTracker
     /// Gets whether circuit breaker is enabled.
     /// </summary>
     public bool CircuitBreakerEnabled => _circuitBreakerEnabled;
+
+    /// <summary>
+    /// Gets whether grace period buffering is enabled.
+    /// </summary>
+    public bool GracePeriodEnabled => _gracePeriodBuffer.IsEnabled;
 
     /// <summary>
     /// Records a successful delivery to an observer, resetting its failure count and closing circuit.
@@ -177,6 +190,70 @@ public sealed class ObserverHealthTracker
         {
             _healthStates.Remove(connectionId);
         }
+        _gracePeriodBuffer.Expire(connectionId);
+    }
+
+    /// <summary>
+    /// Starts a grace period for an observer, allowing message buffering until restored or expired.
+    /// Call this when an observer fails but might recover (e.g., heartbeat timeout).
+    /// </summary>
+    /// <returns>True if grace period started, false if already in grace period or disabled.</returns>
+    public bool StartGracePeriod(string connectionId)
+    {
+        return _gracePeriodBuffer.StartGracePeriod(connectionId);
+    }
+
+    /// <summary>
+    /// Checks if an observer is currently in the grace period.
+    /// </summary>
+    public bool IsInGracePeriod(string connectionId)
+    {
+        return _gracePeriodBuffer.IsInGracePeriod(connectionId);
+    }
+
+    /// <summary>
+    /// Buffers a message for an observer that is in the grace period.
+    /// </summary>
+    /// <returns>True if buffered, false if not in grace period or buffer full.</returns>
+    public bool BufferMessage(string connectionId, HubMessage message)
+    {
+        return _gracePeriodBuffer.BufferMessage(connectionId, message);
+    }
+
+    /// <summary>
+    /// Restores an observer from the grace period, returning any buffered messages.
+    /// Call this when an observer reconnects or sends a heartbeat during the grace period.
+    /// </summary>
+    public IReadOnlyList<HubMessage> RestoreFromGracePeriod(string connectionId)
+    {
+        var messages = _gracePeriodBuffer.RestoreAndGetMessages(connectionId);
+
+        // Also reset health state since the observer recovered
+        lock (_lock)
+        {
+            if (_healthStates.TryGetValue(connectionId, out var state))
+            {
+                state.RecordSuccess();
+            }
+        }
+
+        return messages;
+    }
+
+    /// <summary>
+    /// Gets the remaining grace period time for a connection.
+    /// </summary>
+    public TimeSpan? GetRemainingGracePeriod(string connectionId)
+    {
+        return _gracePeriodBuffer.GetRemainingGracePeriod(connectionId);
+    }
+
+    /// <summary>
+    /// Cleans up expired grace periods and returns the connection IDs that expired.
+    /// </summary>
+    public List<string> CleanupExpiredGracePeriods()
+    {
+        return _gracePeriodBuffer.CleanupExpired();
     }
 
     /// <summary>
@@ -188,6 +265,7 @@ public sealed class ObserverHealthTracker
         {
             _healthStates.Clear();
         }
+        _gracePeriodBuffer.Clear();
     }
 
     /// <summary>
@@ -237,9 +315,11 @@ public sealed class ObserverHealthTracker
     /// </summary>
     public HealthStatistics GetStatistics()
     {
+        HealthStatistics stats;
+
         lock (_lock)
         {
-            var stats = new HealthStatistics();
+            stats = new HealthStatistics();
 
             foreach (var state in _healthStates.Values)
             {
@@ -263,9 +343,14 @@ public sealed class ObserverHealthTracker
                     stats.DeadObservers++;
                 }
             }
-
-            return stats;
         }
+
+        // Add grace period stats
+        var bufferStats = _gracePeriodBuffer.GetStatistics();
+        stats.ObserversInGracePeriod = bufferStats.ObserversInGracePeriod;
+        stats.TotalBufferedMessages = bufferStats.TotalBufferedMessages;
+
+        return stats;
     }
 
     private sealed class ObserverHealthState
@@ -418,4 +503,6 @@ public sealed class HealthStatistics
     public int OpenCircuits { get; set; }
     public int HalfOpenCircuits { get; set; }
     public int DeadObservers { get; set; }
+    public int ObserversInGracePeriod { get; set; }
+    public int TotalBufferedMessages { get; set; }
 }

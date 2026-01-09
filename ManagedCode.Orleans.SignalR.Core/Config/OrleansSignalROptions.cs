@@ -94,4 +94,20 @@ public class OrleansSignalROptions
     ///     The default value is 5 seconds.
     /// </summary>
     public TimeSpan CircuitBreakerHalfOpenTestInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    ///     Grace period before an observer is hard-removed after a failure.
+    ///     During this period, messages are buffered and replayed if the observer recovers.
+    ///     This handles timing edge cases like GC pauses, network latency, or silo overload.
+    ///     Set to TimeSpan.Zero to disable grace period buffering.
+    ///     The default value is 10 seconds.
+    /// </summary>
+    public TimeSpan ObserverGracePeriod { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    ///     Maximum number of messages to buffer per observer during the grace period.
+    ///     Oldest messages are dropped when the limit is exceeded.
+    ///     The default value is 50.
+    /// </summary>
+    public int MaxBufferedMessagesPerObserver { get; set; } = 50;
 }
