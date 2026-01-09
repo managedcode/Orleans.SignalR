@@ -129,34 +129,26 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             list.Add(groupName);
         }
 
-        if (groupsByPartition.Count < 100)
+        if (groupsByPartition.Count == 0)
         {
-            var tasks = new List<Task>(groupsByPartition.Count);
-            foreach (var kvp in groupsByPartition)
-            {
-                var partitionGrain = await GetPartitionGrainAsync(kvp.Key);
-                tasks.Add(partitionGrain.SendToGroups(message, kvp.Value.ToArray()));
-            }
+            return;
+        }
+
+        // Send to all partitions in parallel
+        var tasks = new List<Task>(groupsByPartition.Count);
+        foreach (var kvp in groupsByPartition)
+        {
+            var partitionGrain = await GetPartitionGrainAsync(kvp.Key);
+            tasks.Add(partitionGrain.SendToGroups(message, kvp.Value.ToArray()));
+        }
+
+        try
+        {
             await Task.WhenAll(tasks);
         }
-        else
+        catch (Exception ex)
         {
-            foreach (var kvp in groupsByPartition)
-            {
-                var partitionId = kvp.Key;
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        var partitionGrain = await GetPartitionGrainAsync(partitionId);
-                        await partitionGrain.SendToGroups(message, kvp.Value.ToArray());
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to send to groups in partition {PartitionId}", partitionId);
-                    }
-                });
-            }
+            _logger.LogError(ex, "Failed to send to one or more group partitions");
         }
     }
 
@@ -195,6 +187,13 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             {
                 GroupMembership[groupName] = count - 1;
             }
+        }
+
+        // Persist state changes to ensure consistency after reactivation
+        if (_stateDirty)
+        {
+            await _state.WriteStateAsync();
+            _stateDirty = false;
         }
     }
 

@@ -89,9 +89,10 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         return Task.FromResult(_currentPartitionCount);
     }
 
-    public Task<int> GetPartitionForConnection(string connectionId)
+    public async Task<int> GetPartitionForConnection(string connectionId)
     {
         var stopwatch = Stopwatch.StartNew();
+        var wasNew = !_connectionPartitions.ContainsKey(connectionId);
         var partition = GetOrAssignPartition(connectionId);
         stopwatch.Stop();
 
@@ -104,7 +105,13 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
                 _connectionPartitions.Count);
         }
 
-        return Task.FromResult(partition);
+        // Persist state if a new partition was assigned to ensure consistency after reactivation
+        if (wasNew)
+        {
+            await _state.WriteStateAsync();
+        }
+
+        return partition;
     }
 
     public async Task SendToAll(HubMessage message)
@@ -115,11 +122,14 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             return;
         }
 
-        var distribution = _connectionPartitions
-            .GroupBy(static kvp => kvp.Value)
-            .Select(group => $"{group.Key}:{group.Count()}")
-            .ToArray();
-        _logger.LogInformation("Sending to all partitions {Distribution}", string.Join(",", distribution));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            var distribution = _connectionPartitions
+                .GroupBy(static kvp => kvp.Value)
+                .Select(group => $"{group.Key}:{group.Count()}")
+                .ToArray();
+            _logger.LogDebug("Sending to all partitions {Distribution}", string.Join(",", distribution));
+        }
 
         var tasks = new List<Task>(partitions.Count);
         foreach (var partitionId in partitions)
