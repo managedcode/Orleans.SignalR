@@ -27,11 +27,12 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     private readonly ILogger<SignalRConnectionCoordinatorGrain> _logger;
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<ConnectionCoordinatorState> _state;
-    private readonly Dictionary<string, int> _connectionPartitions;
+    private readonly Dictionary<string, PartitionAssignment> _connectionPartitions;
     private readonly HashSet<int> _activePartitions;
     private readonly int _connectionsPerPartitionHint;
     private uint _basePartitionCount;
     private int _currentPartitionCount;
+    private int _partitionEpoch;
 
     public SignalRConnectionCoordinatorGrain(
         ILogger<SignalRConnectionCoordinatorGrain> logger,
@@ -42,7 +43,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         _logger = logger;
         _options = options;
         _state = state;
-        _connectionPartitions = new Dictionary<string, int>(StringComparer.Ordinal);
+        _connectionPartitions = new Dictionary<string, PartitionAssignment>(StringComparer.Ordinal);
         _activePartitions = new HashSet<int>();
         _connectionsPerPartitionHint = Math.Max(1, _options.Value.ConnectionsPerPartitionHint);
     }
@@ -51,17 +52,21 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     {
         await _state.ReadStateAsync(cancellationToken);
         _state.State ??= new ConnectionCoordinatorState();
+
         var partitions = EnsureOrdinalDictionary(_state.State.ConnectionPartitions);
         _connectionPartitions.Clear();
         _activePartitions.Clear();
+
         foreach (var kvp in partitions)
         {
             _connectionPartitions[kvp.Key] = kvp.Value;
-            _activePartitions.Add(kvp.Value);
+            _activePartitions.Add(kvp.Value.PartitionId);
         }
+
         _state.State.ConnectionPartitions = _connectionPartitions;
         _basePartitionCount = Math.Max(1u, _options.Value.ConnectionPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
+        _partitionEpoch = Math.Max(1, _state.State.PartitionEpoch);
 
         // Ensure partition count is at least base, but preserve higher counts to maintain routing consistency
         if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
@@ -75,12 +80,16 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
+            // Reset epoch when scaling back to base with no connections
+            _partitionEpoch = 1;
+            _state.State.PartitionEpoch = _partitionEpoch;
         }
 
         _logger.LogInformation(
-            "Connection coordinator activated with base partition count {PartitionCount}, current {CurrentPartitionCount}, hint {ConnectionsPerPartition}, tracked connections {TrackedConnections}",
+            "Connection coordinator activated with base partition count {PartitionCount}, current {CurrentPartitionCount}, epoch {Epoch}, hint {ConnectionsPerPartition}, tracked connections {TrackedConnections}",
             _basePartitionCount,
             _currentPartitionCount,
+            _partitionEpoch,
             _connectionsPerPartitionHint,
             _connectionPartitions.Count);
         await base.OnActivateAsync(cancellationToken);
@@ -94,8 +103,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     public async Task<int> GetPartitionForConnection(string connectionId)
     {
         var stopwatch = Stopwatch.StartNew();
-        var wasNew = !_connectionPartitions.ContainsKey(connectionId);
-        var partition = GetOrAssignPartition(connectionId);
+        var (partition, wasNew, wasReassigned) = GetOrAssignPartitionWithEpoch(connectionId);
         stopwatch.Stop();
 
         if (stopwatch.Elapsed > TimeSpan.FromMilliseconds(500))
@@ -107,8 +115,8 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
                 _connectionPartitions.Count);
         }
 
-        // Persist state if a new partition was assigned to ensure consistency after reactivation
-        if (wasNew)
+        // Persist state if a new partition was assigned or reassigned due to epoch change
+        if (wasNew || wasReassigned)
         {
             await _state.WriteStateAsync();
         }
@@ -157,7 +165,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         var excludedByPartition = new Dictionary<int, List<string>>();
         foreach (var connectionId in excludedConnectionIds)
         {
-            var partition = GetOrAssignPartition(connectionId);
+            var (partition, _, _) = GetOrAssignPartitionWithEpoch(connectionId);
             ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(excludedByPartition, partition, out var exists);
             if (!exists)
             {
@@ -192,7 +200,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
-        var partition = GetOrAssignPartition(connectionId);
+        var (partition, _, _) = GetOrAssignPartitionWithEpoch(connectionId);
         var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, this.GetPrimaryKeyString(), partition);
         return await partitionGrain.SendToConnection(message, connectionId);
     }
@@ -208,7 +216,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         var connectionsByPartition = new Dictionary<int, List<string>>();
         foreach (var connectionId in connectionIds)
         {
-            var partition = GetOrAssignPartition(connectionId);
+            var (partition, _, _) = GetOrAssignPartitionWithEpoch(connectionId);
             ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(connectionsByPartition, partition, out var exists);
             if (!exists)
             {
@@ -245,15 +253,17 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task NotifyConnectionRemoved(string connectionId)
     {
-        if (_connectionPartitions.Remove(connectionId, out var removedPartition))
+        if (_connectionPartitions.Remove(connectionId, out var removedAssignment))
         {
-            _logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping (partition {Partition}).", connectionId, removedPartition);
+            var removedPartition = removedAssignment.PartitionId;
+            _logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping (partition {Partition}, epoch {Epoch}).",
+                connectionId, removedPartition, removedAssignment.Epoch);
 
             // Check if any other connections are using this partition
             var partitionStillActive = false;
-            foreach (var partition in _connectionPartitions.Values)
+            foreach (var assignment in _connectionPartitions.Values)
             {
-                if (partition == removedPartition)
+                if (assignment.PartitionId == removedPartition)
                 {
                     partitionStillActive = true;
                     break;
@@ -267,9 +277,11 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
             if (_connectionPartitions.Count == 0 && _currentPartitionCount != _basePartitionCount)
             {
-                _logger.LogDebug("Resetting partition count to base value {PartitionCount} as no active connections remain.", _basePartitionCount);
+                _logger.LogDebug("Resetting partition count to base value {PartitionCount} and epoch to 1 as no active connections remain.", _basePartitionCount);
                 _currentPartitionCount = (int)_basePartitionCount;
                 _state.State.CurrentPartitionCount = _currentPartitionCount;
+                _partitionEpoch = 1;
+                _state.State.PartitionEpoch = _partitionEpoch;
                 _activePartitions.Clear();
             }
 
@@ -281,6 +293,8 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         _state.State.CurrentPartitionCount = _currentPartitionCount;
+        _state.State.PartitionEpoch = _partitionEpoch;
+
         if (_connectionPartitions.Count == 0)
         {
             await _state.ClearStateAsync(cancellationToken);
@@ -291,21 +305,61 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         }
     }
 
+    /// <summary>
+    /// Gets or assigns a partition for a connection, handling epoch-based reassignment.
+    /// Returns (partitionId, wasNew, wasReassigned).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int GetOrAssignPartition(string connectionId)
+    private (int PartitionId, bool WasNew, bool WasReassigned) GetOrAssignPartitionWithEpoch(string connectionId)
     {
-        if (_connectionPartitions.TryGetValue(connectionId, out var partition))
+        if (_connectionPartitions.TryGetValue(connectionId, out var existingAssignment))
         {
-            return partition;
+            // Check if assignment is from current epoch
+            if (existingAssignment.Epoch == _partitionEpoch)
+            {
+                return (existingAssignment.PartitionId, false, false);
+            }
+
+            // Stale epoch - check if partition would be different with current partition count
+            var newPartition = PartitionHelper.GetPartitionId(connectionId, (uint)_currentPartitionCount);
+
+            if (newPartition == existingAssignment.PartitionId)
+            {
+                // Same partition, just update epoch
+                var updatedAssignment = PartitionAssignment.Create(existingAssignment.PartitionId, _partitionEpoch);
+                _connectionPartitions[connectionId] = updatedAssignment;
+                _logger.LogDebug(
+                    "Updated connection {ConnectionId} epoch from {OldEpoch} to {NewEpoch} (partition {Partition} unchanged)",
+                    connectionId, existingAssignment.Epoch, _partitionEpoch, existingAssignment.PartitionId);
+                return (existingAssignment.PartitionId, false, true);
+            }
+
+            // Partition changed due to scaling - reassign
+            // Note: The old partition may still have this connection until cleanup
+            var reassignment = PartitionAssignment.Create(newPartition, _partitionEpoch);
+            _connectionPartitions[connectionId] = reassignment;
+            _activePartitions.Add(newPartition);
+
+            _logger.LogInformation(
+                "Reassigned connection {ConnectionId} from partition {OldPartition} (epoch {OldEpoch}) to partition {NewPartition} (epoch {NewEpoch}) due to scaling",
+                connectionId, existingAssignment.PartitionId, existingAssignment.Epoch, newPartition, _partitionEpoch);
+
+            return (newPartition, false, true);
         }
 
+        // New connection - assign to partition with current epoch
         var partitionCount = EnsurePartitionCapacity(_connectionPartitions.Count + 1);
-        partition = PartitionHelper.GetPartitionId(connectionId, (uint)partitionCount);
-        _connectionPartitions[connectionId] = partition;
+        var partition = PartitionHelper.GetPartitionId(connectionId, (uint)partitionCount);
+        var assignment = PartitionAssignment.Create(partition, _partitionEpoch);
+
+        _connectionPartitions[connectionId] = assignment;
         _activePartitions.Add(partition);
 
-        _logger.LogDebug("Assigned connection {ConnectionId} to partition {Partition} (partitionCount={PartitionCount})", connectionId, partition, partitionCount);
-        return partition;
+        _logger.LogDebug(
+            "Assigned connection {ConnectionId} to partition {Partition} (epoch {Epoch}, partitionCount={PartitionCount})",
+            connectionId, partition, _partitionEpoch, partitionCount);
+
+        return (partition, true, false);
     }
 
     private int EnsurePartitionCapacity(int prospectiveConnections)
@@ -316,22 +370,27 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         if (desired > _currentPartitionCount)
         {
             _logger.LogInformation(
-                "Increasing connection partition count from {OldPartitionCount} to {NewPartitionCount} for {ConnectionCount} tracked connections.",
+                "Increasing connection partition count from {OldPartitionCount} to {NewPartitionCount} (epoch {OldEpoch} -> {NewEpoch}) for {ConnectionCount} tracked connections.",
                 _currentPartitionCount,
                 desired,
+                _partitionEpoch,
+                _partitionEpoch + 1,
                 prospectiveConnections);
+
             _currentPartitionCount = desired;
+            _partitionEpoch++;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
+            _state.State.PartitionEpoch = _partitionEpoch;
         }
 
         return _currentPartitionCount;
     }
 
-    private static Dictionary<string, int> EnsureOrdinalDictionary(Dictionary<string, int>? dictionary)
+    private static Dictionary<string, PartitionAssignment> EnsureOrdinalDictionary(Dictionary<string, PartitionAssignment>? dictionary)
     {
         if (dictionary is null)
         {
-            return new Dictionary<string, int>(StringComparer.Ordinal);
+            return new Dictionary<string, PartitionAssignment>(StringComparer.Ordinal);
         }
 
         if (dictionary.Comparer == StringComparer.Ordinal)
@@ -339,6 +398,6 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             return dictionary;
         }
 
-        return new Dictionary<string, int>(dictionary, StringComparer.Ordinal);
+        return new Dictionary<string, PartitionAssignment>(dictionary, StringComparer.Ordinal);
     }
 }

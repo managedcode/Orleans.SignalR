@@ -31,6 +31,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     private uint _basePartitionCount;
     private string? _hubKey;
     private int _currentPartitionCount;
+    private int _partitionEpoch;
     private bool _stateDirty;
 
     public SignalRGroupCoordinatorGrain(
@@ -51,15 +52,16 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         await _state.ReadStateAsync(cancellationToken);
         _state.State ??= new GroupCoordinatorState();
         _state.State.GroupPartitions = EnsureOrdinalDictionary(_state.State.GroupPartitions);
-        _state.State.GroupMembership = EnsureOrdinalDictionary(_state.State.GroupMembership);
+        _state.State.GroupMembership = EnsureOrdinalMembershipDictionary(_state.State.GroupMembership);
         _basePartitionCount = Math.Max(1u, _options.Value.GroupPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
+        _partitionEpoch = Math.Max(1, _state.State.PartitionEpoch);
 
         // Rebuild active partitions set from persisted state
         _activePartitions.Clear();
-        foreach (var partitionId in GroupPartitions.Values)
+        foreach (var assignment in GroupPartitions.Values)
         {
-            _activePartitions.Add(partitionId);
+            _activePartitions.Add(assignment.PartitionId);
         }
 
         // Ensure partition count is at least base, but preserve higher counts to maintain routing consistency
@@ -73,15 +75,19 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
+            // Reset epoch when scaling back to base with no groups
+            _partitionEpoch = 1;
+            _state.State.PartitionEpoch = _partitionEpoch;
         }
 
         _hubKey = this.GetPrimaryKeyString();
         _stateDirty = false;
 
         _logger.LogInformation(
-            "Group coordinator activated with base partition count {PartitionCount}, current {CurrentPartitionCount}, hint {GroupsPerPartition}, tracked groups {TrackedGroups}",
+            "Group coordinator activated with base partition count {PartitionCount}, current {CurrentPartitionCount}, epoch {Epoch}, hint {GroupsPerPartition}, tracked groups {TrackedGroups}",
             _basePartitionCount,
             _currentPartitionCount,
+            _partitionEpoch,
             _groupsPerPartitionHint,
             GroupPartitions.Count);
         await base.OnActivateAsync(cancellationToken);
@@ -100,20 +106,20 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     public Task<int> GetPartitionForGroup(string groupName)
     {
-        var partition = GetOrAssignPartition(groupName);
+        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
         return Task.FromResult(partition);
     }
 
     public async Task SendToGroup(string groupName, HubMessage message)
     {
-        var partition = GetOrAssignPartition(groupName);
+        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
         var partitionGrain = await GetPartitionGrainAsync(partition);
         await partitionGrain.SendToGroups(message, new[] { groupName });
     }
 
     public async Task SendToGroupExcept(string groupName, HubMessage message, string[] excludedConnectionIds)
     {
-        var partition = GetOrAssignPartition(groupName);
+        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
         var partitionGrain = await GetPartitionGrainAsync(partition);
         await partitionGrain.SendToGroupsExcept(message, new[] { groupName }, excludedConnectionIds);
     }
@@ -124,7 +130,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         var groupsByPartition = new Dictionary<int, List<string>>();
         foreach (var groupName in groupNames)
         {
-            var partition = GetOrAssignPartition(groupName);
+            var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
             ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(groupsByPartition, partition, out var exists);
             if (!exists)
             {
@@ -163,7 +169,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     public async Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        var partition = GetOrAssignPartition(groupName);
+        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
         var membership = GroupMembership.TryGetValue(groupName, out var count) ? count + 1 : 1;
         GroupMembership[groupName] = membership;
 
@@ -180,9 +186,16 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     public async Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        var partition = GroupPartitions.TryGetValue(groupName, out var existingPartition)
-            ? existingPartition
-            : PartitionHelper.GetPartitionId(groupName, (uint)_currentPartitionCount);
+        int partition;
+        if (GroupPartitions.TryGetValue(groupName, out var existingAssignment))
+        {
+            partition = existingAssignment.PartitionId;
+        }
+        else
+        {
+            partition = PartitionHelper.GetPartitionId(groupName, (uint)_currentPartitionCount);
+        }
+
         var partitionGrain = await GetPartitionGrainAsync(partition);
         await partitionGrain.RemoveConnectionFromGroup(groupName, connectionId, observer);
 
@@ -220,6 +233,8 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         _state.State.CurrentPartitionCount = _currentPartitionCount;
+        _state.State.PartitionEpoch = _partitionEpoch;
+
         if (GroupPartitions.Count == 0)
         {
             await _state.ClearStateAsync(cancellationToken);
@@ -238,22 +253,63 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         return partitionGrain;
     }
 
+    /// <summary>
+    /// Gets or assigns a partition for a group, handling epoch-based reassignment.
+    /// Returns (partitionId, wasNew, wasReassigned).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int GetOrAssignPartition(string groupName)
+    private (int PartitionId, bool WasNew, bool WasReassigned) GetOrAssignPartitionWithEpoch(string groupName)
     {
-        if (GroupPartitions.TryGetValue(groupName, out var partition))
+        if (GroupPartitions.TryGetValue(groupName, out var existingAssignment))
         {
-            return partition;
+            // Check if assignment is from current epoch
+            if (existingAssignment.Epoch == _partitionEpoch)
+            {
+                return (existingAssignment.PartitionId, false, false);
+            }
+
+            // Stale epoch - check if partition would be different with current partition count
+            var newPartition = PartitionHelper.GetPartitionId(groupName, (uint)_currentPartitionCount);
+
+            if (newPartition == existingAssignment.PartitionId)
+            {
+                // Same partition, just update epoch
+                var updatedAssignment = PartitionAssignment.Create(existingAssignment.PartitionId, _partitionEpoch);
+                GroupPartitions[groupName] = updatedAssignment;
+                _stateDirty = true;
+                _logger.LogDebug(
+                    "Updated group {GroupName} epoch from {OldEpoch} to {NewEpoch} (partition {Partition} unchanged)",
+                    groupName, existingAssignment.Epoch, _partitionEpoch, existingAssignment.PartitionId);
+                return (existingAssignment.PartitionId, false, true);
+            }
+
+            // Partition changed due to scaling - reassign
+            var reassignment = PartitionAssignment.Create(newPartition, _partitionEpoch);
+            GroupPartitions[groupName] = reassignment;
+            _activePartitions.Add(newPartition);
+            _stateDirty = true;
+
+            _logger.LogInformation(
+                "Reassigned group {GroupName} from partition {OldPartition} (epoch {OldEpoch}) to partition {NewPartition} (epoch {NewEpoch}) due to scaling",
+                groupName, existingAssignment.PartitionId, existingAssignment.Epoch, newPartition, _partitionEpoch);
+
+            return (newPartition, false, true);
         }
 
+        // New group - assign to partition with current epoch
         var partitionCount = EnsurePartitionCapacity(GroupPartitions.Count + 1);
-        partition = PartitionHelper.GetPartitionId(groupName, (uint)partitionCount);
-        GroupPartitions[groupName] = partition;
+        var partition = PartitionHelper.GetPartitionId(groupName, (uint)partitionCount);
+        var assignment = PartitionAssignment.Create(partition, _partitionEpoch);
+
+        GroupPartitions[groupName] = assignment;
         _activePartitions.Add(partition);
         _stateDirty = true;
 
-        _logger.LogDebug("Assigned group {GroupName} to partition {Partition} (partitionCount={PartitionCount})", groupName, partition, partitionCount);
-        return partition;
+        _logger.LogDebug(
+            "Assigned group {GroupName} to partition {Partition} (epoch {Epoch}, partitionCount={PartitionCount})",
+            groupName, partition, _partitionEpoch, partitionCount);
+
+        return (partition, true, false);
     }
 
     private int EnsurePartitionCapacity(int prospectiveGroups)
@@ -264,34 +320,40 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         if (desired > _currentPartitionCount)
         {
             _logger.LogInformation(
-                "Increasing group partition count from {OldPartitionCount} to {NewPartitionCount} for {GroupCount} tracked groups.",
+                "Increasing group partition count from {OldPartitionCount} to {NewPartitionCount} (epoch {OldEpoch} -> {NewEpoch}) for {GroupCount} tracked groups.",
                 _currentPartitionCount,
                 desired,
+                _partitionEpoch,
+                _partitionEpoch + 1,
                 prospectiveGroups);
+
             _currentPartitionCount = desired;
+            _partitionEpoch++;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
+            _state.State.PartitionEpoch = _partitionEpoch;
         }
 
         return _currentPartitionCount;
     }
 
-    private Dictionary<string, int> GroupPartitions => _state.State.GroupPartitions!;
+    private Dictionary<string, PartitionAssignment> GroupPartitions => _state.State.GroupPartitions!;
     private Dictionary<string, int> GroupMembership => _state.State.GroupMembership!;
 
     private void ReleaseGroup(string groupName)
     {
         var removedMembership = GroupMembership.Remove(groupName);
-        var removedPartition = GroupPartitions.Remove(groupName, out var partitionId);
+        var removedPartition = GroupPartitions.Remove(groupName, out var assignment);
 
         if (removedPartition)
         {
             _stateDirty = true;
+            var partitionId = assignment.PartitionId;
 
             // Check if any other groups are using this partition
             var partitionStillActive = false;
-            foreach (var partition in GroupPartitions.Values)
+            foreach (var otherAssignment in GroupPartitions.Values)
             {
-                if (partition == partitionId)
+                if (otherAssignment.PartitionId == partitionId)
                 {
                     partitionStillActive = true;
                     break;
@@ -306,14 +368,31 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
         if ((removedMembership || removedPartition) && GroupMembership.Count == 0 && _currentPartitionCount != _basePartitionCount)
         {
-            _logger.LogDebug("Resetting group partition count to base value {PartitionCount} as no active groups remain.", _basePartitionCount);
+            _logger.LogDebug("Resetting group partition count to base value {PartitionCount} and epoch to 1 as no active groups remain.", _basePartitionCount);
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
+            _partitionEpoch = 1;
+            _state.State.PartitionEpoch = _partitionEpoch;
             _activePartitions.Clear();
         }
     }
 
-    private static Dictionary<string, int> EnsureOrdinalDictionary(Dictionary<string, int>? dictionary)
+    private static Dictionary<string, PartitionAssignment> EnsureOrdinalDictionary(Dictionary<string, PartitionAssignment>? dictionary)
+    {
+        if (dictionary is null)
+        {
+            return new Dictionary<string, PartitionAssignment>(StringComparer.Ordinal);
+        }
+
+        if (dictionary.Comparer == StringComparer.Ordinal)
+        {
+            return dictionary;
+        }
+
+        return new Dictionary<string, PartitionAssignment>(dictionary, StringComparer.Ordinal);
+    }
+
+    private static Dictionary<string, int> EnsureOrdinalMembershipDictionary(Dictionary<string, int>? dictionary)
     {
         if (dictionary is null)
         {
