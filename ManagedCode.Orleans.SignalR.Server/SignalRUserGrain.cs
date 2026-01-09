@@ -71,14 +71,14 @@ public class SignalRUserGrain(
         }
     }
 
-    public async Task SendToUser(HubMessage message)
+    public Task SendToUser(HubMessage message)
     {
         Logs.SendToUser(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
 
         if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
-            return;
+            return Task.CompletedTask;
         }
 
         if (ObserverManager.Count == 0)
@@ -105,17 +105,18 @@ public class SignalRUserGrain(
             }
 
             messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
-            return;
+            return Task.CompletedTask;
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
+        ObserverManager.Notify(s => s.OnNextAsync(message));
+        return Task.CompletedTask;
     }
 
-    public async Task RequestMessage()
+    public Task RequestMessage()
     {
         if (messagesStorage.State.Messages.Count == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         var currentDateTime = DateTime.UtcNow;
@@ -129,12 +130,14 @@ public class SignalRUserGrain(
                 }
                 else
                 {
-                    await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message.Key)));
+                    ObserverManager.Notify(s => s.OnNextAsync(message.Key));
                 }
             }
 
             messagesStorage.State.Messages.Remove(message.Key);
         }
+
+        return Task.CompletedTask;
     }
 
     public Task Ping(ISignalRObserver observer)

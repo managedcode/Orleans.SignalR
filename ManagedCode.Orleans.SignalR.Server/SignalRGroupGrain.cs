@@ -36,20 +36,21 @@ public class SignalRGroupGrain(
         await base.OnActivateAsync(cancellationToken);
     }
 
-    public async Task SendToGroup(HubMessage message)
+    public Task SendToGroup(HubMessage message)
     {
         Logs.SendToGroup(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString());
 
         if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
-            return;
+            return Task.CompletedTask;
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
+        ObserverManager.Notify(s => s.OnNextAsync(message));
+        return Task.CompletedTask;
     }
 
-    public async Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds)
+    public Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds)
     {
         Logs.SendToGroupExcept(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString(), excludedConnectionIds);
 
@@ -58,7 +59,7 @@ public class SignalRGroupGrain(
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
             DispatchToLiveObservers(targets, message);
-            return;
+            return Task.CompletedTask;
         }
 
         var hashSet = new HashSet<string>();
@@ -70,8 +71,9 @@ public class SignalRGroupGrain(
             }
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
+        ObserverManager.Notify(s => s.OnNextAsync(message),
+            connection => !hashSet.Contains(connection.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
     public async Task AddConnection(string connectionId, ISignalRObserver observer)

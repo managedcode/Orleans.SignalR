@@ -9,6 +9,9 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 /// Tracks observer health by monitoring delivery failures with circuit breaker support.
 /// Observers exceeding the failure threshold have their circuit opened to prevent cascade failures.
 /// Supports graceful expiration with message buffering for timing edge cases.
+///
+/// Note: This class is designed to be used within Orleans grains which provide single-threaded
+/// execution guarantees. No explicit locking is required.
 /// </summary>
 public sealed class ObserverHealthTracker
 {
@@ -19,7 +22,6 @@ public sealed class ObserverHealthTracker
     private readonly TimeSpan _circuitOpenDuration;
     private readonly TimeSpan _halfOpenTestInterval;
     private readonly ExpiringObserverBuffer _gracePeriodBuffer;
-    private readonly object _lock = new();
 
     public ObserverHealthTracker(
         int failureThreshold,
@@ -66,12 +68,9 @@ public sealed class ObserverHealthTracker
             return;
         }
 
-        lock (_lock)
+        if (_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (_healthStates.TryGetValue(connectionId, out var state))
-            {
-                state.RecordSuccess();
-            }
+            state.RecordSuccess();
         }
     }
 
@@ -87,21 +86,18 @@ public sealed class ObserverHealthTracker
             return FailureResult.Healthy;
         }
 
-        lock (_lock)
+        if (!_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (!_healthStates.TryGetValue(connectionId, out var state))
-            {
-                state = new ObserverHealthState(
-                    _failureWindow,
-                    _circuitBreakerEnabled,
-                    _failureThreshold,
-                    _circuitOpenDuration,
-                    _halfOpenTestInterval);
-                _healthStates[connectionId] = state;
-            }
-
-            return state.RecordFailure(exception);
+            state = new ObserverHealthState(
+                _failureWindow,
+                _circuitBreakerEnabled,
+                _failureThreshold,
+                _circuitOpenDuration,
+                _halfOpenTestInterval);
+            _healthStates[connectionId] = state;
         }
+
+        return state.RecordFailure(exception);
     }
 
     /// <summary>
@@ -115,15 +111,12 @@ public sealed class ObserverHealthTracker
             return true;
         }
 
-        lock (_lock)
+        if (!_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (!_healthStates.TryGetValue(connectionId, out var state))
-            {
-                return true;
-            }
-
-            return state.AllowRequest();
+            return true;
         }
+
+        return state.AllowRequest();
     }
 
     /// <summary>
@@ -138,15 +131,12 @@ public sealed class ObserverHealthTracker
             return true;
         }
 
-        lock (_lock)
+        if (!_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (!_healthStates.TryGetValue(connectionId, out var state))
-            {
-                return true;
-            }
-
-            return state.IsHealthy;
+            return true;
         }
+
+        return state.IsHealthy;
     }
 
     /// <summary>
@@ -154,15 +144,12 @@ public sealed class ObserverHealthTracker
     /// </summary>
     public CircuitState GetCircuitState(string connectionId)
     {
-        lock (_lock)
+        if (_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (_healthStates.TryGetValue(connectionId, out var state))
-            {
-                return state.CircuitState;
-            }
-
-            return CircuitState.Closed;
+            return state.CircuitState;
         }
+
+        return CircuitState.Closed;
     }
 
     /// <summary>
@@ -170,15 +157,12 @@ public sealed class ObserverHealthTracker
     /// </summary>
     public int GetFailureCount(string connectionId)
     {
-        lock (_lock)
+        if (_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (_healthStates.TryGetValue(connectionId, out var state))
-            {
-                return state.FailureCount;
-            }
-
-            return 0;
+            return state.FailureCount;
         }
+
+        return 0;
     }
 
     /// <summary>
@@ -186,10 +170,7 @@ public sealed class ObserverHealthTracker
     /// </summary>
     public void RemoveConnection(string connectionId)
     {
-        lock (_lock)
-        {
-            _healthStates.Remove(connectionId);
-        }
+        _healthStates.Remove(connectionId);
         _gracePeriodBuffer.Expire(connectionId);
     }
 
@@ -229,12 +210,9 @@ public sealed class ObserverHealthTracker
         var messages = _gracePeriodBuffer.RestoreAndGetMessages(connectionId);
 
         // Also reset health state since the observer recovered
-        lock (_lock)
+        if (_healthStates.TryGetValue(connectionId, out var state))
         {
-            if (_healthStates.TryGetValue(connectionId, out var state))
-            {
-                state.RecordSuccess();
-            }
+            state.RecordSuccess();
         }
 
         return messages;
@@ -261,10 +239,7 @@ public sealed class ObserverHealthTracker
     /// </summary>
     public void Clear()
     {
-        lock (_lock)
-        {
-            _healthStates.Clear();
-        }
+        _healthStates.Clear();
         _gracePeriodBuffer.Clear();
     }
 
@@ -275,14 +250,11 @@ public sealed class ObserverHealthTracker
     {
         var dead = new List<string>();
 
-        lock (_lock)
+        foreach (var (connectionId, state) in _healthStates)
         {
-            foreach (var (connectionId, state) in _healthStates)
+            if (state.IsDead)
             {
-                if (state.IsDead)
-                {
-                    dead.Add(connectionId);
-                }
+                dead.Add(connectionId);
             }
         }
 
@@ -296,14 +268,11 @@ public sealed class ObserverHealthTracker
     {
         var open = new List<string>();
 
-        lock (_lock)
+        foreach (var (connectionId, state) in _healthStates)
         {
-            foreach (var (connectionId, state) in _healthStates)
+            if (state.CircuitState == CircuitState.Open)
             {
-                if (state.CircuitState == CircuitState.Open)
-                {
-                    open.Add(connectionId);
-                }
+                open.Add(connectionId);
             }
         }
 
@@ -315,33 +284,28 @@ public sealed class ObserverHealthTracker
     /// </summary>
     public HealthStatistics GetStatistics()
     {
-        HealthStatistics stats;
+        var stats = new HealthStatistics();
 
-        lock (_lock)
+        foreach (var state in _healthStates.Values)
         {
-            stats = new HealthStatistics();
+            stats.TotalTracked++;
 
-            foreach (var state in _healthStates.Values)
+            switch (state.CircuitState)
             {
-                stats.TotalTracked++;
+                case CircuitState.Closed:
+                    stats.ClosedCircuits++;
+                    break;
+                case CircuitState.Open:
+                    stats.OpenCircuits++;
+                    break;
+                case CircuitState.HalfOpen:
+                    stats.HalfOpenCircuits++;
+                    break;
+            }
 
-                switch (state.CircuitState)
-                {
-                    case CircuitState.Closed:
-                        stats.ClosedCircuits++;
-                        break;
-                    case CircuitState.Open:
-                        stats.OpenCircuits++;
-                        break;
-                    case CircuitState.HalfOpen:
-                        stats.HalfOpenCircuits++;
-                        break;
-                }
-
-                if (state.IsDead)
-                {
-                    stats.DeadObservers++;
-                }
+            if (state.IsDead)
+            {
+                stats.DeadObservers++;
             }
         }
 

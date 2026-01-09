@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -19,6 +20,7 @@ namespace ManagedCode.Orleans.SignalR.Server;
 public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : class, IGrain
 {
     private readonly Dictionary<string, ISignalRObserver> _liveObservers = new(StringComparer.Ordinal);
+    private readonly Dictionary<ISignalRObserver, string> _observerToConnectionId = new(ReferenceEqualityComparer.Instance);
     private readonly ObserverHealthTracker _healthTracker;
     private readonly TimeSpan _idleExtension;
     private readonly TimeSpan _observerRefreshInterval;
@@ -75,7 +77,15 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     protected void TrackConnection(string connectionId, ISignalRObserver observer)
     {
         ObserverManager.Subscribe(observer, observer);
+
+        // Remove any existing mapping if the observer was previously tracked with a different connection
+        if (_liveObservers.TryGetValue(connectionId, out var existingObserver) && !ReferenceEquals(existingObserver, observer))
+        {
+            _observerToConnectionId.Remove(existingObserver);
+        }
+
         _liveObservers[connectionId] = observer;
+        _observerToConnectionId[observer] = connectionId;
         EnsureActiveWhileConnectionsTracked();
         EnsureObserverRefreshTimer();
     }
@@ -84,6 +94,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     {
         ObserverManager.Unsubscribe(observer);
         _liveObservers.Remove(connectionId);
+        _observerToConnectionId.Remove(observer);
         _healthTracker.RemoveConnection(connectionId);
         ReleaseWhenIdle();
         StopObserverRefreshTimerIfIdle();
@@ -160,6 +171,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     {
         ObserverManager.ClearExpired();
         _liveObservers.Clear();
+        _observerToConnectionId.Clear();
         _healthTracker.Clear();
         StopObserverRefreshTimer();
     }
@@ -258,17 +270,12 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         }
     }
 
+    /// <summary>
+    /// Finds the connection ID for an observer using O(1) reverse lookup.
+    /// </summary>
     private string? FindConnectionIdForObserver(ISignalRObserver observer)
     {
-        foreach (var (connectionId, obs) in _liveObservers)
-        {
-            if (ReferenceEquals(obs, observer))
-            {
-                return connectionId;
-            }
-        }
-
-        return null;
+        return _observerToConnectionId.GetValueOrDefault(observer);
     }
 
     private async Task ObserveLiveObserverAsync(Task pending, string? connectionId, ISignalRObserver observer)
@@ -345,6 +352,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     {
         // Remove from live observers - connection cleanup will happen via normal disconnect flow
         _liveObservers.Remove(connectionId);
+        _observerToConnectionId.Remove(observer);
         ObserverManager.Unsubscribe(observer);
 
         Logger.LogWarning(

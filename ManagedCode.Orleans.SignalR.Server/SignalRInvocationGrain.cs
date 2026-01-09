@@ -37,14 +37,14 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
 
-    public async Task TryCompleteResult(string connectionId, HubMessage message)
+    public Task TryCompleteResult(string connectionId, HubMessage message)
     {
         Logs.TryCompleteResult(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), connectionId);
         _logger.LogInformation("Hub: {PrimaryKeyString}; TryCompleteResult: {ConnectionId}", this.GetPrimaryKeyString(),
             connectionId);
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         if (message is CompletionMessage completionMessage)
@@ -52,7 +52,8 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
             _completionSource?.TrySetResult(completionMessage);
         }
 
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
+        _observerManager.Notify(s => s.OnNextAsync(message));
+        return Task.CompletedTask;
     }
 
     public Task<ReturnType> TryGetReturnType()

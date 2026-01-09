@@ -8,13 +8,15 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 /// Buffers messages for observers in the grace period before hard expiration.
 /// This handles timing edge cases where heartbeats are delayed due to GC pauses,
 /// network latency, or silo overload.
+///
+/// Note: This class is designed to be used within Orleans grains which provide single-threaded
+/// execution guarantees. No explicit locking is required.
 /// </summary>
 public sealed class ExpiringObserverBuffer
 {
     private readonly Dictionary<string, ObserverBufferState> _buffers = new(StringComparer.Ordinal);
     private readonly TimeSpan _gracePeriod;
     private readonly int _maxBufferedMessages;
-    private readonly object _lock = new();
 
     public ExpiringObserverBuffer(TimeSpan gracePeriod, int maxBufferedMessages)
     {
@@ -39,16 +41,13 @@ public sealed class ExpiringObserverBuffer
             return false;
         }
 
-        lock (_lock)
+        if (_buffers.ContainsKey(connectionId))
         {
-            if (_buffers.ContainsKey(connectionId))
-            {
-                return false; // Already in grace period
-            }
-
-            _buffers[connectionId] = new ObserverBufferState(_gracePeriod, _maxBufferedMessages);
-            return true;
+            return false; // Already in grace period
         }
+
+        _buffers[connectionId] = new ObserverBufferState(_gracePeriod, _maxBufferedMessages);
+        return true;
     }
 
     /// <summary>
@@ -56,22 +55,19 @@ public sealed class ExpiringObserverBuffer
     /// </summary>
     public bool IsInGracePeriod(string connectionId)
     {
-        lock (_lock)
+        if (!_buffers.TryGetValue(connectionId, out var state))
         {
-            if (!_buffers.TryGetValue(connectionId, out var state))
-            {
-                return false;
-            }
-
-            // Check if grace period has expired
-            if (state.IsExpired)
-            {
-                _buffers.Remove(connectionId);
-                return false;
-            }
-
-            return true;
+            return false;
         }
+
+        // Check if grace period has expired
+        if (state.IsExpired)
+        {
+            _buffers.Remove(connectionId);
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -85,21 +81,18 @@ public sealed class ExpiringObserverBuffer
             return false;
         }
 
-        lock (_lock)
+        if (!_buffers.TryGetValue(connectionId, out var state))
         {
-            if (!_buffers.TryGetValue(connectionId, out var state))
-            {
-                return false;
-            }
-
-            if (state.IsExpired)
-            {
-                _buffers.Remove(connectionId);
-                return false;
-            }
-
-            return state.AddMessage(message);
+            return false;
         }
+
+        if (state.IsExpired)
+        {
+            _buffers.Remove(connectionId);
+            return false;
+        }
+
+        return state.AddMessage(message);
     }
 
     /// <summary>
@@ -109,15 +102,12 @@ public sealed class ExpiringObserverBuffer
     /// <returns>Buffered messages, or empty if not in grace period.</returns>
     public IReadOnlyList<HubMessage> RestoreAndGetMessages(string connectionId)
     {
-        lock (_lock)
+        if (!_buffers.Remove(connectionId, out var state))
         {
-            if (!_buffers.Remove(connectionId, out var state))
-            {
-                return Array.Empty<HubMessage>();
-            }
-
-            return state.GetMessages();
+            return Array.Empty<HubMessage>();
         }
+
+        return state.GetMessages();
     }
 
     /// <summary>
@@ -126,15 +116,12 @@ public sealed class ExpiringObserverBuffer
     /// <returns>Number of messages discarded.</returns>
     public int Expire(string connectionId)
     {
-        lock (_lock)
+        if (!_buffers.Remove(connectionId, out var state))
         {
-            if (!_buffers.Remove(connectionId, out var state))
-            {
-                return 0;
-            }
-
-            return state.MessageCount;
+            return 0;
         }
+
+        return state.MessageCount;
     }
 
     /// <summary>
@@ -145,20 +132,17 @@ public sealed class ExpiringObserverBuffer
     {
         var expired = new List<string>();
 
-        lock (_lock)
+        foreach (var (connectionId, state) in _buffers)
         {
-            foreach (var (connectionId, state) in _buffers)
+            if (state.IsExpired)
             {
-                if (state.IsExpired)
-                {
-                    expired.Add(connectionId);
-                }
+                expired.Add(connectionId);
             }
+        }
 
-            foreach (var connectionId in expired)
-            {
-                _buffers.Remove(connectionId);
-            }
+        foreach (var connectionId in expired)
+        {
+            _buffers.Remove(connectionId);
         }
 
         return expired;
@@ -169,15 +153,12 @@ public sealed class ExpiringObserverBuffer
     /// </summary>
     public TimeSpan? GetRemainingGracePeriod(string connectionId)
     {
-        lock (_lock)
+        if (_buffers.TryGetValue(connectionId, out var state) && !state.IsExpired)
         {
-            if (_buffers.TryGetValue(connectionId, out var state) && !state.IsExpired)
-            {
-                return state.RemainingTime;
-            }
-
-            return null;
+            return state.RemainingTime;
         }
+
+        return null;
     }
 
     /// <summary>
@@ -185,23 +166,20 @@ public sealed class ExpiringObserverBuffer
     /// </summary>
     public BufferStatistics GetStatistics()
     {
-        lock (_lock)
+        var stats = new BufferStatistics();
+
+        foreach (var state in _buffers.Values)
         {
-            var stats = new BufferStatistics();
-
-            foreach (var state in _buffers.Values)
+            if (state.IsExpired)
             {
-                if (state.IsExpired)
-                {
-                    continue;
-                }
-
-                stats.ObserversInGracePeriod++;
-                stats.TotalBufferedMessages += state.MessageCount;
+                continue;
             }
 
-            return stats;
+            stats.ObserversInGracePeriod++;
+            stats.TotalBufferedMessages += state.MessageCount;
         }
+
+        return stats;
     }
 
     /// <summary>
@@ -209,22 +187,25 @@ public sealed class ExpiringObserverBuffer
     /// </summary>
     public void Clear()
     {
-        lock (_lock)
-        {
-            _buffers.Clear();
-        }
+        _buffers.Clear();
     }
 
+    /// <summary>
+    /// Circular buffer state for a single observer, optimized for O(1) enqueue/dequeue.
+    /// </summary>
     private sealed class ObserverBufferState
     {
         private readonly DateTime _expiresAt;
-        private readonly int _maxMessages;
-        private readonly List<HubMessage> _messages = new();
+        private readonly HubMessage[] _messages;
+        private int _head; // Index of first (oldest) message
+        private int _count; // Number of messages in buffer
 
         public ObserverBufferState(TimeSpan gracePeriod, int maxMessages)
         {
             _expiresAt = DateTime.UtcNow + gracePeriod;
-            _maxMessages = maxMessages;
+            _messages = new HubMessage[maxMessages];
+            _head = 0;
+            _count = 0;
         }
 
         public bool IsExpired => DateTime.UtcNow >= _expiresAt;
@@ -238,23 +219,44 @@ public sealed class ExpiringObserverBuffer
             }
         }
 
-        public int MessageCount => _messages.Count;
+        public int MessageCount => _count;
 
         public bool AddMessage(HubMessage message)
         {
-            if (_messages.Count >= _maxMessages)
+            if (_count >= _messages.Length)
             {
-                // Drop oldest message to make room
-                _messages.RemoveAt(0);
+                // Buffer is full - overwrite oldest message (drop oldest)
+                // The head points to the oldest, so we overwrite it and advance head
+                _messages[_head] = message;
+                _head = (_head + 1) % _messages.Length;
+                // _count stays the same since we're replacing
+            }
+            else
+            {
+                // Buffer has space - add at tail position
+                var tail = (_head + _count) % _messages.Length;
+                _messages[tail] = message;
+                _count++;
             }
 
-            _messages.Add(message);
             return true;
         }
 
         public IReadOnlyList<HubMessage> GetMessages()
         {
-            return _messages;
+            if (_count == 0)
+            {
+                return Array.Empty<HubMessage>();
+            }
+
+            // Return messages in order (oldest to newest)
+            var result = new HubMessage[_count];
+            for (var i = 0; i < _count; i++)
+            {
+                result[i] = _messages[(_head + i) % _messages.Length];
+            }
+
+            return result;
         }
     }
 }
