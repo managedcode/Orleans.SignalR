@@ -74,4 +74,24 @@ public class OrleansSignalROptions
     ///     The default value is 30 seconds.
     /// </summary>
     public TimeSpan ObserverFailureWindow { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    ///     Enables circuit breaker pattern for observers to prevent cascade failures.
+    ///     When enabled, failing observers are temporarily blocked from receiving messages.
+    ///     The default value is true.
+    /// </summary>
+    public bool EnableCircuitBreaker { get; set; } = true;
+
+    /// <summary>
+    ///     Duration to keep the circuit open (blocking requests) after failure threshold is reached.
+    ///     After this duration, the circuit transitions to half-open state for testing.
+    ///     The default value is 30 seconds.
+    /// </summary>
+    public TimeSpan CircuitBreakerOpenDuration { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    ///     Interval between test requests when circuit is in half-open state.
+    ///     The default value is 5 seconds.
+    /// </summary>
+    public TimeSpan CircuitBreakerHalfOpenTestInterval { get; set; } = TimeSpan.FromSeconds(5);
 }

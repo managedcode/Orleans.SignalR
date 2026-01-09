@@ -23,6 +23,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     private readonly TimeSpan _idleExtension;
     private readonly TimeSpan _observerRefreshInterval;
     private readonly int _failureThreshold;
+    private readonly bool _circuitBreakerEnabled;
     private IDisposable? _observerRefreshTimer;
 
     protected SignalRObserverGrainBase(
@@ -41,11 +42,15 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         var expiration = TimeIntervalHelper.GetObserverExpiration(orleansSignalOptions, timeout);
         ObserverManager = new ObserverManager<ISignalRObserver>(expiration, Logger);
 
-        // Initialize health tracking
+        // Initialize health tracking with circuit breaker
         _failureThreshold = orleansSignalOptions.Value.ObserverFailureThreshold;
+        _circuitBreakerEnabled = orleansSignalOptions.Value.EnableCircuitBreaker;
         _healthTracker = new ObserverHealthTracker(
             _failureThreshold,
-            orleansSignalOptions.Value.ObserverFailureWindow);
+            orleansSignalOptions.Value.ObserverFailureWindow,
+            _circuitBreakerEnabled,
+            orleansSignalOptions.Value.CircuitBreakerOpenDuration,
+            orleansSignalOptions.Value.CircuitBreakerHalfOpenTestInterval);
     }
 
     protected ObserverManager<ISignalRObserver> ObserverManager { get; }
@@ -59,7 +64,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     protected abstract int TrackedConnectionCount { get; }
 
     /// <summary>
-    /// Gets the health tracker for monitoring observer failures.
+    /// Gets the health tracker for monitoring observer failures and circuit breaker state.
     /// </summary>
     protected ObserverHealthTracker HealthTracker => _healthTracker;
 
@@ -93,8 +98,8 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     }
 
     /// <summary>
-    /// Tries to get a live observer, checking health status first.
-    /// Returns false if the observer is unhealthy or not found.
+    /// Tries to get a live observer, checking circuit breaker and health status first.
+    /// Returns false if the observer's circuit is open, unhealthy, or not found.
     /// </summary>
     protected bool TryGetHealthyLiveObserver(string connectionId, out ISignalRObserver observer)
     {
@@ -103,9 +108,18 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             return false;
         }
 
-        if (!_healthTracker.IsHealthy(connectionId))
+        // Use AllowRequest which checks circuit breaker state
+        if (!_healthTracker.AllowRequest(connectionId))
         {
-            Logger.LogDebug("Observer for connection {ConnectionId} is unhealthy, skipping.", connectionId);
+            var circuitState = _healthTracker.GetCircuitState(connectionId);
+            if (circuitState == CircuitState.Open)
+            {
+                Logger.LogDebug("Circuit breaker open for connection {ConnectionId}, blocking request.", connectionId);
+            }
+            else
+            {
+                Logger.LogDebug("Observer for connection {ConnectionId} is unhealthy, skipping.", connectionId);
+            }
             return false;
         }
 
@@ -125,12 +139,13 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
     /// <summary>
     /// Gets only healthy live observers for the given connection IDs.
+    /// Respects circuit breaker state.
     /// </summary>
     protected IEnumerable<(string ConnectionId, ISignalRObserver Observer)> GetHealthyLiveObservers(IEnumerable<string> connectionIds)
     {
         foreach (var connectionId in connectionIds)
         {
-            if (_liveObservers.TryGetValue(connectionId, out var observer) && _healthTracker.IsHealthy(connectionId))
+            if (_liveObservers.TryGetValue(connectionId, out var observer) && _healthTracker.AllowRequest(connectionId))
             {
                 yield return (connectionId, observer);
             }
@@ -160,14 +175,27 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     }
 
     /// <summary>
-    /// Dispatches a message to live observers with health tracking.
-    /// Observers that fail are tracked and removed if they exceed the failure threshold.
+    /// Dispatches a message to live observers with health tracking and circuit breaker.
+    /// Observers with open circuits are skipped. Failed observers are tracked and may have
+    /// their circuits opened or be marked dead if they exceed the failure threshold.
     /// </summary>
     protected void DispatchToLiveObservers(IEnumerable<ISignalRObserver> observers, HubMessage message)
     {
         foreach (var observer in observers)
         {
             var connectionId = FindConnectionIdForObserver(observer);
+
+            // Check circuit breaker before dispatch
+            if (connectionId is not null && !_healthTracker.AllowRequest(connectionId))
+            {
+                var state = _healthTracker.GetCircuitState(connectionId);
+                if (state == CircuitState.Open)
+                {
+                    Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
+                    continue;
+                }
+            }
+
             var pending = observer.OnNextAsync(message);
             _ = ObserveLiveObserverAsync(pending, connectionId, observer);
         }
@@ -175,14 +203,20 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
     /// <summary>
     /// Dispatches a message to live observers with connection ID tracking for health monitoring.
+    /// Respects circuit breaker state.
     /// </summary>
     protected void DispatchToLiveObserversWithTracking(IEnumerable<(string ConnectionId, ISignalRObserver Observer)> observers, HubMessage message)
     {
         foreach (var (connectionId, observer) in observers)
         {
-            // Skip unhealthy observers
-            if (!_healthTracker.IsHealthy(connectionId))
+            // Check circuit breaker before dispatch
+            if (!_healthTracker.AllowRequest(connectionId))
             {
+                var state = _healthTracker.GetCircuitState(connectionId);
+                if (state == CircuitState.Open)
+                {
+                    Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
+                }
                 continue;
             }
 
@@ -210,7 +244,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         {
             await pending;
 
-            // Record success if we have connection tracking
+            // Record success - this closes circuit breaker if in half-open state
             if (connectionId is not null)
             {
                 _healthTracker.RecordSuccess(connectionId);
@@ -218,27 +252,54 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         }
         catch (Exception exception)
         {
-            // Record failure and check if observer should be removed
-            if (connectionId is not null && _healthTracker.RecordFailure(connectionId, exception))
-            {
-                Logger.LogWarning(
-                    exception,
-                    "Observer for connection {ConnectionId} exceeded failure threshold ({Threshold}), marking as dead.",
-                    connectionId,
-                    _failureThreshold);
-
-                // Trigger removal callback
-                OnObserverDead(connectionId, observer, exception);
-            }
-            else
+            if (connectionId is null)
             {
                 OnLiveObserverDispatchFailure(exception);
+                return;
+            }
+
+            // Record failure and handle result
+            var result = _healthTracker.RecordFailure(connectionId, exception);
+
+            switch (result)
+            {
+                case FailureResult.Dead:
+                    Logger.LogWarning(
+                        exception,
+                        "Observer for connection {ConnectionId} exceeded failure threshold ({Threshold}), marking as dead.",
+                        connectionId,
+                        _failureThreshold);
+                    OnObserverDead(connectionId, observer, exception);
+                    break;
+
+                case FailureResult.CircuitOpened:
+                    Logger.LogWarning(
+                        exception,
+                        "Circuit breaker opened for connection {ConnectionId} after failure threshold reached. Will retry after cooldown.",
+                        connectionId);
+                    OnCircuitOpened(connectionId, observer, exception);
+                    break;
+
+                case FailureResult.Healthy:
+                default:
+                    OnLiveObserverDispatchFailure(exception);
+                    break;
             }
         }
     }
 
     /// <summary>
-    /// Called when an observer exceeds the failure threshold and should be removed.
+    /// Called when a circuit breaker opens for an observer.
+    /// Override in derived classes to handle circuit open events.
+    /// </summary>
+    protected virtual void OnCircuitOpened(string connectionId, ISignalRObserver observer, Exception lastException)
+    {
+        // Default behavior: just log (already done in caller)
+        // Derived classes can implement additional behavior like metrics or notifications
+    }
+
+    /// <summary>
+    /// Called when an observer exceeds the failure threshold and is marked dead.
     /// Override in derived classes to handle dead observer cleanup.
     /// </summary>
     protected virtual void OnObserverDead(string connectionId, ISignalRObserver observer, Exception lastException)
