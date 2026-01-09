@@ -83,6 +83,27 @@ public class SignalRUserGrain(
 
         if (ObserverManager.Count == 0)
         {
+            // Enforce message queue limit to prevent unbounded memory growth
+            var maxMessages = _orleansSignalOptions.Value.MaxQueuedMessagesPerUser;
+            if (maxMessages > 0 && messagesStorage.State.Messages.Count >= maxMessages)
+            {
+                // Remove oldest messages to make room
+                var toRemove = messagesStorage.State.Messages.Count - maxMessages + 1;
+                var oldestMessages = messagesStorage.State.Messages
+                    .OrderBy(kvp => kvp.Value)
+                    .Take(toRemove)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
+
+                foreach (var oldMessage in oldestMessages)
+                {
+                    messagesStorage.State.Messages.Remove(oldMessage);
+                }
+
+                Logger.LogWarning("Dropped {Count} oldest messages for user {User} due to queue limit {Limit}",
+                    toRemove, this.GetPrimaryKeyString(), maxMessages);
+            }
+
             messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
             return;
         }

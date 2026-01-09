@@ -190,35 +190,34 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         }
     }
 
-    public override Task SendGroupsAsync(IReadOnlyList<string> groupNames, string methodName, object?[] args,
+    public override async Task SendGroupsAsync(IReadOnlyList<string> groupNames, string methodName, object?[] args,
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
 
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
-            return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
+            await Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
                 .SendToGroups(groupNames.ToArray(), message), cancellationToken);
+            return;
         }
 
-        // For potentially many groups, use fire-and-forget to avoid memory issues
-        _ = Task.Run(async () =>
+        // Send to all groups in parallel for better performance
+        var tasks = new List<Task>(groupNames.Count);
+        foreach (var groupName in groupNames)
         {
-            foreach (var groupName in groupNames)
-            {
-                try
-                {
-                    var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
-                    await groupGrain.SendToGroup(message).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to send to group {GroupName}", groupName);
-                }
-            }
-        }, cancellationToken);
+            var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
+            tasks.Add(Task.Run(() => groupGrain.SendToGroup(message), cancellationToken));
+        }
 
-        return Task.CompletedTask;
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send to one or more groups");
+        }
     }
 
     public override Task SendGroupExceptAsync(string groupName, string methodName, object?[] args,
@@ -244,29 +243,27 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return Task.Run(() => NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId).SendToUser(message), cancellationToken);
     }
 
-    public override Task SendUsersAsync(IReadOnlyList<string> userIds, string methodName, object?[] args,
+    public override async Task SendUsersAsync(IReadOnlyList<string> userIds, string methodName, object?[] args,
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
 
-        // For potentially many users, use fire-and-forget to avoid memory issues
-        _ = Task.Run(async () =>
+        // Send to all users in parallel for better performance
+        var tasks = new List<Task>(userIds.Count);
+        foreach (var userId in userIds)
         {
-            foreach (var userId in userIds)
-            {
-                try
-                {
-                    var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId);
-                    await userGrain.SendToUser(message).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to send to user {UserId}", userId);
-                }
-            }
-        }, cancellationToken);
+            var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId);
+            tasks.Add(Task.Run(() => userGrain.SendToUser(message), cancellationToken));
+        }
 
-        return Task.CompletedTask;
+        try
+        {
+            await Task.WhenAll(tasks);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send to one or more users");
+        }
     }
 
     public override async Task AddToGroupAsync(string connectionId, string groupName,
@@ -474,15 +471,20 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     public override bool TryGetReturnType(string invocationId, [NotNullWhen(true)] out Type? type)
     {
-        var returnType = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).TryGetReturnType();
+        var returnTypeTask = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).TryGetReturnType();
 
         var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
-        Task.WaitAny(returnType, Task.Delay(timeSpan * 0.8));
+        var timeout = TimeSpan.FromMilliseconds(timeSpan.TotalMilliseconds * 0.8);
 
-        if (returnType.IsCompleted)
+        // Use async wait with timeout to avoid blocking thread pool threads
+        // This is required because the base class method is synchronous
+        var completed = returnTypeTask.Wait(timeout);
+
+        if (completed && returnTypeTask.IsCompletedSuccessfully)
         {
-            type = returnType.Result.GetReturnType();
-            return returnType.Result.Result;
+            var result = returnTypeTask.Result;
+            type = result.GetReturnType();
+            return result.Result;
         }
 
         type = null;

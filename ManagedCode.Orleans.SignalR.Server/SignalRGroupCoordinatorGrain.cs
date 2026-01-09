@@ -23,10 +23,12 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     private readonly ILogger<SignalRGroupCoordinatorGrain> _logger;
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<GroupCoordinatorState> _state;
+    private readonly HashSet<int> _activePartitions;
     private readonly int _groupsPerPartitionHint;
     private uint _basePartitionCount;
     private string? _hubKey;
     private int _currentPartitionCount;
+    private bool _stateDirty;
 
     public SignalRGroupCoordinatorGrain(
         ILogger<SignalRGroupCoordinatorGrain> logger,
@@ -37,6 +39,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         _logger = logger;
         _options = options;
         _state = state;
+        _activePartitions = new HashSet<int>();
         _groupsPerPartitionHint = Math.Max(1, _options.Value.GroupsPerPartitionHint);
     }
 
@@ -48,19 +51,36 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         _state.State.GroupMembership = EnsureOrdinalDictionary(_state.State.GroupMembership);
         _basePartitionCount = Math.Max(1u, _options.Value.GroupPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
+
+        // Rebuild active partitions set from persisted state
+        _activePartitions.Clear();
+        foreach (var partitionId in GroupPartitions.Values)
+        {
+            _activePartitions.Add(partitionId);
+        }
+
+        // Ensure partition count is at least base, but preserve higher counts to maintain routing consistency
         if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
         }
+        // Only reset to base if truly empty AND partition count was scaled up
         else if (GroupPartitions.Count == 0 && _currentPartitionCount > _basePartitionCount)
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
         }
-        _hubKey = this.GetPrimaryKeyString();
 
-        _logger.LogInformation("Group coordinator activated with base partition count {PartitionCount} and hint {GroupsPerPartition}", _basePartitionCount, _groupsPerPartitionHint);
+        _hubKey = this.GetPrimaryKeyString();
+        _stateDirty = false;
+
+        _logger.LogInformation(
+            "Group coordinator activated with base partition count {PartitionCount}, current {CurrentPartitionCount}, hint {GroupsPerPartition}, tracked groups {TrackedGroups}",
+            _basePartitionCount,
+            _currentPartitionCount,
+            _groupsPerPartitionHint,
+            GroupPartitions.Count);
         await base.OnActivateAsync(cancellationToken);
     }
 
@@ -148,6 +168,13 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
         var partitionGrain = await GetPartitionGrainAsync(partition);
         await partitionGrain.AddConnectionToGroup(groupName, connectionId, observer);
+
+        // Persist state changes to ensure consistency after reactivation
+        if (_stateDirty)
+        {
+            await _state.WriteStateAsync();
+            _stateDirty = false;
+        }
     }
 
     public async Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
@@ -171,10 +198,15 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         }
     }
 
-    public Task NotifyGroupRemoved(string groupName)
+    public async Task NotifyGroupRemoved(string groupName)
     {
         ReleaseGroup(groupName);
-        return Task.CompletedTask;
+
+        if (_stateDirty)
+        {
+            await _state.WriteStateAsync();
+            _stateDirty = false;
+        }
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
@@ -208,6 +240,8 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         var partitionCount = EnsurePartitionCapacity(GroupPartitions.Count + 1);
         partition = PartitionHelper.GetPartitionId(groupName, (uint)partitionCount);
         GroupPartitions[groupName] = partition;
+        _activePartitions.Add(partition);
+        _stateDirty = true;
 
         _logger.LogDebug("Assigned group {GroupName} to partition {Partition} (partitionCount={PartitionCount})", groupName, partition, partitionCount);
         return partition;
@@ -238,13 +272,35 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     private void ReleaseGroup(string groupName)
     {
         var removedMembership = GroupMembership.Remove(groupName);
-        var removedPartition = GroupPartitions.Remove(groupName);
+        var removedPartition = GroupPartitions.Remove(groupName, out var partitionId);
+
+        if (removedPartition)
+        {
+            _stateDirty = true;
+
+            // Check if any other groups are using this partition
+            var partitionStillActive = false;
+            foreach (var partition in GroupPartitions.Values)
+            {
+                if (partition == partitionId)
+                {
+                    partitionStillActive = true;
+                    break;
+                }
+            }
+
+            if (!partitionStillActive)
+            {
+                _activePartitions.Remove(partitionId);
+            }
+        }
 
         if ((removedMembership || removedPartition) && GroupMembership.Count == 0 && _currentPartitionCount != _basePartitionCount)
         {
             _logger.LogDebug("Resetting group partition count to base value {PartitionCount} as no active groups remain.", _basePartitionCount);
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
+            _activePartitions.Clear();
         }
     }
 

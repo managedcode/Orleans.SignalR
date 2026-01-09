@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO.Hashing;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace ManagedCode.Orleans.SignalR.Core.Helpers;
@@ -130,9 +130,10 @@ public class ConsistentHashRing
 
     private static uint GetHash(string key)
     {
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(key));
-        return BitConverter.ToUInt32(hash, 0);
+        var bytes = Encoding.UTF8.GetBytes(key);
+        var hash = XxHash64.HashToUInt64(bytes);
+        // Use lower 32 bits for partition assignment
+        return unchecked((uint)hash);
     }
 
     public Dictionary<int, int> GetDistribution(IEnumerable<string> keys)

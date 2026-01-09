@@ -54,4 +54,11 @@ public class OrleansSignalROptions
     ///     Used as a hint when determining how many partitions to allocate dynamically.
     /// </summary>
     public int GroupsPerPartitionHint { get; set; } = 1_000;
+
+    /// <summary>
+    ///     Maximum number of messages to queue per user when they are disconnected.
+    ///     Oldest messages are dropped when the limit is exceeded.
+    ///     The default value is 100.
+    /// </summary>
+    public int MaxQueuedMessagesPerUser { get; set; } = 100;
 }

@@ -26,6 +26,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<ConnectionCoordinatorState> _state;
     private readonly Dictionary<string, int> _connectionPartitions;
+    private readonly HashSet<int> _activePartitions;
     private readonly int _connectionsPerPartitionHint;
     private uint _basePartitionCount;
     private int _currentPartitionCount;
@@ -40,6 +41,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         _options = options;
         _state = state;
         _connectionPartitions = new Dictionary<string, int>(StringComparer.Ordinal);
+        _activePartitions = new HashSet<int>();
         _connectionsPerPartitionHint = Math.Max(1, _options.Value.ConnectionsPerPartitionHint);
     }
 
@@ -49,18 +51,24 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         _state.State ??= new ConnectionCoordinatorState();
         var partitions = EnsureOrdinalDictionary(_state.State.ConnectionPartitions);
         _connectionPartitions.Clear();
+        _activePartitions.Clear();
         foreach (var kvp in partitions)
         {
             _connectionPartitions[kvp.Key] = kvp.Value;
+            _activePartitions.Add(kvp.Value);
         }
         _state.State.ConnectionPartitions = _connectionPartitions;
         _basePartitionCount = Math.Max(1u, _options.Value.ConnectionPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
+
+        // Ensure partition count is at least base, but preserve higher counts to maintain routing consistency
         if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
         }
+        // Only reset to base if truly empty AND partition count was scaled up
+        // This preserves routing consistency for connections that might reconnect
         else if (_connectionPartitions.Count == 0 && _currentPartitionCount > _basePartitionCount)
         {
             _currentPartitionCount = (int)_basePartitionCount;
@@ -68,9 +76,11 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         }
 
         _logger.LogInformation(
-            "Connection coordinator activated with base partition count {PartitionCount} and hint {ConnectionsPerPartition}",
+            "Connection coordinator activated with base partition count {PartitionCount}, current {CurrentPartitionCount}, hint {ConnectionsPerPartition}, tracked connections {TrackedConnections}",
             _basePartitionCount,
-            _connectionsPerPartitionHint);
+            _currentPartitionCount,
+            _connectionsPerPartitionHint,
+            _connectionPartitions.Count);
         await base.OnActivateAsync(cancellationToken);
     }
 
@@ -190,20 +200,39 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         await Task.WhenAll(tasks);
     }
 
-    public Task NotifyConnectionRemoved(string connectionId)
+    public async Task NotifyConnectionRemoved(string connectionId)
     {
-        if (_connectionPartitions.Remove(connectionId))
+        if (_connectionPartitions.Remove(connectionId, out var removedPartition))
         {
-            _logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping.", connectionId);
+            _logger.LogDebug("Removed connection {ConnectionId} from coordinator mapping (partition {Partition}).", connectionId, removedPartition);
+
+            // Check if any other connections are using this partition
+            var partitionStillActive = false;
+            foreach (var partition in _connectionPartitions.Values)
+            {
+                if (partition == removedPartition)
+                {
+                    partitionStillActive = true;
+                    break;
+                }
+            }
+
+            if (!partitionStillActive)
+            {
+                _activePartitions.Remove(removedPartition);
+            }
+
             if (_connectionPartitions.Count == 0 && _currentPartitionCount != _basePartitionCount)
             {
                 _logger.LogDebug("Resetting partition count to base value {PartitionCount} as no active connections remain.", _basePartitionCount);
                 _currentPartitionCount = (int)_basePartitionCount;
                 _state.State.CurrentPartitionCount = _currentPartitionCount;
+                _activePartitions.Clear();
             }
-        }
 
-        return Task.CompletedTask;
+            // Persist state changes to ensure consistency after reactivation
+            await _state.WriteStateAsync();
+        }
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
@@ -221,15 +250,18 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     private List<int> GetActivePartitions()
     {
-        if (_connectionPartitions.Count == 0)
+        // Use cached active partitions set - only send to partitions that actually have connections
+        if (_activePartitions.Count == 0)
         {
-            return Enumerable.Range(0, _currentPartitionCount).ToList();
+            // No tracked connections - nothing to send to
+            return [];
         }
 
-        return _connectionPartitions.Values
-            .Distinct()
-            .OrderBy(static partitionId => partitionId)
-            .ToList();
+        // Return sorted list of active partitions for consistent ordering
+        var result = new List<int>(_activePartitions.Count);
+        result.AddRange(_activePartitions);
+        result.Sort();
+        return result;
     }
 
     private int GetOrAssignPartition(string connectionId)
@@ -242,6 +274,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         var partitionCount = EnsurePartitionCapacity(_connectionPartitions.Count + 1);
         partition = PartitionHelper.GetPartitionId(connectionId, (uint)partitionCount);
         _connectionPartitions[connectionId] = partition;
+        _activePartitions.Add(partition);
 
         _logger.LogDebug("Assigned connection {ConnectionId} to partition {Partition} (partitionCount={PartitionCount})", connectionId, partition, partitionCount);
         return partition;
