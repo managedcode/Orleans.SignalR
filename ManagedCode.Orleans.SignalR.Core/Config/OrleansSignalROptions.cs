@@ -61,4 +61,17 @@ public class OrleansSignalROptions
     ///     The default value is 100.
     /// </summary>
     public int MaxQueuedMessagesPerUser { get; set; } = 100;
+
+    /// <summary>
+    ///     Number of consecutive failures before an observer is considered dead and removed.
+    ///     Set to 0 to disable failure tracking.
+    ///     The default value is 3.
+    /// </summary>
+    public int ObserverFailureThreshold { get; set; } = 3;
+
+    /// <summary>
+    ///     Time window for counting observer failures. Failures older than this are forgotten.
+    ///     The default value is 30 seconds.
+    /// </summary>
+    public TimeSpan ObserverFailureWindow { get; set; } = TimeSpan.FromSeconds(30);
 }
