@@ -1,7 +1,9 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -116,62 +118,76 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task SendToAll(HubMessage message)
     {
-        var partitions = GetActivePartitions();
-        if (partitions.Count == 0)
+        var partitionCount = _activePartitions.Count;
+        if (partitionCount == 0)
         {
             return;
         }
 
-        if (_logger.IsEnabled(LogLevel.Debug))
+        // Use ArrayPool for task collection to reduce allocations
+        var tasks = ArrayPool<Task>.Shared.Rent(partitionCount);
+        try
         {
-            var distribution = _connectionPartitions
-                .GroupBy(static kvp => kvp.Value)
-                .Select(group => $"{group.Key}:{group.Count()}")
-                .ToArray();
-            _logger.LogDebug("Sending to all partitions {Distribution}", string.Join(",", distribution));
-        }
+            var hubKey = this.GetPrimaryKeyString();
+            var taskIndex = 0;
 
-        var tasks = new List<Task>(partitions.Count);
-        foreach (var partitionId in partitions)
+            foreach (var partitionId in _activePartitions)
+            {
+                var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
+                tasks[taskIndex++] = partitionGrain.SendToPartition(message);
+            }
+
+            await Task.WhenAll(tasks.AsSpan(0, taskIndex));
+        }
+        finally
         {
-            var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, this.GetPrimaryKeyString(), partitionId);
-            tasks.Add(partitionGrain.SendToPartition(message));
+            ArrayPool<Task>.Shared.Return(tasks, clearArray: true);
         }
-
-        await Task.WhenAll(tasks);
     }
 
     public async Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds)
     {
-        var excludedByPartition = new Dictionary<int, List<string>>();
-        foreach (var connectionId in excludedConnectionIds)
-        {
-            var partition = GetOrAssignPartition(connectionId);
-            if (!excludedByPartition.TryGetValue(partition, out var list))
-            {
-                list = new List<string>();
-                excludedByPartition[partition] = list;
-            }
-            list.Add(connectionId);
-        }
-
-        var partitions = GetActivePartitions();
-        if (partitions.Count == 0)
+        var partitionCount = _activePartitions.Count;
+        if (partitionCount == 0)
         {
             return;
         }
 
-        var tasks = new List<Task>(partitions.Count);
-        foreach (var partitionId in partitions)
+        // Group excluded connections by partition using CollectionsMarshal for efficient access
+        var excludedByPartition = new Dictionary<int, List<string>>();
+        foreach (var connectionId in excludedConnectionIds)
         {
-            var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, this.GetPrimaryKeyString(), partitionId);
-            var excluded = excludedByPartition.TryGetValue(partitionId, out var list)
-                ? list.ToArray()
-                : Array.Empty<string>();
-            tasks.Add(partitionGrain.SendToPartitionExcept(message, excluded));
+            var partition = GetOrAssignPartition(connectionId);
+            ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(excludedByPartition, partition, out var exists);
+            if (!exists)
+            {
+                list = new List<string>();
+            }
+            list!.Add(connectionId);
         }
 
-        await Task.WhenAll(tasks);
+        // Use ArrayPool for task collection
+        var tasks = ArrayPool<Task>.Shared.Rent(partitionCount);
+        try
+        {
+            var hubKey = this.GetPrimaryKeyString();
+            var taskIndex = 0;
+
+            foreach (var partitionId in _activePartitions)
+            {
+                var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
+                var excluded = excludedByPartition.TryGetValue(partitionId, out var list)
+                    ? CollectionsMarshal.AsSpan(list).ToArray()
+                    : [];
+                tasks[taskIndex++] = partitionGrain.SendToPartitionExcept(message, excluded);
+            }
+
+            await Task.WhenAll(tasks.AsSpan(0, taskIndex));
+        }
+        finally
+        {
+            ArrayPool<Task>.Shared.Return(tasks, clearArray: true);
+        }
     }
 
     public async Task<bool> SendToConnection(HubMessage message, string connectionId)
@@ -183,16 +199,22 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task SendToConnections(HubMessage message, string[] connectionIds)
     {
+        if (connectionIds.Length == 0)
+        {
+            return;
+        }
+
+        // Group connections by partition using CollectionsMarshal for efficient access
         var connectionsByPartition = new Dictionary<int, List<string>>();
         foreach (var connectionId in connectionIds)
         {
             var partition = GetOrAssignPartition(connectionId);
-            if (!connectionsByPartition.TryGetValue(partition, out var list))
+            ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(connectionsByPartition, partition, out var exists);
+            if (!exists)
             {
                 list = new List<string>();
-                connectionsByPartition[partition] = list;
             }
-            list.Add(connectionId);
+            list!.Add(connectionId);
         }
 
         if (connectionsByPartition.Count == 0)
@@ -200,14 +222,25 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             return;
         }
 
-        var tasks = new List<Task>(connectionsByPartition.Count);
-        foreach (var kvp in connectionsByPartition)
+        // Use ArrayPool for task collection
+        var tasks = ArrayPool<Task>.Shared.Rent(connectionsByPartition.Count);
+        try
         {
-            var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, this.GetPrimaryKeyString(), kvp.Key);
-            tasks.Add(partitionGrain.SendToConnections(message, kvp.Value.ToArray()));
-        }
+            var hubKey = this.GetPrimaryKeyString();
+            var taskIndex = 0;
 
-        await Task.WhenAll(tasks);
+            foreach (var kvp in connectionsByPartition)
+            {
+                var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, kvp.Key);
+                tasks[taskIndex++] = partitionGrain.SendToConnections(message, CollectionsMarshal.AsSpan(kvp.Value).ToArray());
+            }
+
+            await Task.WhenAll(tasks.AsSpan(0, taskIndex));
+        }
+        finally
+        {
+            ArrayPool<Task>.Shared.Return(tasks, clearArray: true);
+        }
     }
 
     public async Task NotifyConnectionRemoved(string connectionId)
@@ -258,22 +291,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         }
     }
 
-    private List<int> GetActivePartitions()
-    {
-        // Use cached active partitions set - only send to partitions that actually have connections
-        if (_activePartitions.Count == 0)
-        {
-            // No tracked connections - nothing to send to
-            return [];
-        }
-
-        // Return sorted list of active partitions for consistent ordering
-        var result = new List<int>(_activePartitions.Count);
-        result.AddRange(_activePartitions);
-        result.Sort();
-        return result;
-    }
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetOrAssignPartition(string connectionId)
     {
         if (_connectionPartitions.TryGetValue(connectionId, out var partition))

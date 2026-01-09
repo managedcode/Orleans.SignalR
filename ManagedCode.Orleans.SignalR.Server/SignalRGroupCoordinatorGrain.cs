@@ -1,5 +1,8 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -117,16 +120,17 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     public async Task SendToGroups(string[] groupNames, HubMessage message)
     {
+        // Group by partition using CollectionsMarshal for efficient access
         var groupsByPartition = new Dictionary<int, List<string>>();
         foreach (var groupName in groupNames)
         {
             var partition = GetOrAssignPartition(groupName);
-            if (!groupsByPartition.TryGetValue(partition, out var list))
+            ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(groupsByPartition, partition, out var exists);
+            if (!exists)
             {
                 list = new List<string>();
-                groupsByPartition[partition] = list;
             }
-            list.Add(groupName);
+            list!.Add(groupName);
         }
 
         if (groupsByPartition.Count == 0)
@@ -134,21 +138,26 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             return;
         }
 
-        // Send to all partitions in parallel
-        var tasks = new List<Task>(groupsByPartition.Count);
-        foreach (var kvp in groupsByPartition)
-        {
-            var partitionGrain = await GetPartitionGrainAsync(kvp.Key);
-            tasks.Add(partitionGrain.SendToGroups(message, kvp.Value.ToArray()));
-        }
-
+        // Use ArrayPool for task collection
+        var tasks = ArrayPool<Task>.Shared.Rent(groupsByPartition.Count);
         try
         {
-            await Task.WhenAll(tasks);
+            var taskIndex = 0;
+            foreach (var kvp in groupsByPartition)
+            {
+                var partitionGrain = await GetPartitionGrainAsync(kvp.Key);
+                tasks[taskIndex++] = partitionGrain.SendToGroups(message, CollectionsMarshal.AsSpan(kvp.Value).ToArray());
+            }
+
+            await Task.WhenAll(tasks.AsSpan(0, taskIndex));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send to one or more group partitions");
+        }
+        finally
+        {
+            ArrayPool<Task>.Shared.Return(tasks, clearArray: true);
         }
     }
 
@@ -229,6 +238,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         return partitionGrain;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetOrAssignPartition(string groupName)
     {
         if (GroupPartitions.TryGetValue(groupName, out var partition))

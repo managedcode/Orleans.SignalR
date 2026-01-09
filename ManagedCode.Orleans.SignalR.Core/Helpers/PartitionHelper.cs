@@ -1,8 +1,12 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO.Hashing;
 using System.Linq;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace ManagedCode.Orleans.SignalR.Core.Helpers;
@@ -10,65 +14,80 @@ namespace ManagedCode.Orleans.SignalR.Core.Helpers;
 public static class PartitionHelper
 {
     private const int VirtualNodesPerPartition = 150; // Number of virtual nodes per physical partition
+    private const int MaxStackAllocSize = 256; // Max bytes for stackalloc
     private static readonly ConcurrentDictionary<RingCacheKey, ConsistentHashRing> RingCache = new();
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetPartitionId(string connectionId, uint partitionCount)
     {
-        if (string.IsNullOrEmpty(connectionId))
-        {
-            throw new ArgumentException("Connection ID cannot be null or empty", nameof(connectionId));
-        }
-
-        if (partitionCount <= 0)
-        {
-            throw new ArgumentException("Partition count must be greater than 0", nameof(partitionCount));
-        }
+        ArgumentException.ThrowIfNullOrEmpty(connectionId);
+        ArgumentOutOfRangeException.ThrowIfZero(partitionCount);
 
         var ring = RingCache.GetOrAdd(new RingCacheKey((int)partitionCount, VirtualNodesPerPartition),
-            key => new ConsistentHashRing(key.PartitionCount, key.VirtualNodes));
+            static key => new ConsistentHashRing(key.PartitionCount, key.VirtualNodes));
 
         return ring.GetPartition(connectionId);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetOptimalPartitionCount(int expectedConnections)
     {
         return GetOptimalPartitionCount(expectedConnections, 10_000);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetOptimalPartitionCount(int expectedConnections, int connectionsPerPartition)
     {
         var perPartition = Math.Max(1, connectionsPerPartition);
         var partitions = Math.Max(1, (expectedConnections + perPartition - 1) / perPartition);
-        return ToPowerOfTwo(partitions);
+        return (int)BitOperations.RoundUpToPowerOf2((uint)partitions);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetOptimalGroupPartitionCount(int expectedGroups)
     {
         return GetOptimalGroupPartitionCount(expectedGroups, 1_000);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetOptimalGroupPartitionCount(int expectedGroups, int groupsPerPartition)
     {
         var perPartition = Math.Max(1, groupsPerPartition);
         var partitions = Math.Max(1, (expectedGroups + perPartition - 1) / perPartition);
-        return ToPowerOfTwo(partitions);
+        return (int)BitOperations.RoundUpToPowerOf2((uint)partitions);
     }
 
-    private static int ToPowerOfTwo(int value)
+    /// <summary>
+    /// Computes hash using stack allocation for small strings, ArrayPool for larger ones.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static uint ComputeHash(ReadOnlySpan<char> key)
     {
-        if (value <= 1)
+        var maxByteCount = Encoding.UTF8.GetMaxByteCount(key.Length);
+
+        if (maxByteCount <= MaxStackAllocSize)
         {
-            return 1;
+            Span<byte> buffer = stackalloc byte[maxByteCount];
+            var bytesWritten = Encoding.UTF8.GetBytes(key, buffer);
+            return unchecked((uint)XxHash64.HashToUInt64(buffer[..bytesWritten]));
         }
 
-        var power = (int)Math.Ceiling(Math.Log(value, 2));
-        return (int)Math.Pow(2, power);
+        var rentedBuffer = ArrayPool<byte>.Shared.Rent(maxByteCount);
+        try
+        {
+            var bytesWritten = Encoding.UTF8.GetBytes(key, rentedBuffer);
+            return unchecked((uint)XxHash64.HashToUInt64(rentedBuffer.AsSpan(0, bytesWritten)));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rentedBuffer);
+        }
     }
 
     private readonly record struct RingCacheKey(int PartitionCount, int VirtualNodes);
 }
 
-public class ConsistentHashRing
+public sealed class ConsistentHashRing
 {
     private readonly uint[] _keys;
     private readonly int[] _partitions;
@@ -76,10 +95,7 @@ public class ConsistentHashRing
 
     public ConsistentHashRing(int partitionCount, int virtualNodes = 150)
     {
-        if (partitionCount <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(partitionCount), "Partition count must be greater than zero.");
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(partitionCount);
 
         _partitionCount = partitionCount;
 
@@ -92,12 +108,24 @@ public class ConsistentHashRing
     {
         var ring = new SortedList<uint, int>(partitionCount * virtualNodes);
 
+        Span<char> keyBuffer = stackalloc char[64]; // "partition-XXXX-vnode-XXXX" max ~25 chars
+
         for (var partition = 0; partition < partitionCount; partition++)
         {
             for (var vnode = 0; vnode < virtualNodes; vnode++)
             {
-                var virtualNodeKey = $"partition-{partition}-vnode-{vnode}";
-                var hash = GetHash(virtualNodeKey);
+                // Build key without allocation using TryFormat
+                var written = 0;
+                "partition-".AsSpan().CopyTo(keyBuffer);
+                written += 10;
+                partition.TryFormat(keyBuffer[written..], out var partitionChars, default, CultureInfo.InvariantCulture);
+                written += partitionChars;
+                "-vnode-".AsSpan().CopyTo(keyBuffer[written..]);
+                written += 7;
+                vnode.TryFormat(keyBuffer[written..], out var vnodeChars, default, CultureInfo.InvariantCulture);
+                written += vnodeChars;
+
+                var hash = PartitionHelper.ComputeHash(keyBuffer[..written]);
                 ring[hash] = partition;
             }
         }
@@ -105,6 +133,7 @@ public class ConsistentHashRing
         return ring;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int GetPartition(string key)
     {
         if (_keys.Length == 0)
@@ -112,7 +141,7 @@ public class ConsistentHashRing
             return 0;
         }
 
-        var hash = GetHash(key);
+        var hash = PartitionHelper.ComputeHash(key.AsSpan());
 
         var index = Array.BinarySearch(_keys, hash);
         if (index < 0)
@@ -128,17 +157,9 @@ public class ConsistentHashRing
         return _partitions[index];
     }
 
-    private static uint GetHash(string key)
-    {
-        var bytes = Encoding.UTF8.GetBytes(key);
-        var hash = XxHash64.HashToUInt64(bytes);
-        // Use lower 32 bits for partition assignment
-        return unchecked((uint)hash);
-    }
-
     public Dictionary<int, int> GetDistribution(IEnumerable<string> keys)
     {
-        var distribution = new Dictionary<int, int>();
+        var distribution = new Dictionary<int, int>(_partitionCount);
         for (var i = 0; i < _partitionCount; i++)
         {
             distribution[i] = 0;
