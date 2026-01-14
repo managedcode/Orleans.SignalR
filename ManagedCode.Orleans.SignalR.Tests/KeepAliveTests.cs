@@ -314,7 +314,7 @@ public class KeepAliveTests : IAsyncLifetime
         public override string ToString() => $"conn={Connections}, part={Partitions}, hb={Heartbeat}, inv={Invocation}";
     }
 
-    private static Task<string> WaitForMessageAsync(Task<string> task, string description)
+    private static Task<string> WaitForMessageAsync(Task<string> task, string _)
     {
         return task.WaitAsync(TimeSpan.FromSeconds(30));
     }

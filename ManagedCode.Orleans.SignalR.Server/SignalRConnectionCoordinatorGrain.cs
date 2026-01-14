@@ -1,3 +1,15 @@
+using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Helpers;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Core.SignalR;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
+using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Orleans;
+using Orleans.Concurrency;
+using Orleans.Runtime;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -6,18 +18,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using ManagedCode.Orleans.SignalR.Core.Config;
-using ManagedCode.Orleans.SignalR.Core.Helpers;
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using ManagedCode.Orleans.SignalR.Core.Models;
-using ManagedCode.Orleans.SignalR.Core.SignalR;
-using Microsoft.AspNetCore.SignalR.Protocol;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Orleans;
-using Orleans.Concurrency;
-using Orleans.Runtime;
-
 using static ManagedCode.Orleans.SignalR.Core.Helpers.CollectionPool;
 
 namespace ManagedCode.Orleans.SignalR.Server;
@@ -118,9 +118,17 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         }
 
         // Persist state if a new partition was assigned or reassigned due to epoch change
+        // Use safe write with retry for both persistent and memory storage ETag conflicts
         if (wasNew || wasReassigned)
         {
-            await _state.WriteStateAsync();
+            await _state.WriteStateSafeAsync(state =>
+            {
+                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
+                state.ConnectionPartitions = _connectionPartitions;
+                state.CurrentPartitionCount = _currentPartitionCount;
+                state.PartitionEpoch = _partitionEpoch;
+                return true;
+            });
         }
 
         return partition;
@@ -301,8 +309,15 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
                 _activePartitions.Clear();
             }
 
-            // Persist state changes to ensure consistency after reactivation
-            await _state.WriteStateAsync();
+            // Persist state changes with safe retry for ETag conflicts
+            await _state.WriteStateSafeAsync(state =>
+            {
+                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
+                state.ConnectionPartitions = _connectionPartitions;
+                state.CurrentPartitionCount = _currentPartitionCount;
+                state.PartitionEpoch = _partitionEpoch;
+                return true;
+            });
         }
     }
 
@@ -311,13 +326,21 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         _state.State.CurrentPartitionCount = _currentPartitionCount;
         _state.State.PartitionEpoch = _partitionEpoch;
 
-        if (_connectionPartitions.Count == 0)
+        try
         {
-            await _state.ClearStateAsync(cancellationToken);
+            if (_connectionPartitions.Count == 0)
+            {
+                await _state.ClearStateSafeAsync(cancellationToken);
+            }
+            else
+            {
+                await _state.WriteStateSafeAsync(cancellationToken);
+            }
         }
-        else
+        catch (OrleansMessageRejectionException ex)
         {
-            await _state.WriteStateAsync(cancellationToken);
+            // Storage grains may be unavailable during silo shutdown
+            _logger.LogDebug(ex, "Unable to persist state during deactivation for coordinator {HubKey} - storage unavailable.", this.GetPrimaryKeyString());
         }
     }
 

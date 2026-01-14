@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -15,6 +10,11 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -120,11 +120,11 @@ public class SignalRGroupGrain(
 
         if (!hasConnections)
         {
-            await stateStorage.ClearStateAsync(cancellationToken);
+            await stateStorage.ClearStateSafeAsync(cancellationToken);
         }
         else
         {
-            await stateStorage.WriteStateAsync(cancellationToken);
+            await stateStorage.WriteStateSafeAsync(cancellationToken);
         }
     }
 

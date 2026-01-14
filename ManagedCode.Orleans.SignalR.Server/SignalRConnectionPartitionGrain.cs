@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -16,6 +10,12 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -188,13 +188,21 @@ public class SignalRConnectionPartitionGrain(
         var hasConnections = stateStorage.State.ConnectionIds.Count > 0;
         ClearObserverTracking();
 
-        if (!hasConnections)
+        try
         {
-            await stateStorage.ClearStateAsync(cancellationToken);
+            if (!hasConnections)
+            {
+                await stateStorage.ClearStateSafeAsync(cancellationToken);
+            }
+            else
+            {
+                await stateStorage.WriteStateSafeAsync(cancellationToken);
+            }
         }
-        else
+        catch (OrleansMessageRejectionException ex)
         {
-            await stateStorage.WriteStateAsync(cancellationToken);
+            // Storage grains may be unavailable during silo shutdown
+            Logger.LogDebug(ex, "Unable to persist state during deactivation for partition {PartitionId} - storage unavailable.", this.GetPrimaryKeyLong());
         }
     }
 

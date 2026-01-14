@@ -357,7 +357,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
         }
     }
 
-    private static Task<string> WaitForMessageAsync(Task<string> task, string description)
+    private static Task<string> WaitForMessageAsync(Task<string> task, string _)
     {
         return task.WaitAsync(TimeSpan.FromSeconds(30));
     }

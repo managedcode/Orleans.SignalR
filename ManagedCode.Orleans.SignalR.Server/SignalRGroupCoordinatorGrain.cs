@@ -1,3 +1,15 @@
+using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Helpers;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Core.SignalR;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
+using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Orleans;
+using Orleans.Concurrency;
+using Orleans.Runtime;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -5,17 +17,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
-using ManagedCode.Orleans.SignalR.Core.Config;
-using ManagedCode.Orleans.SignalR.Core.Helpers;
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using ManagedCode.Orleans.SignalR.Core.Models;
-using ManagedCode.Orleans.SignalR.Core.SignalR;
-using Microsoft.AspNetCore.SignalR.Protocol;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Orleans;
-using Orleans.Concurrency;
-using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -26,6 +27,8 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     private readonly ILogger<SignalRGroupCoordinatorGrain> _logger;
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<GroupCoordinatorState> _state;
+    private readonly Dictionary<string, PartitionAssignment> _groupPartitions;
+    private readonly Dictionary<string, int> _groupMembership;
     private readonly HashSet<int> _activePartitions;
     private readonly int _groupsPerPartitionHint;
     private uint _basePartitionCount;
@@ -43,6 +46,8 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         _logger = logger;
         _options = options;
         _state = state;
+        _groupPartitions = new Dictionary<string, PartitionAssignment>(StringComparer.Ordinal);
+        _groupMembership = new Dictionary<string, int>(StringComparer.Ordinal);
         _activePartitions = new HashSet<int>();
         _groupsPerPartitionHint = Math.Max(1, _options.Value.GroupsPerPartitionHint);
     }
@@ -51,18 +56,33 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     {
         await _state.ReadStateAsync(cancellationToken);
         _state.State ??= new GroupCoordinatorState();
-        _state.State.GroupPartitions = EnsureOrdinalDictionary(_state.State.GroupPartitions);
-        _state.State.GroupMembership = EnsureOrdinalMembershipDictionary(_state.State.GroupMembership);
+
+        // Copy persisted state to local dictionaries
+        var persistedPartitions = EnsureOrdinalDictionary(_state.State.GroupPartitions);
+        var persistedMembership = EnsureOrdinalMembershipDictionary(_state.State.GroupMembership);
+
+        _groupPartitions.Clear();
+        _groupMembership.Clear();
+        _activePartitions.Clear();
+
+        foreach (var kvp in persistedPartitions)
+        {
+            _groupPartitions[kvp.Key] = kvp.Value;
+            _activePartitions.Add(kvp.Value.PartitionId);
+        }
+
+        foreach (var kvp in persistedMembership)
+        {
+            _groupMembership[kvp.Key] = kvp.Value;
+        }
+
+        // Set state to reference local dictionaries
+        _state.State.GroupPartitions = _groupPartitions;
+        _state.State.GroupMembership = _groupMembership;
+
         _basePartitionCount = Math.Max(1u, _options.Value.GroupPartitionCount);
         _currentPartitionCount = _state.State.CurrentPartitionCount;
         _partitionEpoch = Math.Max(1, _state.State.PartitionEpoch);
-
-        // Rebuild active partitions set from persisted state
-        _activePartitions.Clear();
-        foreach (var assignment in GroupPartitions.Values)
-        {
-            _activePartitions.Add(assignment.PartitionId);
-        }
 
         // Ensure partition count is at least base, but preserve higher counts to maintain routing consistency
         if (_currentPartitionCount <= 0 || _currentPartitionCount < _basePartitionCount)
@@ -71,7 +91,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             _state.State.CurrentPartitionCount = _currentPartitionCount;
         }
         // Only reset to base if truly empty AND partition count was scaled up
-        else if (GroupPartitions.Count == 0 && _currentPartitionCount > _basePartitionCount)
+        else if (_groupPartitions.Count == 0 && _currentPartitionCount > _basePartitionCount)
         {
             _currentPartitionCount = (int)_basePartitionCount;
             _state.State.CurrentPartitionCount = _currentPartitionCount;
@@ -89,7 +109,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             _currentPartitionCount,
             _partitionEpoch,
             _groupsPerPartitionHint,
-            GroupPartitions.Count);
+            _groupPartitions.Count);
         await base.OnActivateAsync(cancellationToken);
     }
 
@@ -179,7 +199,15 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         // Persist state changes to ensure consistency after reactivation
         if (_stateDirty)
         {
-            await _state.WriteStateAsync();
+            await _state.WriteStateSafeAsync(state =>
+            {
+                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
+                state.GroupPartitions = _groupPartitions;
+                state.GroupMembership = _groupMembership;
+                state.CurrentPartitionCount = _currentPartitionCount;
+                state.PartitionEpoch = _partitionEpoch;
+                return true;
+            });
             _stateDirty = false;
         }
     }
@@ -214,7 +242,15 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         // Persist state changes to ensure consistency after reactivation
         if (_stateDirty)
         {
-            await _state.WriteStateAsync();
+            await _state.WriteStateSafeAsync(state =>
+            {
+                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
+                state.GroupPartitions = _groupPartitions;
+                state.GroupMembership = _groupMembership;
+                state.CurrentPartitionCount = _currentPartitionCount;
+                state.PartitionEpoch = _partitionEpoch;
+                return true;
+            });
             _stateDirty = false;
         }
     }
@@ -225,7 +261,15 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
         if (_stateDirty)
         {
-            await _state.WriteStateAsync();
+            await _state.WriteStateSafeAsync(state =>
+            {
+                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
+                state.GroupPartitions = _groupPartitions;
+                state.GroupMembership = _groupMembership;
+                state.CurrentPartitionCount = _currentPartitionCount;
+                state.PartitionEpoch = _partitionEpoch;
+                return true;
+            });
             _stateDirty = false;
         }
     }
@@ -237,11 +281,11 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
         if (GroupPartitions.Count == 0)
         {
-            await _state.ClearStateAsync(cancellationToken);
+            await _state.ClearStateSafeAsync(cancellationToken);
         }
         else
         {
-            await _state.WriteStateAsync(cancellationToken);
+            await _state.WriteStateSafeAsync(cancellationToken);
         }
     }
 
@@ -336,8 +380,8 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         return _currentPartitionCount;
     }
 
-    private Dictionary<string, PartitionAssignment> GroupPartitions => _state.State.GroupPartitions!;
-    private Dictionary<string, int> GroupMembership => _state.State.GroupMembership!;
+    private Dictionary<string, PartitionAssignment> GroupPartitions => _groupPartitions;
+    private Dictionary<string, int> GroupMembership => _groupMembership;
 
     private void ReleaseGroup(string groupName)
     {

@@ -1,5 +1,5 @@
-using System.Collections.Generic;
 using Microsoft.AspNetCore.SignalR;
+using System.Collections.Generic;
 
 namespace ManagedCode.Orleans.SignalR.Core.HubContext;
 

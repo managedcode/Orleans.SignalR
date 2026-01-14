@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
@@ -15,6 +10,10 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -241,10 +240,10 @@ public class SignalRGroupPartitionGrain(
 
         if (!hasState)
         {
-            return state.ClearStateAsync(cancellationToken);
+            return state.ClearStateSafeAsync(cancellationToken);
         }
 
-        return state.WriteStateAsync(cancellationToken);
+        return state.WriteStateSafeAsync(cancellationToken);
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)

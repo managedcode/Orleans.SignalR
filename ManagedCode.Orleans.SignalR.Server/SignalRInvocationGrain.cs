@@ -1,9 +1,8 @@
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -12,6 +11,8 @@ using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
 using Orleans.Utilities;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -98,7 +99,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _completionSource?.TrySetCanceled();
         _completionSource = null;
         var into = _stateStorage.State;
-        await _stateStorage.ClearStateAsync();
+        await _stateStorage.ClearStateSafeAsync();
         DeactivateOnIdle();
         return into;
     }
@@ -128,7 +129,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         Logs.RemoveConnection(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _observerManager.Clear();
-        await _stateStorage.ClearStateAsync();
+        await _stateStorage.ClearStateSafeAsync();
         DeactivateOnIdle();
     }
 
@@ -141,11 +142,11 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         if (string.IsNullOrEmpty(_stateStorage.State.ConnectionId) ||
             string.IsNullOrEmpty(_stateStorage.State.InvocationId))
         {
-            await _stateStorage.ClearStateAsync(cancellationToken);
+            await _stateStorage.ClearStateSafeAsync(cancellationToken);
         }
         else
         {
-            await _stateStorage.WriteStateAsync(cancellationToken);
+            await _stateStorage.WriteStateSafeAsync(cancellationToken);
         }
     }
 }

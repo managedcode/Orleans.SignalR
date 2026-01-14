@@ -1,5 +1,5 @@
-using System.Collections.Generic;
 using Orleans;
+using System.Collections.Generic;
 
 namespace ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 

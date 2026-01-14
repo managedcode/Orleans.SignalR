@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -14,6 +9,10 @@ using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Runtime;
 using Orleans.Utilities;
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -465,7 +464,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
         var dueTime = TimeSpan.FromMilliseconds(Math.Max(500, _observerRefreshInterval.TotalMilliseconds / 2));
         _observerRefreshTimer = this.RegisterGrainTimer(
-            () => RefreshObserversAsync(),
+            RefreshObserversAsync,
             new GrainTimerCreationOptions
             {
                 DueTime = dueTime,

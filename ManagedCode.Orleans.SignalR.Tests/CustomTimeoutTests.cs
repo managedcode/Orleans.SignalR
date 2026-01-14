@@ -37,7 +37,7 @@ public class CustomTimeoutTests
 
     [Theory]
     [MemberData(nameof(TimeoutConfigurations))]
-    public async Task DirectSendShouldSurviveIdleWithCustomTimeouts(
+    public async Task DirectSendShouldSurviveIdleWithCustomTimeoutsAsync(
         string scenario,
         double keepAliveSeconds,
         double clientTimeoutSeconds,

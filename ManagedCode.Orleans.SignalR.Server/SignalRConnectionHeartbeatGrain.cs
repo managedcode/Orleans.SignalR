@@ -1,14 +1,14 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
-using ManagedCode.Orleans.SignalR.Core.SignalR;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
 using Microsoft.Extensions.Logging;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -48,32 +48,46 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
     public async Task Start(ConnectionHeartbeatRegistration registration)
     {
         _registration = registration;
-        _state.State.Registration = registration;
         ResetTimer(registration.Interval);
         _logger.LogDebug("Heartbeat started for connection grain {Key} (hub={Hub}, partitioned={Partitioned}, partitionId={PartitionId}).",
             this.GetPrimaryKeyString(), registration.HubKey, registration.UsePartitioning, registration.PartitionId);
-        await _state.WriteStateAsync();
+        await _state.WriteStateSafeAsync(state =>
+        {
+            state.Registration = registration;
+            return true;
+        });
     }
 
     public async Task Stop()
     {
         ResetTimer(null);
-        _state.State.Registration = null;
         _registration = null;
         _logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());
-        await _state.WriteStateAsync();
+        await _state.WriteStateSafeAsync(state =>
+        {
+            state.Registration = null;
+            return true;
+        });
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
     {
         ResetTimer(null);
-        if (_state.State.Registration is null)
+        try
         {
-            await _state.ClearStateAsync(cancellationToken);
+            if (_state.State.Registration is null)
+            {
+                await _state.ClearStateSafeAsync(cancellationToken);
+            }
+            else
+            {
+                await _state.WriteStateSafeAsync(cancellationToken);
+            }
         }
-        else
+        catch (OrleansMessageRejectionException ex)
         {
-            await _state.WriteStateAsync(cancellationToken);
+            // Storage grains may be unavailable during silo shutdown
+            _logger.LogDebug(ex, "Unable to persist state during deactivation for grain {Key} - storage unavailable.", this.GetPrimaryKeyString());
         }
     }
 
@@ -96,7 +110,7 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
         }
     }
 
-    private Task OnTimerTickAsync(object? state)
+    private Task OnTimerTickAsync(object? _)
     {
         if (_registration is null)
         {

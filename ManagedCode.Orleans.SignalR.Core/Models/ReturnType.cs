@@ -1,5 +1,5 @@
-using System;
 using Orleans;
+using System;
 
 namespace ManagedCode.Orleans.SignalR.Core.Models;
 

@@ -1,8 +1,8 @@
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using Orleans.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
@@ -49,6 +49,12 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
     {
         _grains.Remove(grain);
         _heartbeatGrainIds.Remove(((GrainReference)grain).GrainId);
+    }
+
+    public void ClearGrains()
+    {
+        _grains.Clear();
+        _heartbeatGrainIds.Clear();
     }
 
     public void SetReference(ISignalRObserver reference)
