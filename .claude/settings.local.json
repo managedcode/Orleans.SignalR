@@ -3,7 +3,10 @@
     "allow": [
       "Bash(tree:*)",
       "Bash(dotnet build:*)",
-      "Bash(dotnet test:*)"
+      "Bash(dotnet test:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(git remote add:*)"
     ]
   }
 }

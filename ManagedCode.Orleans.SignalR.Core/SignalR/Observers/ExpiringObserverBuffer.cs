@@ -1,6 +1,7 @@
-using Microsoft.AspNetCore.SignalR.Protocol;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using Microsoft.AspNetCore.SignalR.Protocol;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
@@ -12,17 +13,11 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 /// Note: This class is designed to be used within Orleans grains which provide single-threaded
 /// execution guarantees. No explicit locking is required.
 /// </summary>
-public sealed class ExpiringObserverBuffer
+public sealed class ExpiringObserverBuffer(TimeSpan gracePeriod, int maxBufferedMessages)
 {
     private readonly Dictionary<string, ObserverBufferState> _buffers = new(StringComparer.Ordinal);
-    private readonly TimeSpan _gracePeriod;
-    private readonly int _maxBufferedMessages;
-
-    public ExpiringObserverBuffer(TimeSpan gracePeriod, int maxBufferedMessages)
-    {
-        _gracePeriod = gracePeriod;
-        _maxBufferedMessages = Math.Max(1, maxBufferedMessages);
-    }
+    private readonly TimeSpan _gracePeriod = gracePeriod;
+    private readonly int _maxBufferedMessages = Math.Max(1, maxBufferedMessages);
 
     /// <summary>
     /// Gets whether the buffer is enabled (grace period > 0).
@@ -193,50 +188,41 @@ public sealed class ExpiringObserverBuffer
     /// <summary>
     /// Circular buffer state for a single observer, optimized for O(1) enqueue/dequeue.
     /// </summary>
-    private sealed class ObserverBufferState
+    private sealed class ObserverBufferState(TimeSpan gracePeriod, int maxMessages)
     {
-        private readonly DateTime _expiresAt;
-        private readonly HubMessage[] _messages;
+        private readonly long _createdAtTimestamp = Stopwatch.GetTimestamp();
+        private readonly TimeSpan _gracePeriod = gracePeriod;
+        private readonly HubMessage[] _messages = new HubMessage[maxMessages];
         private int _head; // Index of first (oldest) message
-        private int _count; // Number of messages in buffer
-
-        public ObserverBufferState(TimeSpan gracePeriod, int maxMessages)
-        {
-            _expiresAt = DateTime.UtcNow + gracePeriod;
-            _messages = new HubMessage[maxMessages];
-            _head = 0;
-            _count = 0;
-        }
-
-        public bool IsExpired => DateTime.UtcNow >= _expiresAt;
+        public bool IsExpired => Stopwatch.GetElapsedTime(_createdAtTimestamp) >= _gracePeriod;
 
         public TimeSpan RemainingTime
         {
             get
             {
-                var remaining = _expiresAt - DateTime.UtcNow;
+                var remaining = _gracePeriod - Stopwatch.GetElapsedTime(_createdAtTimestamp);
                 return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
             }
         }
 
-        public int MessageCount => _count;
+        public int MessageCount { get; private set; } // Number of messages in buffer
 
         public bool AddMessage(HubMessage message)
         {
-            if (_count >= _messages.Length)
+            if (MessageCount >= _messages.Length)
             {
                 // Buffer is full - overwrite oldest message (drop oldest)
                 // The head points to the oldest, so we overwrite it and advance head
                 _messages[_head] = message;
                 _head = (_head + 1) % _messages.Length;
-                // _count stays the same since we're replacing
+                // MessageCount stays the same since we're replacing
             }
             else
             {
                 // Buffer has space - add at tail position
-                var tail = (_head + _count) % _messages.Length;
+                var tail = (_head + MessageCount) % _messages.Length;
                 _messages[tail] = message;
-                _count++;
+                MessageCount++;
             }
 
             return true;
@@ -244,14 +230,14 @@ public sealed class ExpiringObserverBuffer
 
         public IReadOnlyList<HubMessage> GetMessages()
         {
-            if (_count == 0)
+            if (MessageCount == 0)
             {
                 return Array.Empty<HubMessage>();
             }
 
             // Return messages in order (oldest to newest)
-            var result = new HubMessage[_count];
-            for (var i = 0; i < _count; i++)
+            var result = new HubMessage[MessageCount];
+            for (var i = 0; i < MessageCount; i++)
             {
                 result[i] = _messages[(_head + i) % _messages.Length];
             }

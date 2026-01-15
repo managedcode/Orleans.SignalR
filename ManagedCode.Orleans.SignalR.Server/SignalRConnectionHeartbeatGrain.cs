@@ -1,3 +1,6 @@
+using System;
+using System.Threading;
+using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
@@ -6,9 +9,6 @@ using Microsoft.Extensions.Logging;
 using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -112,18 +112,21 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
 
     private Task OnTimerTickAsync(object? _)
     {
-        if (_registration is null)
+        // Capture registration to avoid null reference if Stop() is called during reentrant execution
+        var registration = _registration;
+        if (registration is null)
         {
             return Task.CompletedTask;
         }
 
-        var grainIds = _registration.GrainIds;
+        var grainIds = registration.GrainIds;
         if (grainIds.IsDefaultOrEmpty)
         {
             return Task.CompletedTask;
         }
 
-        var connectionId = _registration.ConnectionId;
+        var connectionId = registration.ConnectionId;
+        var observer = registration.Observer;
         try
         {
             foreach (var grainId in grainIds)
@@ -132,9 +135,9 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
                 var manager = grain.AsReference<IObserverConnectionManager>();
                 if (!string.IsNullOrEmpty(connectionId))
                 {
-                    _ = manager.AddConnection(connectionId, _registration.Observer);
+                    _ = manager.AddConnection(connectionId, observer);
                 }
-                _ = manager.Ping(_registration.Observer);
+                _ = manager.Ping(observer);
             }
         }
         catch (Exception ex)

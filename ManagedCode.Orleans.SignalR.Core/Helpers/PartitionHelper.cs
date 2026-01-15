@@ -15,7 +15,7 @@ public static class PartitionHelper
 {
     private const int VirtualNodesPerPartition = 150; // Number of virtual nodes per physical partition
     private const int MaxStackAllocSize = 256; // Max bytes for stackalloc
-    private static readonly ConcurrentDictionary<RingCacheKey, ConsistentHashRing> RingCache = new();
+    private static readonly ConcurrentDictionary<_ringCacheKey, ConsistentHashRing> _ringCache = new();
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetPartitionId(string connectionId, uint partitionCount)
@@ -23,7 +23,7 @@ public static class PartitionHelper
         ArgumentException.ThrowIfNullOrEmpty(connectionId);
         ArgumentOutOfRangeException.ThrowIfZero(partitionCount);
 
-        var ring = RingCache.GetOrAdd(new RingCacheKey((int)partitionCount, VirtualNodesPerPartition),
+        var ring = _ringCache.GetOrAdd(new _ringCacheKey((int)partitionCount, VirtualNodesPerPartition),
             static key => new ConsistentHashRing(key.PartitionCount, key.VirtualNodes));
 
         return ring.GetPartition(connectionId);
@@ -84,7 +84,7 @@ public static class PartitionHelper
         }
     }
 
-    private readonly record struct RingCacheKey(int PartitionCount, int VirtualNodes);
+    private readonly record struct _ringCacheKey(int PartitionCount, int VirtualNodes);
 }
 
 public sealed class ConsistentHashRing

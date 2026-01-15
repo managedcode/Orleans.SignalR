@@ -453,6 +453,20 @@ dotnet_diagnostic.IDE0200.severity = warning
 dotnet_style_allow_multiple_blank_lines_experimental = false
 dotnet_diagnostic.IDE2000.severity = warning
 
+# SignalR Hub methods are called by string name from clients - suppress async naming rule
+[**/Hubs/*.cs]
+dotnet_naming_rule.async_methods_should_end_with_async.severity = none
+
+# ASP.NET Controller actions don't typically follow async naming conventions
+[**/Controllers/*.cs]
+dotnet_naming_rule.async_methods_should_end_with_async.severity = none
+
+# Orleans grains with [PersistentState] attributes cannot use primary constructors
+# because attributes on constructor parameters cannot be applied to primary constructor parameters
+[**/SignalRConnectionHeartbeatGrain.cs]
+csharp_style_prefer_primary_constructors = false:none
+dotnet_diagnostic.IDE0290.severity = none
+
 # Verify settings for test files
 [*.{received,verified}.{txt,xml,json}]
 charset = utf-8-bom

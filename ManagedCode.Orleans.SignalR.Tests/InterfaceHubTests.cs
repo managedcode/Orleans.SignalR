@@ -19,8 +19,8 @@ public class InterfaceHubTests
     private readonly ITestOutputHelper _outputHelper;
     private readonly TestWebApplication _secondApp;
     private readonly SmokeClusterFixture _siloCluster;
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan _defaultTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(50);
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
     public InterfaceHubTests(SmokeClusterFixture testApp, ITestOutputHelper outputHelper)
@@ -32,7 +32,7 @@ public class InterfaceHubTests
         _secondApp = new TestWebApplication(_siloCluster, 8082, loggerAccessor: _loggerAccessor);
     }
 
-    private async Task<HubConnection> CreateHubConnection(TestWebApplication app, string hubName = nameof(InterfaceTestHub))
+    private async Task<HubConnection> CreateHubConnectionAsync(TestWebApplication app, string hubName = nameof(InterfaceTestHub))
     {
         var hubConnection = app.CreateSignalRClient(hubName);
         hubConnection.Closed += error =>
@@ -61,12 +61,12 @@ public class InterfaceHubTests
     }
 
     [Fact]
-    public async Task BasicMessageFlowAcrossApps()
+    public async Task BasicMessageFlowAcrossAppsAsync()
     {
         var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var connection1 = await CreateHubConnection(_firstApp, nameof(SimpleTestHub));
-        var connection2 = await CreateHubConnection(_secondApp, nameof(SimpleTestHub));
+        var connection1 = await CreateHubConnectionAsync(_firstApp, nameof(SimpleTestHub));
+        var connection2 = await CreateHubConnectionAsync(_secondApp, nameof(SimpleTestHub));
 
         connection2.On<string>("SendAll", payload => received.TrySetResult(payload));
 
@@ -82,10 +82,10 @@ public class InterfaceHubTests
     }
 
     [Fact]
-    public async Task InvokeAsyncSignalRTest()
+    public async Task InvokeAsyncSignalRTestAsync()
     {
-        var connection1 = await CreateHubConnection(_firstApp);
-        var connection2 = await CreateHubConnection(_secondApp);
+        var connection1 = await CreateHubConnectionAsync(_firstApp);
+        var connection2 = await CreateHubConnectionAsync(_secondApp);
 
         connection1.On("GetMessage", () =>
         {
@@ -136,12 +136,12 @@ public class InterfaceHubTests
     }
 
     [Fact]
-    public async Task InvokeAsyncGrainTest()
+    public async Task InvokeAsyncGrainTestAsync()
     {
-        var connection1 = await CreateHubConnection(_firstApp);
-        var connection2 = await CreateHubConnection(_secondApp);
-        var connection3 = await CreateHubConnection(_firstApp);
-        var connection4 = await CreateHubConnection(_secondApp);
+        var connection1 = await CreateHubConnectionAsync(_firstApp);
+        var connection2 = await CreateHubConnectionAsync(_secondApp);
+        var connection3 = await CreateHubConnectionAsync(_firstApp);
+        var connection4 = await CreateHubConnectionAsync(_secondApp);
 
         connection1.On("GetMessage", () =>
         {
@@ -194,10 +194,10 @@ public class InterfaceHubTests
     }
 
     [Fact]
-    public async Task InvokeAsyncWithPingConnectionGrainTest()
+    public async Task InvokeAsyncWithPingConnectionGrainTestAsync()
     {
-        var connection1 = await CreateHubConnection(_firstApp);
-        var connection2 = await CreateHubConnection(_secondApp);
+        var connection1 = await CreateHubConnectionAsync(_firstApp);
+        var connection2 = await CreateHubConnectionAsync(_secondApp);
 
         connection1.On("GetMessage", () => "connection1");
         connection2.On("GetMessage", () => "connection2");
@@ -243,13 +243,13 @@ public class InterfaceHubTests
     }
 
     [Fact]
-    public async Task SignalRFromGrainTest()
+    public async Task SignalRFromGrainTestAsync()
     {
         List<string> messages1 = new();
         List<string> messages2 = new();
 
-        var connection1 = await CreateHubConnection(_firstApp);
-        var connection2 = await CreateHubConnection(_secondApp);
+        var connection1 = await CreateHubConnectionAsync(_firstApp);
+        var connection2 = await CreateHubConnectionAsync(_secondApp);
 
         connection1.On<int>("SendRandom", random => messages1.Add(random.ToString(CultureInfo.InvariantCulture)));
         connection1.On<string>("SendMessage", messages1.Add);
@@ -291,8 +291,8 @@ public class InterfaceHubTests
         TimeSpan? pollInterval = null,
         string? description = null)
     {
-        var limit = timeout ?? DefaultTimeout;
-        var delay = pollInterval ?? PollInterval;
+        var limit = timeout ?? _defaultTimeout;
+        var delay = pollInterval ?? _pollInterval;
         var start = DateTime.UtcNow;
         var lastLog = TimeSpan.Zero;
 

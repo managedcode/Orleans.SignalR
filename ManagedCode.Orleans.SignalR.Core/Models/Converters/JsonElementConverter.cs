@@ -1,6 +1,6 @@
+using System.Text.Json;
 using ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 using Orleans;
-using System.Text.Json;
 
 namespace ManagedCode.Orleans.SignalR.Core.Models.Converters;
 

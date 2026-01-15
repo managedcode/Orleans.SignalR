@@ -1,7 +1,7 @@
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using Microsoft.AspNetCore.SignalR.Protocol;
 using System;
 using System.Threading.Tasks;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using Microsoft.AspNetCore.SignalR.Protocol;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 

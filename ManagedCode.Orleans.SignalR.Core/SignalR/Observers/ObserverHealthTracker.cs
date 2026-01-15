@@ -1,7 +1,8 @@
-using Microsoft.AspNetCore.SignalR.Protocol;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using Microsoft.AspNetCore.SignalR.Protocol;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
@@ -13,34 +14,22 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 /// Note: This class is designed to be used within Orleans grains which provide single-threaded
 /// execution guarantees. No explicit locking is required.
 /// </summary>
-public sealed class ObserverHealthTracker
+public sealed class ObserverHealthTracker(
+    int failureThreshold,
+    TimeSpan failureWindow,
+    bool circuitBreakerEnabled = true,
+    TimeSpan? circuitOpenDuration = null,
+    TimeSpan? halfOpenTestInterval = null,
+    TimeSpan? gracePeriod = null,
+    int maxBufferedMessages = 50)
 {
     private readonly Dictionary<string, ObserverHealthState> _healthStates = new(StringComparer.Ordinal);
-    private readonly int _failureThreshold;
-    private readonly TimeSpan _failureWindow;
-    private readonly bool _circuitBreakerEnabled;
-    private readonly TimeSpan _circuitOpenDuration;
-    private readonly TimeSpan _halfOpenTestInterval;
-    private readonly ExpiringObserverBuffer _gracePeriodBuffer;
-
-    public ObserverHealthTracker(
-        int failureThreshold,
-        TimeSpan failureWindow,
-        bool circuitBreakerEnabled = true,
-        TimeSpan? circuitOpenDuration = null,
-        TimeSpan? halfOpenTestInterval = null,
-        TimeSpan? gracePeriod = null,
-        int maxBufferedMessages = 50)
-    {
-        _failureThreshold = Math.Max(1, failureThreshold);
-        _failureWindow = failureWindow;
-        _circuitBreakerEnabled = circuitBreakerEnabled;
-        _circuitOpenDuration = circuitOpenDuration ?? TimeSpan.FromSeconds(30);
-        _halfOpenTestInterval = halfOpenTestInterval ?? TimeSpan.FromSeconds(5);
-        _gracePeriodBuffer = new ExpiringObserverBuffer(
-            gracePeriod ?? TimeSpan.Zero,
-            maxBufferedMessages);
-    }
+    // Allow 0 to disable health tracking (as documented)
+    private readonly int _failureThreshold = Math.Max(0, failureThreshold);
+    private readonly TimeSpan _failureWindow = failureWindow;
+    private readonly TimeSpan _circuitOpenDuration = circuitOpenDuration ?? TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _halfOpenTestInterval = halfOpenTestInterval ?? TimeSpan.FromSeconds(5);
+    private readonly ExpiringObserverBuffer _gracePeriodBuffer = new(gracePeriod ?? TimeSpan.Zero, maxBufferedMessages);
 
     /// <summary>
     /// Gets whether health tracking is enabled.
@@ -50,7 +39,7 @@ public sealed class ObserverHealthTracker
     /// <summary>
     /// Gets whether circuit breaker is enabled.
     /// </summary>
-    public bool CircuitBreakerEnabled => _circuitBreakerEnabled;
+    public bool CircuitBreakerEnabled { get; } = circuitBreakerEnabled;
 
     /// <summary>
     /// Gets whether grace period buffering is enabled.
@@ -90,7 +79,7 @@ public sealed class ObserverHealthTracker
         {
             state = new ObserverHealthState(
                 _failureWindow,
-                _circuitBreakerEnabled,
+                CircuitBreakerEnabled,
                 _failureThreshold,
                 _circuitOpenDuration,
                 _halfOpenTestInterval);
@@ -322,10 +311,8 @@ public sealed class ObserverHealthTracker
         private readonly TimeSpan _failureWindow;
         private readonly bool _circuitBreakerEnabled;
         private readonly int _failureThreshold;
-        private readonly List<DateTime> _failureTimestamps = new();
+        private readonly List<long> _failureTimestamps = new();
         private readonly ObserverCircuitBreaker? _circuitBreaker;
-        private Exception? _lastException;
-        private bool _markedDead;
 
         public ObserverHealthState(
             TimeSpan failureWindow,
@@ -356,17 +343,17 @@ public sealed class ObserverHealthTracker
             }
         }
 
-        public bool IsHealthy => !_markedDead && FailureCount < _failureThreshold;
+        public bool IsHealthy => !IsDead && FailureCount < _failureThreshold;
 
-        public bool IsDead => _markedDead;
+        public bool IsDead { get; private set; }
 
         public CircuitState CircuitState => _circuitBreaker?.State ?? CircuitState.Closed;
 
-        public Exception? LastException => _lastException;
+        public Exception? LastException { get; private set; }
 
         public bool AllowRequest()
         {
-            if (_markedDead)
+            if (IsDead)
             {
                 return false;
             }
@@ -382,15 +369,15 @@ public sealed class ObserverHealthTracker
         public FailureResult RecordFailure(Exception? exception)
         {
             PruneOldFailures();
-            _failureTimestamps.Add(DateTime.UtcNow);
-            _lastException = exception;
+            _failureTimestamps.Add(Stopwatch.GetTimestamp());
+            LastException = exception;
 
             var failureCount = _failureTimestamps.Count;
             var circuitOpened = _circuitBreaker?.RecordFailure(exception) ?? false;
 
             if (failureCount >= _failureThreshold)
             {
-                _markedDead = true;
+                IsDead = true;
                 return FailureResult.Dead;
             }
 
@@ -405,21 +392,21 @@ public sealed class ObserverHealthTracker
         public void RecordSuccess()
         {
             _failureTimestamps.Clear();
-            _lastException = null;
+            LastException = null;
             _circuitBreaker?.RecordSuccess();
 
             // Allow recovery from dead state if circuit breaker succeeds in half-open
-            if (_markedDead && _circuitBreaker?.State == CircuitState.Closed)
+            if (IsDead && _circuitBreaker?.State == CircuitState.Closed)
             {
-                _markedDead = false;
+                IsDead = false;
             }
         }
 
         public void Reset()
         {
             _failureTimestamps.Clear();
-            _lastException = null;
-            _markedDead = false;
+            LastException = null;
+            IsDead = false;
             _circuitBreaker?.Reset();
         }
 
@@ -430,8 +417,8 @@ public sealed class ObserverHealthTracker
                 return;
             }
 
-            var cutoff = DateTime.UtcNow - _failureWindow;
-            _failureTimestamps.RemoveAll(t => t < cutoff);
+            var now = Stopwatch.GetTimestamp();
+            _failureTimestamps.RemoveAll(t => Stopwatch.GetElapsedTime(t, now) >= _failureWindow);
         }
     }
 }

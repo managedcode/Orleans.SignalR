@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
@@ -30,27 +31,18 @@ public enum CircuitState
 /// Circuit breaker for an individual observer to prevent cascade failures.
 /// Thread-safe implementation using lock-free operations where possible.
 /// </summary>
-public sealed class ObserverCircuitBreaker
+public sealed class ObserverCircuitBreaker(int failureThreshold, TimeSpan openDuration, TimeSpan halfOpenTestInterval)
 {
-    private readonly int _failureThreshold;
-    private readonly TimeSpan _openDuration;
-    private readonly TimeSpan _halfOpenTestInterval;
+    private readonly int _failureThreshold = Math.Max(1, failureThreshold);
+    private readonly TimeSpan _openDuration = openDuration;
+    private readonly TimeSpan _halfOpenTestInterval = halfOpenTestInterval;
 
     private int _failureCount;
-    private int _state; // CircuitState as int for Interlocked operations
-    private DateTime _lastFailureTime;
-    private DateTime _openedAt;
-    private DateTime _lastHalfOpenTest;
-    private Exception? _lastException;
+    private int _state = (int)CircuitState.Closed; // CircuitState as int for Interlocked operations
+    private long _lastFailureTimestamp;
+    private long _lastHalfOpenTestTimestamp;
+    private long _openedAtTimestamp;
     private readonly object _lock = new();
-
-    public ObserverCircuitBreaker(int failureThreshold, TimeSpan openDuration, TimeSpan halfOpenTestInterval)
-    {
-        _failureThreshold = Math.Max(1, failureThreshold);
-        _openDuration = openDuration;
-        _halfOpenTestInterval = halfOpenTestInterval;
-        _state = (int)CircuitState.Closed;
-    }
 
     /// <summary>
     /// Gets the current state of the circuit breaker.
@@ -64,7 +56,7 @@ public sealed class ObserverCircuitBreaker
             // Check if we should transition from Open to HalfOpen
             if (currentState == CircuitState.Open)
             {
-                if (DateTime.UtcNow - _openedAt >= _openDuration)
+                if (Stopwatch.GetElapsedTime(_openedAtTimestamp) >= _openDuration)
                 {
                     TryTransitionToHalfOpen();
                     return (CircuitState)Volatile.Read(ref _state);
@@ -83,12 +75,7 @@ public sealed class ObserverCircuitBreaker
     /// <summary>
     /// Gets the last exception that caused a failure.
     /// </summary>
-    public Exception? LastException => _lastException;
-
-    /// <summary>
-    /// Gets the time when the circuit was opened.
-    /// </summary>
-    public DateTime OpenedAt => _openedAt;
+    public Exception? LastException { get; private set; }
 
     /// <summary>
     /// Gets whether the circuit allows requests through.
@@ -132,7 +119,7 @@ public sealed class ObserverCircuitBreaker
         {
             // Reset failure count on success
             Interlocked.Exchange(ref _failureCount, 0);
-            _lastException = null;
+            LastException = null;
         }
     }
 
@@ -143,8 +130,8 @@ public sealed class ObserverCircuitBreaker
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool RecordFailure(Exception? exception = null)
     {
-        _lastException = exception;
-        _lastFailureTime = DateTime.UtcNow;
+        LastException = exception;
+        _lastFailureTimestamp = Stopwatch.GetTimestamp();
 
         var currentState = (CircuitState)Volatile.Read(ref _state);
 
@@ -176,7 +163,7 @@ public sealed class ObserverCircuitBreaker
         lock (_lock)
         {
             _state = (int)CircuitState.Open;
-            _openedAt = DateTime.UtcNow;
+            _openedAtTimestamp = Stopwatch.GetTimestamp();
         }
     }
 
@@ -189,7 +176,7 @@ public sealed class ObserverCircuitBreaker
         {
             _state = (int)CircuitState.Closed;
             _failureCount = 0;
-            _lastException = null;
+            LastException = null;
         }
     }
 
@@ -202,10 +189,10 @@ public sealed class ObserverCircuitBreaker
         {
             _state = (int)CircuitState.Closed;
             _failureCount = 0;
-            _lastException = null;
-            _openedAt = default;
-            _lastFailureTime = default;
-            _lastHalfOpenTest = default;
+            LastException = null;
+            _openedAtTimestamp = 0;
+            _lastFailureTimestamp = 0;
+            _lastHalfOpenTestTimestamp = 0;
         }
     }
 
@@ -213,10 +200,10 @@ public sealed class ObserverCircuitBreaker
     {
         lock (_lock)
         {
-            if (_state == (int)CircuitState.Open && DateTime.UtcNow - _openedAt >= _openDuration)
+            if (_state == (int)CircuitState.Open && Stopwatch.GetElapsedTime(_openedAtTimestamp) >= _openDuration)
             {
                 _state = (int)CircuitState.HalfOpen;
-                _lastHalfOpenTest = default; // Allow immediate test
+                _lastHalfOpenTestTimestamp = 0; // Allow immediate test
             }
         }
     }
@@ -230,10 +217,10 @@ public sealed class ObserverCircuitBreaker
                 return false;
             }
 
-            var now = DateTime.UtcNow;
-            if (_lastHalfOpenTest == default || now - _lastHalfOpenTest >= _halfOpenTestInterval)
+            var now = Stopwatch.GetTimestamp();
+            if (_lastHalfOpenTestTimestamp == 0 || Stopwatch.GetElapsedTime(_lastHalfOpenTestTimestamp, now) >= _halfOpenTestInterval)
             {
-                _lastHalfOpenTest = now;
+                _lastHalfOpenTestTimestamp = now;
                 return true;
             }
 

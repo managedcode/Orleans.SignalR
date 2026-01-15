@@ -21,8 +21,8 @@ public class HubSmokeTests
     private readonly ITestOutputHelper _output;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan _defaultTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(50);
 
     public HubSmokeTests(SmokeClusterFixture cluster, ITestOutputHelper output)
     {
@@ -34,7 +34,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task SingleConnectionCanInvokeServerMethod()
+    public async Task SingleConnectionCanInvokeServerMethodAsync()
     {
         var connection = _firstApp.CreateSignalRClient(HubName);
 
@@ -49,7 +49,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task BroadcastReachesBothServers()
+    public async Task BroadcastReachesBothServersAsync()
     {
         var message1 = string.Empty;
         var message2 = string.Empty;
@@ -69,7 +69,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task GroupBroadcastReachesMembersAcrossSilos()
+    public async Task GroupBroadcastReachesMembersAcrossSilosAsync()
     {
         var messages = new ConcurrentDictionary<string, string>();
 
@@ -90,7 +90,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task UserMessageIsDeliveredToSpecificUser()
+    public async Task UserMessageIsDeliveredToSpecificUserAsync()
     {
         var httpClient = _firstApp.CreateHttpClient();
         var response = await httpClient.GetAsync("/auth?user=SmokeUser");
@@ -112,7 +112,7 @@ public class HubSmokeTests
     }
 
     [Fact]
-    public async Task ServerStreamingCompletesWithinTimeout()
+    public async Task ServerStreamingCompletesWithinTimeoutAsync()
     {
         var connection = _firstApp.CreateSignalRClient(HubName);
         await connection.StartAsync();
@@ -134,7 +134,7 @@ public class HubSmokeTests
 
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan? timeout = null)
     {
-        var limit = timeout ?? DefaultTimeout;
+        var limit = timeout ?? _defaultTimeout;
         var start = DateTime.UtcNow;
 
         while (DateTime.UtcNow - start < limit)
@@ -144,7 +144,7 @@ public class HubSmokeTests
                 return;
             }
 
-            await Task.Delay(PollInterval);
+            await Task.Delay(_pollInterval);
         }
 
         condition().ShouldBeTrue($"Condition not met within {limit.TotalSeconds} seconds.");

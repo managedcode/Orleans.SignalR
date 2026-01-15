@@ -1,7 +1,3 @@
-using System;
-using System.Net.Http;
-using System.Threading;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -42,7 +38,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAliveShouldPreventIdleDisconnect()
+    public async Task KeepAliveShouldPreventIdleDisconnectAsync()
     {
         if (_app is null)
         {
@@ -79,7 +75,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAliveShouldAllowDirectSendsAfterIdleInterval()
+    public async Task KeepAliveShouldAllowDirectSendsAfterIdleIntervalAsync()
     {
         if (_app is null)
         {
@@ -121,7 +117,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAliveShouldPreserveUserDeliveryAfterIdleInterval()
+    public async Task KeepAliveShouldPreserveUserDeliveryAfterIdleIntervalAsync()
     {
         if (_app is null)
         {
@@ -180,7 +176,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAliveShouldPreserveGroupDeliveryAfterIdleInterval()
+    public async Task KeepAliveShouldPreserveGroupDeliveryAfterIdleIntervalAsync()
     {
         if (_app is null)
         {
@@ -232,7 +228,7 @@ public class KeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAliveShouldCleanupGrainsAfterDisconnect()
+    public async Task KeepAliveShouldCleanupGrainsAfterDisconnectAsync()
     {
         if (_app is null)
         {

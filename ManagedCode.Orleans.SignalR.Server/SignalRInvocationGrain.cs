@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -11,8 +13,6 @@ using Orleans;
 using Orleans.Concurrency;
 using Orleans.Runtime;
 using Orleans.Utilities;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
@@ -74,12 +74,12 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
     public Task AddInvocation(ISignalRObserver? observer, InvocationInfo invocationInfo)
     {
-        Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
-
-        if (invocationInfo?.InvocationId is null || invocationInfo?.ConnectionId is null)
+        if (invocationInfo.InvocationId is null || invocationInfo.ConnectionId is null)
         {
             return Task.CompletedTask;
         }
+
+        Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
 
         _completionSource = new TaskCompletionSource<CompletionMessage?>(TaskCreationOptions.RunContinuationsAsynchronously);
 

@@ -1,8 +1,8 @@
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using Orleans.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 

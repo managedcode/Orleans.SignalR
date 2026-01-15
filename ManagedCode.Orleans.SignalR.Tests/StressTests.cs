@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
@@ -8,7 +6,6 @@ using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
-using Orleans.Runtime;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -132,15 +129,11 @@ public abstract class StressTestBase<TFixture> : IAsyncLifetime where TFixture :
 
 [Collection(nameof(LoadClusterDevice))]
 [Trait("Category", "Load")]
-public sealed class StressUserRoundtripTests : StressTestBase<LoadClusterDeviceFixture>
+public sealed class StressUserRoundtripTests(LoadClusterDeviceFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterDeviceFixture>(cluster, output)
 {
-    public StressUserRoundtripTests(LoadClusterDeviceFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     [Fact]
-    public async Task StressUserRoundtrip()
+    public async Task StressUserRoundtripAsync()
     {
         var harness = CreateHarness();
         await harness.RunDeviceEchoAsync(useOrleans: true, basePort: 30_000);
@@ -149,15 +142,11 @@ public sealed class StressUserRoundtripTests : StressTestBase<LoadClusterDeviceF
 
 [Collection(nameof(LoadClusterBroadcast))]
 [Trait("Category", "Load")]
-public sealed class StressBroadcastFanoutTests : StressTestBase<LoadClusterBroadcastFixture>
+public sealed class StressBroadcastFanoutTests(LoadClusterBroadcastFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterBroadcastFixture>(cluster, output)
 {
-    public StressBroadcastFanoutTests(LoadClusterBroadcastFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     [Fact]
-    public async Task StressBroadcastFanout()
+    public async Task StressBroadcastFanoutAsync()
     {
         var harness = CreateHarness();
         await harness.RunBroadcastFanoutAsync(useOrleans: true, basePort: 31_000);
@@ -166,15 +155,11 @@ public sealed class StressBroadcastFanoutTests : StressTestBase<LoadClusterBroad
 
 [Collection(nameof(LoadClusterGroup))]
 [Trait("Category", "Load")]
-public sealed class StressGroupBroadcastTests : StressTestBase<LoadClusterGroupFixture>
+public sealed class StressGroupBroadcastTests(LoadClusterGroupFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterGroupFixture>(cluster, output)
 {
-    public StressGroupBroadcastTests(LoadClusterGroupFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     [Fact]
-    public async Task StressGroupBroadcast()
+    public async Task StressGroupBroadcastAsync()
     {
         var harness = CreateHarness();
         await harness.RunGroupScenarioAsync(useOrleans: true, basePort: 32_000);
@@ -183,15 +168,11 @@ public sealed class StressGroupBroadcastTests : StressTestBase<LoadClusterGroupF
 
 [Collection(nameof(LoadClusterStreaming))]
 [Trait("Category", "Load")]
-public sealed class StressStreamingTests : StressTestBase<LoadClusterStreamingFixture>
+public sealed class StressStreamingTests(LoadClusterStreamingFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterStreamingFixture>(cluster, output)
 {
-    public StressStreamingTests(LoadClusterStreamingFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     [Fact]
-    public async Task StressStreaming()
+    public async Task StressStreamingAsync()
     {
         var harness = CreateHarness();
         await harness.RunStreamingScenarioAsync(useOrleans: true, basePort: 33_000);
@@ -200,15 +181,11 @@ public sealed class StressStreamingTests : StressTestBase<LoadClusterStreamingFi
 
 [Collection(nameof(LoadClusterInvocation))]
 [Trait("Category", "Load")]
-public sealed class StressInvocationTests : StressTestBase<LoadClusterInvocationFixture>
+public sealed class StressInvocationTests(LoadClusterInvocationFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterInvocationFixture>(cluster, output)
 {
-    public StressInvocationTests(LoadClusterInvocationFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     [Fact]
-    public async Task StressInvocation()
+    public async Task StressInvocationAsync()
     {
         var harness = CreateHarness();
         await harness.RunInvocationScenarioAsync(useOrleans: true, basePort: 34_000);
@@ -217,15 +194,11 @@ public sealed class StressInvocationTests : StressTestBase<LoadClusterInvocation
 
 [Collection(nameof(LoadClusterCascade))]
 [Trait("Category", "Load")]
-public sealed class StressCascadeTests : StressTestBase<LoadClusterCascadeFixture>
+public sealed class StressCascadeTests(LoadClusterCascadeFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterCascadeFixture>(cluster, output)
 {
-    public StressCascadeTests(LoadClusterCascadeFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     [Fact]
-    public async Task StressAllScenarios()
+    public async Task StressAllScenariosAsync()
     {
         var harness = CreateHarness();
         var device = await harness.RunDeviceEchoAsync(true, 40_000);
@@ -240,17 +213,13 @@ public sealed class StressCascadeTests : StressTestBase<LoadClusterCascadeFixtur
 
 [Collection(nameof(LoadClusterActivation))]
 [Trait("Category", "Load")]
-public sealed class StressActivationTests : StressTestBase<LoadClusterActivationFixture>
+public sealed class StressActivationTests(LoadClusterActivationFixture cluster, ITestOutputHelper output)
+    : StressTestBase<LoadClusterActivationFixture>(cluster, output)
 {
-    public StressActivationTests(LoadClusterActivationFixture cluster, ITestOutputHelper output)
-        : base(cluster, output)
-    {
-    }
-
     protected override bool RequiresWebApps => true;
 
     [Fact]
-    public async Task InvokeAsyncAndOnTest()
+    public async Task InvokeAsyncAndOnTestAsync()
     {
         Output.WriteLine("Clearing previous activations for clean state.");
         await Cluster.Cluster.Client.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);

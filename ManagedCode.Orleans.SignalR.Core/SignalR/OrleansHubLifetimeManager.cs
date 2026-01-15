@@ -1,3 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -10,14 +18,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
 using Orleans.Runtime;
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
@@ -54,7 +54,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         // Retry logic for silo restart scenarios where grain directory has stale entries
         const int maxRetries = 3;
-        for (int attempt = 1; attempt <= maxRetries; attempt++)
+        for (var attempt = 1; attempt <= maxRetries; attempt++)
         {
             try
             {
@@ -139,7 +139,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 try
                 {
                     var removalTasks = subscription.Grains
-                        .Select(grain => SafeRemoveConnection(grain, connection.ConnectionId, subscription.Reference))
+                        .Select(grain => SafeRemoveConnectionAsync(grain, connection.ConnectionId, subscription.Reference))
                         .ToArray();
 
                     if (removalTasks.Length > 0)
@@ -168,7 +168,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         }
     }
 
-    private static async Task SafeRemoveConnection(IObserverConnectionManager grain, string connectionId, ISignalRObserver reference)
+    private static async Task SafeRemoveConnectionAsync(IObserverConnectionManager grain, string connectionId, ISignalRObserver reference)
     {
         try
         {

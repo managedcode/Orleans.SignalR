@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Linq;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -10,30 +9,22 @@ using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Infrastructure;
 
-public sealed class PerformanceScenarioHarness
+public sealed class PerformanceScenarioHarness(
+    LoadClusterFixture cluster,
+    ITestOutputHelper output,
+    TestOutputHelperAccessor? loggerAccessor = null,
+    PerformanceScenarioSettings? settings = null)
 {
-    private readonly LoadClusterFixture _cluster;
-    private readonly ITestOutputHelper _output;
-    private readonly TestOutputHelperAccessor? _loggerAccessor;
+    private readonly LoadClusterFixture _cluster = cluster;
+    private readonly ITestOutputHelper _output = output;
+    private readonly TestOutputHelperAccessor? _loggerAccessor = loggerAccessor;
     private const string DeviceScenarioKey = "device-echo";
     private const string BroadcastScenarioKey = "broadcast-fanout";
     private const string GroupScenarioKey = "group-broadcast";
     private const string StreamScenarioKey = "streaming";
     private const string InvocationScenarioKey = "invocation";
 
-    public PerformanceScenarioSettings Settings { get; }
-
-    public PerformanceScenarioHarness(
-        LoadClusterFixture cluster,
-        ITestOutputHelper output,
-        TestOutputHelperAccessor? loggerAccessor = null,
-        PerformanceScenarioSettings? settings = null)
-    {
-        _cluster = cluster;
-        _output = output;
-        _loggerAccessor = loggerAccessor;
-        Settings = settings ?? PerformanceScenarioSettings.CreatePerformance();
-    }
+    public PerformanceScenarioSettings Settings { get; } = settings ?? PerformanceScenarioSettings.CreatePerformance();
 
     public async Task<TimeSpan> RunDeviceEchoAsync(bool useOrleans, int basePort)
     {

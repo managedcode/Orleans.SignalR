@@ -1,9 +1,5 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Channels;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -21,11 +17,11 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 [Collection(nameof(UserConfigurationCluster))]
 public class UserConfigurationRegressionTests : IAsyncLifetime
 {
-    private static readonly TimeSpan SignalRKeepAlive = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan SignalRClientTimeout = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan SignalRHandshakeTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan OrleansClientTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan MessageRetention = TimeSpan.FromMinutes(1.1);
+    private static readonly TimeSpan _signalRKeepAlive = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan _signalRClientTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _signalRHandshakeTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _orleansClientTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan _messageRetention = TimeSpan.FromMinutes(1.1);
 
     private readonly UserConfigurationClusterFixture _cluster;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
@@ -49,16 +45,16 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
             {
                 services.PostConfigure<HubOptions>(options =>
                 {
-                    options.KeepAliveInterval = SignalRKeepAlive;
-                    options.ClientTimeoutInterval = SignalRClientTimeout;
-                    options.HandshakeTimeout = SignalRHandshakeTimeout;
+                    options.KeepAliveInterval = _signalRKeepAlive;
+                    options.ClientTimeoutInterval = _signalRClientTimeout;
+                    options.HandshakeTimeout = _signalRHandshakeTimeout;
                 });
 
                 services.PostConfigure<OrleansSignalROptions>(options =>
                 {
-                    options.ClientTimeoutInterval = OrleansClientTimeout;
+                    options.ClientTimeoutInterval = _orleansClientTimeout;
                     options.KeepEachConnectionAlive = false;
-                    options.KeepMessageInterval = MessageRetention;
+                    options.KeepMessageInterval = _messageRetention;
                     options.ConnectionPartitionCount = 1;
                     options.GroupPartitionCount = 1;
                     options.ConnectionsPerPartitionHint = 1_024;
@@ -76,7 +72,7 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TargetedSendShouldSurviveIdleWithUserConfiguration()
+    public async Task TargetedSendShouldSurviveIdleWithUserConfigurationAsync()
     {
         if (_app is null)
         {
@@ -96,7 +92,7 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
             receiver.ConnectionId.ShouldNotBeNull();
             sender.ConnectionId.ShouldNotBeNull();
 
-            var idleDuration = SignalRClientTimeout + TimeSpan.FromSeconds(15);
+            var idleDuration = _signalRClientTimeout + TimeSpan.FromSeconds(15);
             _output.WriteLine($"Waiting {idleDuration} with user-provided configuration before sending targeted message.");
             await Task.Delay(idleDuration);
 
@@ -121,7 +117,7 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task IotWorkloadShouldProcessGroupBroadcastAndStreamingAfterIdle()
+    public async Task IotWorkloadShouldProcessGroupBroadcastAndStreamingAfterIdleAsync()
     {
         if (_app is null)
         {
@@ -169,7 +165,7 @@ public class UserConfigurationRegressionTests : IAsyncLifetime
             await Task.WhenAll(devices.Select(device => device.InvokeAsync("AddToGroup", groupName)));
             await Task.Delay(TimeSpan.FromSeconds(1));
 
-            var idleDuration = SignalRClientTimeout + TimeSpan.FromSeconds(15);
+            var idleDuration = _signalRClientTimeout + TimeSpan.FromSeconds(15);
             _output.WriteLine($"[IoT] Waiting {idleDuration} before validating message fan-out.");
             await Task.Delay(idleDuration);
 

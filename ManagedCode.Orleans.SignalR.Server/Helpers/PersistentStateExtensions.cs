@@ -1,8 +1,8 @@
-using Orleans.Runtime;
-using Orleans.Storage;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Orleans.Runtime;
+using Orleans.Storage;
 
 namespace ManagedCode.Orleans.SignalR.Server.Helpers;
 
@@ -20,7 +20,7 @@ internal static class PersistentStateExtensions
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(applyChanges);
 
-        for (int retry = 0; retry < MaxRetries; retry++)
+        for (var retry = 0; retry < MaxRetries; retry++)
         {
             try
             {
@@ -61,7 +61,7 @@ internal static class PersistentStateExtensions
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        for (int retry = 0; retry < MaxRetries; retry++)
+        for (var retry = 0; retry < MaxRetries; retry++)
         {
             try
             {
@@ -89,7 +89,7 @@ internal static class PersistentStateExtensions
     {
         ArgumentNullException.ThrowIfNull(state);
 
-        for (int retry = 0; retry < MaxRetries; retry++)
+        for (var retry = 0; retry < MaxRetries; retry++)
         {
             try
             {

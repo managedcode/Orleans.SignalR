@@ -1,7 +1,7 @@
-using Orleans.Runtime;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Core.Helpers;
 
@@ -195,7 +195,7 @@ public sealed class RetryPolicy
     {
         MaxAttempts = Math.Max(1, maxAttempts);
         InitialDelay = initialDelay > TimeSpan.Zero ? initialDelay : TimeSpan.FromMilliseconds(100);
-        MaxDelay = maxDelay > initialDelay ? maxDelay : TimeSpan.FromSeconds(30);
+        MaxDelay = maxDelay > InitialDelay ? maxDelay : TimeSpan.FromSeconds(30);
         ExponentialBase = Math.Max(1.1, exponentialBase);
     }
 

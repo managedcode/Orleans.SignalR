@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -39,7 +37,7 @@ public class LongIdleClientInvocationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ClientCanInvokeAfterSimulatedFiveMinuteIdle()
+    public async Task ClientCanInvokeAfterSimulatedFiveMinuteIdleAsync()
     {
         if (_app is null)
         {

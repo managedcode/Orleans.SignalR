@@ -1,5 +1,5 @@
-using Orleans;
 using System.Text.Json;
+using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.Models.Surrogates;
 

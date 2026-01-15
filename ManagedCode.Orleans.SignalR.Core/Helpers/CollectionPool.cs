@@ -12,16 +12,16 @@ public static class CollectionPool
 {
     private const int MaxPoolSize = 256;
 
-    private static readonly ConcurrentBag<HashSet<string>> StringHashSetPool = new();
-    private static readonly ConcurrentBag<List<string>> StringListPool = new();
-    private static readonly ConcurrentBag<Dictionary<int, List<string>>> IntListDictionaryPool = new();
+    private static readonly ConcurrentBag<HashSet<string>> _stringHashSetPool = new();
+    private static readonly ConcurrentBag<List<string>> _stringListPool = new();
+    private static readonly ConcurrentBag<Dictionary<int, List<string>>> _intListDictionaryPool = new();
 
     /// <summary>
     /// Gets a HashSet&lt;string&gt; from the pool or creates a new one.
     /// </summary>
     public static HashSet<string> GetStringHashSet()
     {
-        if (StringHashSetPool.TryTake(out var set))
+        if (_stringHashSetPool.TryTake(out var set))
         {
             return set;
         }
@@ -34,13 +34,13 @@ public static class CollectionPool
     /// </summary>
     public static void Return(HashSet<string> set)
     {
-        if (set is null || StringHashSetPool.Count >= MaxPoolSize)
+        if (set is null || _stringHashSetPool.Count >= MaxPoolSize)
         {
             return;
         }
 
         set.Clear();
-        StringHashSetPool.Add(set);
+        _stringHashSetPool.Add(set);
     }
 
     /// <summary>
@@ -48,7 +48,7 @@ public static class CollectionPool
     /// </summary>
     public static List<string> GetStringList()
     {
-        if (StringListPool.TryTake(out var list))
+        if (_stringListPool.TryTake(out var list))
         {
             return list;
         }
@@ -61,7 +61,7 @@ public static class CollectionPool
     /// </summary>
     public static List<string> GetStringList(int capacity)
     {
-        if (StringListPool.TryTake(out var list))
+        if (_stringListPool.TryTake(out var list))
         {
             if (list.Capacity < capacity)
             {
@@ -78,13 +78,13 @@ public static class CollectionPool
     /// </summary>
     public static void Return(List<string> list)
     {
-        if (list is null || StringListPool.Count >= MaxPoolSize)
+        if (list is null || _stringListPool.Count >= MaxPoolSize)
         {
             return;
         }
 
         list.Clear();
-        StringListPool.Add(list);
+        _stringListPool.Add(list);
     }
 
     /// <summary>
@@ -92,7 +92,7 @@ public static class CollectionPool
     /// </summary>
     public static Dictionary<int, List<string>> GetIntListDictionary()
     {
-        if (IntListDictionaryPool.TryTake(out var dict))
+        if (_intListDictionaryPool.TryTake(out var dict))
         {
             return dict;
         }
@@ -106,7 +106,7 @@ public static class CollectionPool
     /// </summary>
     public static void Return(Dictionary<int, List<string>> dict)
     {
-        if (dict is null || IntListDictionaryPool.Count >= MaxPoolSize)
+        if (dict is null || _intListDictionaryPool.Count >= MaxPoolSize)
         {
             return;
         }
@@ -118,20 +118,15 @@ public static class CollectionPool
         }
 
         dict.Clear();
-        IntListDictionaryPool.Add(dict);
+        _intListDictionaryPool.Add(dict);
     }
 
     /// <summary>
     /// A scope that automatically returns a HashSet to the pool when disposed.
     /// </summary>
-    public readonly struct HashSetScope : IDisposable
+    public readonly struct HashSetScope(HashSet<string> set) : IDisposable
     {
-        public HashSet<string> Set { get; }
-
-        public HashSetScope(HashSet<string> set)
-        {
-            Set = set;
-        }
+        public HashSet<string> Set { get; } = set;
 
         public void Dispose()
         {
@@ -142,14 +137,9 @@ public static class CollectionPool
     /// <summary>
     /// A scope that automatically returns a List to the pool when disposed.
     /// </summary>
-    public readonly struct ListScope : IDisposable
+    public readonly struct ListScope(List<string> list) : IDisposable
     {
-        public List<string> List { get; }
-
-        public ListScope(List<string> list)
-        {
-            List = list;
-        }
+        public List<string> List { get; } = list;
 
         public void Dispose()
         {

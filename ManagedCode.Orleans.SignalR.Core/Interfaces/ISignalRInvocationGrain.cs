@@ -1,8 +1,8 @@
+using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans;
 using Orleans.Concurrency;
-using System.Threading.Tasks;
 
 namespace ManagedCode.Orleans.SignalR.Core.Interfaces;
 

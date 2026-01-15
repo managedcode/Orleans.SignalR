@@ -1,8 +1,8 @@
+using System;
+using System.Threading;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
-using System;
-using System.Threading;
 
 namespace ManagedCode.Orleans.SignalR.Core.Helpers;
 

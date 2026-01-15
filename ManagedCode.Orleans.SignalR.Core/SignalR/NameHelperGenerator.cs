@@ -1,20 +1,20 @@
-using ManagedCode.Orleans.SignalR.Core.Helpers;
-using ManagedCode.Orleans.SignalR.Core.Interfaces;
-using Orleans;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using ManagedCode.Orleans.SignalR.Core.Helpers;
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using Orleans;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public static class NameHelperGenerator
 {
     // Cache cleaned type names to avoid repeated allocations
-    private static readonly ConcurrentDictionary<Type, string> TypeNameCache = new();
+    private static readonly ConcurrentDictionary<Type, string> _typeNameCache = new();
 
     // SearchValues for allowed characters (optimized for .NET 8+)
-    private static readonly SearchValues<char> AllowedChars =
+    private static readonly SearchValues<char> _allowedChars =
         SearchValues.Create("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-:.");
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -112,7 +112,7 @@ public static class NameHelperGenerator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string GetCleanedTypeName<THub>()
     {
-        return TypeNameCache.GetOrAdd(typeof(THub), static t => CleanString(t.FullName!));
+        return _typeNameCache.GetOrAdd(typeof(THub), static t => CleanString(t.FullName!));
     }
 
     /// <summary>
@@ -128,7 +128,7 @@ public static class NameHelperGenerator
 
         // Fast path: check if any characters need replacement
         var inputSpan = input.AsSpan();
-        var firstInvalidIndex = inputSpan.IndexOfAnyExcept(AllowedChars);
+        var firstInvalidIndex = inputSpan.IndexOfAnyExcept(_allowedChars);
 
         if (firstInvalidIndex < 0)
         {
@@ -142,7 +142,7 @@ public static class NameHelperGenerator
             for (var i = 0; i < src.Length; i++)
             {
                 var c = src[i];
-                span[i] = AllowedChars.Contains(c) ? c : ':';
+                span[i] = _allowedChars.Contains(c) ? c : ':';
             }
         });
     }
