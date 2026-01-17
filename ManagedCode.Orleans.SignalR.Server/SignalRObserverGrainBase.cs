@@ -20,7 +20,6 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 {
     private readonly Dictionary<string, ISignalRObserver> _liveObservers = new(StringComparer.Ordinal);
     private readonly Dictionary<ISignalRObserver, string> _observerToConnectionId = new(ReferenceEqualityComparer.Instance);
-    private readonly ObserverHealthTracker _healthTracker;
     private readonly TimeSpan _idleExtension;
     private readonly TimeSpan _observerRefreshInterval;
     private readonly int _failureThreshold;
@@ -48,7 +47,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         _failureThreshold = orleansSignalOptions.Value.ObserverFailureThreshold;
         _circuitBreakerEnabled = orleansSignalOptions.Value.EnableCircuitBreaker;
         _gracePeriodEnabled = orleansSignalOptions.Value.ObserverGracePeriod > TimeSpan.Zero;
-        _healthTracker = new ObserverHealthTracker(
+        HealthTracker = new ObserverHealthTracker(
             _failureThreshold,
             orleansSignalOptions.Value.ObserverFailureWindow,
             _circuitBreakerEnabled,
@@ -71,7 +70,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// <summary>
     /// Gets the health tracker for monitoring observer failures and circuit breaker state.
     /// </summary>
-    protected ObserverHealthTracker HealthTracker => _healthTracker;
+    protected ObserverHealthTracker HealthTracker { get; }
 
     protected void TrackConnection(string connectionId, ISignalRObserver observer)
     {
@@ -94,7 +93,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         ObserverManager.Unsubscribe(observer);
         _liveObservers.Remove(connectionId);
         _observerToConnectionId.Remove(observer);
-        _healthTracker.RemoveConnection(connectionId);
+        HealthTracker.RemoveConnection(connectionId);
         ReleaseWhenIdle();
         StopObserverRefreshTimerIfIdle();
     }
@@ -123,9 +122,9 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         }
 
         // Use AllowRequest which checks circuit breaker state
-        if (!_healthTracker.AllowRequest(connectionId))
+        if (!HealthTracker.AllowRequest(connectionId))
         {
-            var circuitState = _healthTracker.GetCircuitState(connectionId);
+            var circuitState = HealthTracker.GetCircuitState(connectionId);
             if (circuitState == CircuitState.Open)
             {
                 Logger.LogDebug("Circuit breaker open for connection {ConnectionId}, blocking request.", connectionId);
@@ -159,7 +158,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     {
         foreach (var connectionId in connectionIds)
         {
-            if (_liveObservers.TryGetValue(connectionId, out var observer) && _healthTracker.AllowRequest(connectionId))
+            if (_liveObservers.TryGetValue(connectionId, out var observer) && HealthTracker.AllowRequest(connectionId))
             {
                 yield return (connectionId, observer);
             }
@@ -171,7 +170,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         ObserverManager.ClearExpired();
         _liveObservers.Clear();
         _observerToConnectionId.Clear();
-        _healthTracker.Clear();
+        HealthTracker.Clear();
         StopObserverRefreshTimer();
     }
 
@@ -202,15 +201,15 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             var connectionId = FindConnectionIdForObserver(observer);
 
             // Check circuit breaker before dispatch
-            if (connectionId is not null && !_healthTracker.AllowRequest(connectionId))
+            if (connectionId is not null && !HealthTracker.AllowRequest(connectionId))
             {
-                var state = _healthTracker.GetCircuitState(connectionId);
+                var state = HealthTracker.GetCircuitState(connectionId);
                 if (state == CircuitState.Open)
                 {
                     // Try to buffer the message if in grace period
-                    if (_healthTracker.IsInGracePeriod(connectionId))
+                    if (HealthTracker.IsInGracePeriod(connectionId))
                     {
-                        if (_healthTracker.BufferMessage(connectionId, message))
+                        if (HealthTracker.BufferMessage(connectionId, message))
                         {
                             if (Logger.IsEnabled(LogLevel.Debug))
                             {
@@ -240,15 +239,15 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         foreach (var (connectionId, observer) in observers)
         {
             // Check circuit breaker before dispatch
-            if (!_healthTracker.AllowRequest(connectionId))
+            if (!HealthTracker.AllowRequest(connectionId))
             {
-                var state = _healthTracker.GetCircuitState(connectionId);
+                var state = HealthTracker.GetCircuitState(connectionId);
                 if (state == CircuitState.Open)
                 {
                     // Try to buffer the message if in grace period
-                    if (_healthTracker.IsInGracePeriod(connectionId))
+                    if (HealthTracker.IsInGracePeriod(connectionId))
                     {
-                        if (_healthTracker.BufferMessage(connectionId, message))
+                        if (HealthTracker.BufferMessage(connectionId, message))
                         {
                             if (Logger.IsEnabled(LogLevel.Debug))
                             {
@@ -286,7 +285,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             // Record success - this closes circuit breaker if in half-open state
             if (connectionId is not null)
             {
-                _healthTracker.RecordSuccess(connectionId);
+                HealthTracker.RecordSuccess(connectionId);
             }
         }
         catch (Exception exception)
@@ -298,7 +297,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             }
 
             // Record failure and handle result
-            var result = _healthTracker.RecordFailure(connectionId, exception);
+            var result = HealthTracker.RecordFailure(connectionId, exception);
 
             switch (result)
             {
@@ -335,7 +334,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     protected virtual void OnCircuitOpened(string connectionId, ISignalRObserver observer, Exception lastException)
     {
         // Start grace period buffering if enabled
-        if (_gracePeriodEnabled && _healthTracker.StartGracePeriod(connectionId))
+        if (_gracePeriodEnabled && HealthTracker.StartGracePeriod(connectionId))
         {
             Logger.LogDebug(
                 "Started grace period for connection {ConnectionId}. Messages will be buffered until recovery or expiration.",
@@ -366,7 +365,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// <returns>Number of buffered messages replayed.</returns>
     protected async Task<int> RestoreObserverFromGracePeriodAsync(string connectionId, ISignalRObserver observer)
     {
-        var bufferedMessages = _healthTracker.RestoreFromGracePeriod(connectionId);
+        var bufferedMessages = HealthTracker.RestoreFromGracePeriod(connectionId);
         if (bufferedMessages.Count == 0)
         {
             return 0;
@@ -489,7 +488,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         // Cleanup expired grace periods
         if (_gracePeriodEnabled)
         {
-            var expiredConnectionIds = _healthTracker.CleanupExpiredGracePeriods();
+            var expiredConnectionIds = HealthTracker.CleanupExpiredGracePeriods();
             if (expiredConnectionIds.Count > 0)
             {
                 OnGracePeriodsExpired(expiredConnectionIds);

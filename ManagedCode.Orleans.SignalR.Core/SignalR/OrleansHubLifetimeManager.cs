@@ -427,14 +427,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 {
                     if (message is CompletionMessage completionMessage)
                     {
-                            if (completionMessage.HasResult)
-                            {
-                                completionSource.TrySetResult((T)completionMessage.Result!);
-                            }
-                            else
-                            {
-                                completionSource.TrySetException(new HubException(completionMessage.Error));
-                            }
+                        if (completionMessage.HasResult)
+                        {
+                            completionSource.TrySetResult((T)completionMessage.Result!);
+                        }
+                        else
+                        {
+                            completionSource.TrySetException(new HubException(completionMessage.Error));
+                        }
                     }
 
                     return Task.CompletedTask;

@@ -161,12 +161,12 @@ public class KeepAliveDisabledTests : IAsyncLifetime
 
         HubConnection CreateAuthenticatedConnection()
         {
-                return _app.CreateSignalRClient(
-                    nameof(SimpleTestHub),
-                    configureConnection: options =>
-                    {
-                        options.AccessTokenProvider = () => Task.FromResult<string?>(token);
-                    });
+            return _app.CreateSignalRClient(
+                nameof(SimpleTestHub),
+                configureConnection: options =>
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+                });
         }
 
         var receiver = CreateAuthenticatedConnection();

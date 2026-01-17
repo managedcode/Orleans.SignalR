@@ -138,7 +138,7 @@ public class ConnectionRoutingTests : IAsyncLifetime
 
                 var expectedSenderIndex = (i - 1 + connectionCount) % connectionCount;
                 var expectedSender = connectionIds[expectedSenderIndex];
-                 _output.WriteLine($"Connection #{i} ({connectionIds[i]}) received '{result}'. Expecting sender {expectedSenderIndex} ({expectedSender}).");
+                _output.WriteLine($"Connection #{i} ({connectionIds[i]}) received '{result}'. Expecting sender {expectedSenderIndex} ({expectedSender}).");
                 result.ShouldContain(expectedSender);
                 result.ShouldContain($"hop-{expectedSenderIndex}");
             }

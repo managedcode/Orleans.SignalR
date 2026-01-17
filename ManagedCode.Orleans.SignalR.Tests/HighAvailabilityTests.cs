@@ -9,21 +9,15 @@ using Xunit.Abstractions;
 namespace ManagedCode.Orleans.SignalR.Tests;
 
 [Collection(nameof(HighAvailabilityCluster))]
-public sealed class HighAvailabilityTests : IAsyncLifetime
+public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster, ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly HighAvailabilityClusterFixture _cluster;
-    private readonly ITestOutputHelper _output;
+    private readonly HighAvailabilityClusterFixture _cluster = cluster;
+    private readonly ITestOutputHelper _output = output;
     private TestWebApplication? _app;
 
     private const int DisconnectScenarioConnections = 32;
     private static readonly TimeSpan BroadcastTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HeartbeatGracePeriod = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1);
-
-    public HighAvailabilityTests(HighAvailabilityClusterFixture cluster, ITestOutputHelper output)
-    {
-        _cluster = cluster;
-        _output = output;
-    }
 
     public Task InitializeAsync()
     {
@@ -55,12 +49,12 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
             await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
 
             await cluster.StartAdditionalSiloAsync();
-            connections.AddRange(await CreateConnectionsAsync(_app, 50 ));
+            connections.AddRange(await CreateConnectionsAsync(_app, 50));
             await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
             await WarmUpConnectionsAsync(connections);
 
             await cluster.StartAdditionalSiloAsync();
-            connections.AddRange(await CreateConnectionsAsync(_app, 100 ));
+            connections.AddRange(await CreateConnectionsAsync(_app, 100));
             await WarmUpConnectionsAsync(connections);
             await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
 
