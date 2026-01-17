@@ -14,6 +14,13 @@ Observer delivery is protected by health tracking, circuit breaker logic, and op
 - Partitioning strategy and routing.
 - User message buffering.
 
+## Implementation plan (step-by-step)
+
+- [x] Clarify failure-threshold semantics so circuit-breaker and dead removal do not conflict.
+- [x] Route grace-period expiration to observer cleanup and health-state removal.
+- [x] Offload observer notifications from the Orleans scheduler and document why it is critical.
+- [x] Add tests for circuit-breaker threshold behavior (enabled vs disabled).
+
 ## Main flow
 
 ```mermaid
@@ -33,7 +40,8 @@ flowchart TD
 
 - Failed deliveries are recorded in a rolling failure window.
 - When thresholds are exceeded, the circuit opens and delivery is skipped.
-- If a grace period is configured, messages are buffered and replayed on recovery.
+- If a grace period is configured, messages are buffered and replayed on recovery; expired grace periods remove observers.
+- Without a grace period, reaching the failure threshold removes the observer immediately.
 
 ## Configuration knobs
 

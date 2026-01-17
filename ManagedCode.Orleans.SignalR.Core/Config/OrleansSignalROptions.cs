@@ -63,7 +63,8 @@ public class OrleansSignalROptions
     public int MaxQueuedMessagesPerUser { get; set; } = 100;
 
     /// <summary>
-    ///     Number of consecutive failures before an observer is considered dead and removed.
+    ///     Number of consecutive failures before the circuit breaker opens.
+    ///     When the circuit breaker is disabled or the grace period is zero, the observer is removed.
     ///     Set to 0 to disable failure tracking.
     ///     The default value is 3.
     /// </summary>
@@ -111,45 +112,4 @@ public class OrleansSignalROptions
     /// </summary>
     public int MaxBufferedMessagesPerObserver { get; set; } = 50;
 
-    /// <summary>
-    ///     Maximum number of connections allowed per partition grain.
-    ///     New connections are rejected when the limit is exceeded.
-    ///     Set to 0 to disable connection limits (not recommended for production).
-    ///     The default value is 100,000.
-    /// </summary>
-    public int MaxConnectionsPerPartition { get; set; } = 100_000;
-
-    /// <summary>
-    ///     Maximum number of groups per partition grain.
-    ///     New groups are rejected when the limit is exceeded.
-    ///     Set to 0 to disable group limits.
-    ///     The default value is 50,000.
-    /// </summary>
-    public int MaxGroupsPerPartition { get; set; } = 50_000;
-
-    /// <summary>
-    ///     Timeout for slow client message delivery.
-    ///     Connections that cannot receive messages within this time may be terminated.
-    ///     The default value is 10 seconds.
-    /// </summary>
-    public TimeSpan SlowClientTimeout { get; set; } = TimeSpan.FromSeconds(10);
-
-    /// <summary>
-    ///     Enables backpressure handling for slow clients.
-    ///     When enabled, messages to slow clients are dropped or the connection is terminated.
-    ///     The default value is true.
-    /// </summary>
-    public bool EnableSlowClientHandling { get; set; } = true;
-
-    /// <summary>
-    ///     Maximum number of pending messages allowed per connection before backpressure is applied.
-    ///     The default value is 1000.
-    /// </summary>
-    public int MaxPendingMessagesPerConnection { get; set; } = 1000;
-
-    /// <summary>
-    ///     Enables metrics collection for monitoring and diagnostics.
-    ///     The default value is true.
-    /// </summary>
-    public bool EnableMetrics { get; set; } = true;
 }

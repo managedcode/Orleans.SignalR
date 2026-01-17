@@ -29,6 +29,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     private readonly ILogger<SignalRConnectionCoordinatorGrain> _logger;
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<ConnectionCoordinatorState> _state;
+    private readonly StateWriteLock _stateWriteLock = new();
     private readonly Dictionary<string, PartitionAssignment> _connectionPartitions;
     private readonly HashSet<int> _activePartitions;
     private readonly int _connectionsPerPartitionHint;
@@ -121,14 +122,14 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         // Use safe write with retry for both persistent and memory storage ETag conflicts
         if (wasNew || wasReassigned)
         {
-            await _state.WriteStateSafeAsync(state =>
+            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
             {
                 // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
                 state.ConnectionPartitions = _connectionPartitions;
                 state.CurrentPartitionCount = _currentPartitionCount;
                 state.PartitionEpoch = _partitionEpoch;
                 return true;
-            });
+            }));
         }
 
         return partition;
@@ -136,7 +137,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task SendToAll(HubMessage message)
     {
-        var partitionCount = _activePartitions.Count;
+        var partitionCount = _activePartitions.Count > 0 ? _activePartitions.Count : _currentPartitionCount;
         if (partitionCount == 0)
         {
             return;
@@ -149,10 +150,21 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             var hubKey = this.GetPrimaryKeyString();
             var taskIndex = 0;
 
-            foreach (var partitionId in _activePartitions)
+            if (_activePartitions.Count > 0)
             {
-                var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
-                tasks[taskIndex++] = partitionGrain.SendToPartition(message);
+                foreach (var partitionId in _activePartitions)
+                {
+                    var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
+                    tasks[taskIndex++] = partitionGrain.SendToPartition(message);
+                }
+            }
+            else
+            {
+                for (var partitionId = 0; partitionId < _currentPartitionCount; partitionId++)
+                {
+                    var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
+                    tasks[taskIndex++] = partitionGrain.SendToPartition(message);
+                }
             }
 
             await Task.WhenAll(tasks.AsSpan(0, taskIndex));
@@ -165,7 +177,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds)
     {
-        var partitionCount = _activePartitions.Count;
+        var partitionCount = _activePartitions.Count > 0 ? _activePartitions.Count : _currentPartitionCount;
         if (partitionCount == 0)
         {
             return;
@@ -193,13 +205,27 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
                 var hubKey = this.GetPrimaryKeyString();
                 var taskIndex = 0;
 
-                foreach (var partitionId in _activePartitions)
+                if (_activePartitions.Count > 0)
                 {
-                    var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
-                    var excluded = excludedByPartition.TryGetValue(partitionId, out var list)
-                        ? CollectionsMarshal.AsSpan(list).ToArray()
-                        : [];
-                    tasks[taskIndex++] = partitionGrain.SendToPartitionExcept(message, excluded);
+                    foreach (var partitionId in _activePartitions)
+                    {
+                        var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
+                        var excluded = excludedByPartition.TryGetValue(partitionId, out var list)
+                            ? CollectionsMarshal.AsSpan(list).ToArray()
+                            : [];
+                        tasks[taskIndex++] = partitionGrain.SendToPartitionExcept(message, excluded);
+                    }
+                }
+                else
+                {
+                    for (var partitionId = 0; partitionId < _currentPartitionCount; partitionId++)
+                    {
+                        var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, hubKey, partitionId);
+                        var excluded = excludedByPartition.TryGetValue(partitionId, out var list)
+                            ? CollectionsMarshal.AsSpan(list).ToArray()
+                            : [];
+                        tasks[taskIndex++] = partitionGrain.SendToPartitionExcept(message, excluded);
+                    }
                 }
 
                 await Task.WhenAll(tasks.AsSpan(0, taskIndex));
@@ -310,14 +336,14 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             }
 
             // Persist state changes with safe retry for ETag conflicts
-            await _state.WriteStateSafeAsync(state =>
+            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
             {
                 // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
                 state.ConnectionPartitions = _connectionPartitions;
                 state.CurrentPartitionCount = _currentPartitionCount;
                 state.PartitionEpoch = _partitionEpoch;
                 return true;
-            });
+            }));
         }
     }
 
@@ -328,14 +354,17 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
         try
         {
-            if (_connectionPartitions.Count == 0)
+            await _stateWriteLock.RunAsync(async () =>
             {
-                await _state.ClearStateSafeAsync(cancellationToken);
-            }
-            else
-            {
-                await _state.WriteStateSafeAsync(cancellationToken);
-            }
+                if (_connectionPartitions.Count == 0)
+                {
+                    await _state.ClearStateSafeAsync(cancellationToken);
+                }
+                else
+                {
+                    await _state.WriteStateSafeAsync(cancellationToken);
+                }
+            });
         }
         catch (OrleansMessageRejectionException ex)
         {
@@ -359,31 +388,13 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
                 return (existingAssignment.PartitionId, false, false);
             }
 
-            // Stale epoch - check if partition would be different with current partition count
-            var newPartition = PartitionHelper.GetPartitionId(connectionId, (uint)_currentPartitionCount);
-
-            if (newPartition == existingAssignment.PartitionId)
-            {
-                // Same partition, just update epoch
-                var updatedAssignment = PartitionAssignment.Create(existingAssignment.PartitionId, _partitionEpoch);
-                _connectionPartitions[connectionId] = updatedAssignment;
-                _logger.LogDebug(
-                    "Updated connection {ConnectionId} epoch from {OldEpoch} to {NewEpoch} (partition {Partition} unchanged)",
-                    connectionId, existingAssignment.Epoch, _partitionEpoch, existingAssignment.PartitionId);
-                return (existingAssignment.PartitionId, false, true);
-            }
-
-            // Partition changed due to scaling - reassign
-            // Note: The old partition may still have this connection until cleanup
-            var reassignment = PartitionAssignment.Create(newPartition, _partitionEpoch);
-            _connectionPartitions[connectionId] = reassignment;
-            _activePartitions.Add(newPartition);
-
-            _logger.LogInformation(
-                "Reassigned connection {ConnectionId} from partition {OldPartition} (epoch {OldEpoch}) to partition {NewPartition} (epoch {NewEpoch}) due to scaling",
-                connectionId, existingAssignment.PartitionId, existingAssignment.Epoch, newPartition, _partitionEpoch);
-
-            return (newPartition, false, true);
+            // Stale epoch - keep existing partition to preserve routing stability
+            var updatedAssignment = PartitionAssignment.Create(existingAssignment.PartitionId, _partitionEpoch);
+            _connectionPartitions[connectionId] = updatedAssignment;
+            _logger.LogDebug(
+                "Updated connection {ConnectionId} epoch from {OldEpoch} to {NewEpoch} (partition {Partition} unchanged)",
+                connectionId, existingAssignment.Epoch, _partitionEpoch, existingAssignment.PartitionId);
+            return (existingAssignment.PartitionId, false, true);
         }
 
         // New connection - assign to partition with current epoch

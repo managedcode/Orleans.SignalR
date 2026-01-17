@@ -255,34 +255,35 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         }
     }
 
-    public override async Task SendGroupsAsync(IReadOnlyList<string> groupNames, string methodName, object?[] args,
+    public override Task SendGroupsAsync(IReadOnlyList<string> groupNames, string methodName, object?[] args,
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
 
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
-            await Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
+            return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
                 .SendToGroups(groupNames.ToArray(), message), cancellationToken);
-            return;
         }
 
-        // Send to all groups in parallel for better performance
-        var tasks = new List<Task>(groupNames.Count);
-        foreach (var groupName in groupNames)
+        // Fire-and-forget to avoid blocking hub execution on large group fan-out.
+        _ = Task.Run(async () =>
         {
-            var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
-            tasks.Add(Task.Run(() => groupGrain.SendToGroup(message), cancellationToken));
-        }
+            foreach (var groupName in groupNames)
+            {
+                try
+                {
+                    var groupGrain = NameHelperGenerator.GetSignalRGroupGrain<THub>(_clusterClient, groupName);
+                    await groupGrain.SendToGroup(message);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send to group {GroupName}", groupName);
+                }
+            }
+        }, cancellationToken);
 
-        try
-        {
-            await Task.WhenAll(tasks);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send to one or more groups");
-        }
+        return Task.CompletedTask;
     }
 
     public override Task SendGroupExceptAsync(string groupName, string methodName, object?[] args,
@@ -308,27 +309,29 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return Task.Run(() => NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId).SendToUser(message), cancellationToken);
     }
 
-    public override async Task SendUsersAsync(IReadOnlyList<string> userIds, string methodName, object?[] args,
+    public override Task SendUsersAsync(IReadOnlyList<string> userIds, string methodName, object?[] args,
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
 
-        // Send to all users in parallel for better performance
-        var tasks = new List<Task>(userIds.Count);
-        foreach (var userId in userIds)
+        // Fire-and-forget to avoid blocking hub execution on large user fan-out.
+        _ = Task.Run(async () =>
         {
-            var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId);
-            tasks.Add(Task.Run(() => userGrain.SendToUser(message), cancellationToken));
-        }
+            foreach (var userId in userIds)
+            {
+                try
+                {
+                    var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId);
+                    await userGrain.SendToUser(message);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to send to user {UserId}", userId);
+                }
+            }
+        }, cancellationToken);
 
-        try
-        {
-            await Task.WhenAll(tasks);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send to one or more users");
-        }
+        return Task.CompletedTask;
     }
 
     public override async Task AddToGroupAsync(string connectionId, string groupName,

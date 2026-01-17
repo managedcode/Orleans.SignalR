@@ -27,6 +27,8 @@ public class SignalRGroupGrain(
     [PersistentState(nameof(SignalRGroupGrain), OrleansSignalROptions.OrleansSignalRStorage)] IPersistentState<ConnectionState> stateStorage)
     : SignalRObserverGrainBase<SignalRGroupGrain>(logger, orleansSignalOptions, hubOptions), ISignalRGroupGrain
 {
+    private readonly StateWriteLock _stateWriteLock = new();
+
     protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
@@ -36,21 +38,21 @@ public class SignalRGroupGrain(
         await base.OnActivateAsync(cancellationToken);
     }
 
-    public Task SendToGroup(HubMessage message)
+    public async Task SendToGroup(HubMessage message)
     {
         Logs.SendToGroup(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString());
 
         if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
-            return Task.CompletedTask;
+            return;
         }
 
-        ObserverManager.Notify(s => s.OnNextAsync(message));
-        return Task.CompletedTask;
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
     }
 
-    public Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds)
+    public async Task SendToGroupExcept(HubMessage message, string[] excludedConnectionIds)
     {
         Logs.SendToGroupExcept(Logger, nameof(SignalRGroupGrain), this.GetPrimaryKeyString(), excludedConnectionIds);
 
@@ -59,7 +61,7 @@ public class SignalRGroupGrain(
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
             DispatchToLiveObservers(targets, message);
-            return Task.CompletedTask;
+            return;
         }
 
         var hashSet = new HashSet<string>();
@@ -71,22 +73,22 @@ public class SignalRGroupGrain(
             }
         }
 
-        ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => !hashSet.Contains(connection.GetPrimaryKeyString()));
-        return Task.CompletedTask;
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
+            connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
     }
 
     public async Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
-        var persisted = await stateStorage.WriteStateSafeAsync(state =>
+        var persisted = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state =>
         {
             var hasExisting = state.ConnectionIds.TryGetValue(connectionId, out var existing);
             var changed = !hasExisting || !string.Equals(existing, observerKey, StringComparison.Ordinal);
             state.ConnectionIds[connectionId] = observerKey;
             return changed;
-        });
+        }));
 
         if (persisted)
         {
@@ -97,7 +99,7 @@ public class SignalRGroupGrain(
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         UntrackConnection(connectionId, observer);
-        var removed = await stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId));
+        var removed = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId)));
 
         if (removed)
         {
@@ -120,11 +122,11 @@ public class SignalRGroupGrain(
 
         if (!hasConnections)
         {
-            await stateStorage.ClearStateSafeAsync(cancellationToken);
+            await _stateWriteLock.RunAsync(() => stateStorage.ClearStateSafeAsync(cancellationToken));
         }
         else
         {
-            await stateStorage.WriteStateSafeAsync(cancellationToken);
+            await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(cancellationToken));
         }
     }
 

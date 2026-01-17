@@ -27,6 +27,7 @@ public class SignalRGroupPartitionGrain(
     : SignalRObserverGrainBase<SignalRGroupPartitionGrain>(logger, orleansSignalOptions, hubOptions), ISignalRGroupPartitionGrain
 {
     private string? _hubKey;
+    private readonly StateWriteLock _stateWriteLock = new();
     protected override int TrackedConnectionCount => state.State.ConnectionObservers.Count;
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
@@ -37,7 +38,7 @@ public class SignalRGroupPartitionGrain(
         await base.OnActivateAsync(cancellationToken);
     }
 
-    public Task SendToGroups(HubMessage message, string[] groupNames)
+    public async Task SendToGroups(HubMessage message, string[] groupNames)
     {
         Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
             this.GetPrimaryKeyLong(),
@@ -50,18 +51,18 @@ public class SignalRGroupPartitionGrain(
         {
             var targetConnections = CollectConnectionIds(groupNames, excludedConnections: null);
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
-            return Task.CompletedTask;
+            return;
         }
 
         var targetObservers = CollectObservers(groupNames, excludedConnections: null);
 
-        ObserverManager.Notify(
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        await Task.Run(() => ObserverManager.Notify(
             observer => observer.OnNextAsync(message),
-            observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
-        return Task.CompletedTask;
+            observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
     }
 
-    public Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
+    public async Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
     {
         Logger.LogDebug("SendToGroupsExcept invoked for partition {PartitionId} with groups {Groups}, excluded {Excluded} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
             this.GetPrimaryKeyLong(),
@@ -75,30 +76,30 @@ public class SignalRGroupPartitionGrain(
         {
             var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
-            return Task.CompletedTask;
+            return;
         }
 
         var excluded = new HashSet<string>(excludedConnectionIds);
         var targetObservers = CollectObservers(groupNames, excluded);
 
-        ObserverManager.Notify(
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        await Task.Run(() => ObserverManager.Notify(
             observer => observer.OnNextAsync(message),
-            observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
-        return Task.CompletedTask;
+            observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
     }
 
     public async Task AddConnection(string connectionId, ISignalRObserver observer)
     {
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
-        var persisted = await state.WriteStateSafeAsync(state =>
+        var persisted = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state =>
         {
             var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existing) ||
                                   !string.Equals(existing, observerKey, StringComparison.Ordinal);
             state.ConnectionObservers[connectionId] = observerKey;
             var groupsRegistered = state.ConnectionGroups.TryAdd(connectionId, new HashSet<string>());
             return observerChanged || groupsRegistered;
-        });
+        }));
 
         if (persisted)
         {
@@ -111,7 +112,7 @@ public class SignalRGroupPartitionGrain(
     {
         UntrackConnection(connectionId, observer);
         List<string>? emptiedGroups = null;
-        var removed = await state.WriteStateSafeAsync(state => RemoveConnectionState(state, connectionId, out emptiedGroups));
+        var removed = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state => RemoveConnectionState(state, connectionId, out emptiedGroups)));
         if (removed)
         {
             Logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
@@ -131,7 +132,7 @@ public class SignalRGroupPartitionGrain(
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
 
-        var persisted = await state.WriteStateSafeAsync(state =>
+        var persisted = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state =>
         {
             var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existingObserver) ||
                                   !string.Equals(existingObserver, observerKey, StringComparison.Ordinal);
@@ -156,7 +157,7 @@ public class SignalRGroupPartitionGrain(
             var membershipAdded = groups.Add(groupName);
 
             return observerChanged || groupUpdated || membershipAdded;
-        });
+        }));
 
         if (persisted)
         {
@@ -170,7 +171,7 @@ public class SignalRGroupPartitionGrain(
         List<string>? emptiedGroups = null;
         var connectionRemoved = false;
 
-        var stateChanged = await state.WriteStateSafeAsync(state =>
+        var stateChanged = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state =>
         {
             emptiedGroups = null;
             connectionRemoved = false;
@@ -209,7 +210,7 @@ public class SignalRGroupPartitionGrain(
             }
 
             return changed || connectionRemoved;
-        });
+        }));
 
         if (stateChanged)
         {
@@ -238,12 +239,16 @@ public class SignalRGroupPartitionGrain(
         var hasState = !state.State.IsEmpty;
         ClearObserverTracking();
 
-        if (!hasState)
+        return _stateWriteLock.RunAsync(async () =>
         {
-            return state.ClearStateSafeAsync(cancellationToken);
-        }
+            if (!hasState)
+            {
+                await state.ClearStateSafeAsync(cancellationToken);
+                return;
+            }
 
-        return state.WriteStateSafeAsync(cancellationToken);
+            await state.WriteStateSafeAsync(cancellationToken);
+        });
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)

@@ -45,6 +45,43 @@ public class CoordinatorScalingTests(SmokeClusterFixture cluster, ITestOutputHel
     }
 
     [Fact]
+    public async Task ConnectionCoordinatorKeepsAssignmentAfterScalingAsync()
+    {
+        var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<ScalingTestHub>(_cluster.Cluster.Client);
+        var baseline = await coordinator.GetPartitionCount();
+        baseline.ShouldBeGreaterThan(0);
+
+        var stableConnectionId = $"stable-conn-{Guid.NewGuid():N}";
+        var initialPartition = await coordinator.GetPartitionForConnection(stableConnectionId);
+
+        var required = TestDefaults.ConnectionsPerPartitionHint * 4 + 1;
+        var connections = Enumerable.Range(0, required)
+            .Select(index => $"scale-conn-{Guid.NewGuid():N}-{index}")
+            .ToArray();
+
+        foreach (var id in connections)
+        {
+            await coordinator.GetPartitionForConnection(id);
+        }
+
+        var scaled = await coordinator.GetPartitionCount();
+        scaled.ShouldBeGreaterThan(baseline);
+
+        var afterScale = await coordinator.GetPartitionForConnection(stableConnectionId);
+        afterScale.ShouldBe(initialPartition);
+
+        foreach (var id in connections)
+        {
+            await coordinator.NotifyConnectionRemoved(id);
+        }
+
+        await coordinator.NotifyConnectionRemoved(stableConnectionId);
+
+        var reset = await WaitForPartitionCountAsync(coordinator.GetPartitionCount, baseline, _output);
+        reset.ShouldBe(baseline);
+    }
+
+    [Fact]
     public async Task GroupCoordinatorScalesWithGroupLoadAsync()
     {
         var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<ScalingTestHub>(_cluster.Cluster.Client);
@@ -69,6 +106,43 @@ public class CoordinatorScalingTests(SmokeClusterFixture cluster, ITestOutputHel
         {
             await coordinator.NotifyGroupRemoved(group);
         }
+
+        var reset = await WaitForPartitionCountAsync(coordinator.GetPartitionCount, baseline, _output);
+        reset.ShouldBe(baseline);
+    }
+
+    [Fact]
+    public async Task GroupCoordinatorKeepsAssignmentAfterScalingAsync()
+    {
+        var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<ScalingTestHub>(_cluster.Cluster.Client);
+        var baseline = await coordinator.GetPartitionCount();
+        baseline.ShouldBeGreaterThan(0);
+
+        var stableGroupName = $"stable-group-{Guid.NewGuid():N}";
+        var initialPartition = await coordinator.GetPartitionForGroup(stableGroupName);
+
+        var required = TestDefaults.GroupsPerPartitionHint * 4 + 1;
+        var groups = Enumerable.Range(0, required)
+            .Select(index => $"scale-group-{index}")
+            .ToArray();
+
+        foreach (var group in groups)
+        {
+            await coordinator.GetPartitionForGroup(group);
+        }
+
+        var scaled = await coordinator.GetPartitionCount();
+        scaled.ShouldBeGreaterThan(baseline);
+
+        var afterScale = await coordinator.GetPartitionForGroup(stableGroupName);
+        afterScale.ShouldBe(initialPartition);
+
+        foreach (var group in groups)
+        {
+            await coordinator.NotifyGroupRemoved(group);
+        }
+
+        await coordinator.NotifyGroupRemoved(stableGroupName);
 
         var reset = await WaitForPartitionCountAsync(coordinator.GetPartitionCount, baseline, _output);
         reset.ShouldBe(baseline);

@@ -86,6 +86,12 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         _observerToConnectionId[observer] = connectionId;
         EnsureActiveWhileConnectionsTracked();
         EnsureObserverRefreshTimer();
+
+        if (_gracePeriodEnabled && HealthTracker.IsInGracePeriod(connectionId))
+        {
+            // Critical: do NOT replay buffered SignalR messages on the Orleans scheduler.
+            _ = Task.Run(() => RestoreObserverFromGracePeriodAsync(connectionId, observer));
+        }
     }
 
     protected void UntrackConnection(string connectionId, ISignalRObserver observer)
@@ -103,6 +109,13 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         ObserverManager.Subscribe(observer, observer);
         EnsureActiveWhileConnectionsTracked();
         EnsureObserverRefreshTimer();
+
+        if (_gracePeriodEnabled && _observerToConnectionId.TryGetValue(observer, out var connectionId) &&
+            HealthTracker.IsInGracePeriod(connectionId))
+        {
+            // Critical: do NOT replay buffered SignalR messages on the Orleans scheduler.
+            _ = Task.Run(() => RestoreObserverFromGracePeriodAsync(connectionId, observer));
+        }
     }
 
     protected bool TryGetLiveObserver(string connectionId, out ISignalRObserver observer)
@@ -352,6 +365,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         _liveObservers.Remove(connectionId);
         _observerToConnectionId.Remove(observer);
         ObserverManager.Unsubscribe(observer);
+        HealthTracker.RemoveConnection(connectionId);
 
         Logger.LogWarning(
             "Removed dead observer for connection {ConnectionId} due to repeated failures.",
@@ -412,11 +426,25 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// </summary>
     protected virtual void OnGracePeriodsExpired(IReadOnlyList<string> expiredConnectionIds)
     {
-        if (expiredConnectionIds.Count > 0)
+        if (expiredConnectionIds.Count == 0)
         {
-            Logger.LogInformation(
-                "Grace periods expired for {Count} connections. Buffered messages discarded.",
-                expiredConnectionIds.Count);
+            return;
+        }
+
+        Logger.LogInformation(
+            "Grace periods expired for {Count} connections. Buffered messages discarded.",
+            expiredConnectionIds.Count);
+
+        foreach (var connectionId in expiredConnectionIds)
+        {
+            if (_liveObservers.TryGetValue(connectionId, out var observer))
+            {
+                OnObserverDead(connectionId, observer, new TimeoutException("Observer grace period expired."));
+            }
+            else
+            {
+                HealthTracker.RemoveConnection(connectionId);
+            }
         }
     }
 

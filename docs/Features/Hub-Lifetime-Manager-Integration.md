@@ -14,6 +14,11 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 - Partitioning strategy details (see Connection/Group partitioning docs).
 - Observer health and circuit breaker behavior.
 
+## Implementation plan (step-by-step)
+
+- [x] Restore fire-and-forget fan-out for multi-group and multi-user sends.
+- [x] Ensure per-target send failures are logged without blocking hub execution.
+
 ## Main flow
 
 ```mermaid

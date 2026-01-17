@@ -8,7 +8,8 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
 /// <summary>
 /// Tracks observer health by monitoring delivery failures with circuit breaker support.
-/// Observers exceeding the failure threshold have their circuit opened to prevent cascade failures.
+/// When circuit breaker is enabled, failures open the circuit and optionally buffer messages
+/// during a grace period before observers are removed.
 /// Supports graceful expiration with message buffering for timing edge cases.
 ///
 /// Note: This class is designed to be used within Orleans grains which provide single-threaded
@@ -82,7 +83,8 @@ public sealed class ObserverHealthTracker(
                 CircuitBreakerEnabled,
                 _failureThreshold,
                 _circuitOpenDuration,
-                _halfOpenTestInterval);
+                _halfOpenTestInterval,
+                markDeadOnCircuitOpen: !_gracePeriodBuffer.IsEnabled);
             _healthStates[connectionId] = state;
         }
 
@@ -311,6 +313,7 @@ public sealed class ObserverHealthTracker(
         private readonly TimeSpan _failureWindow;
         private readonly bool _circuitBreakerEnabled;
         private readonly int _failureThreshold;
+        private readonly bool _markDeadOnCircuitOpen;
         private readonly List<long> _failureTimestamps = new();
         private readonly ObserverCircuitBreaker? _circuitBreaker;
 
@@ -319,11 +322,13 @@ public sealed class ObserverHealthTracker(
             bool circuitBreakerEnabled,
             int failureThreshold,
             TimeSpan circuitOpenDuration,
-            TimeSpan halfOpenTestInterval)
+            TimeSpan halfOpenTestInterval,
+            bool markDeadOnCircuitOpen)
         {
             _failureWindow = failureWindow;
             _circuitBreakerEnabled = circuitBreakerEnabled;
             _failureThreshold = failureThreshold;
+            _markDeadOnCircuitOpen = markDeadOnCircuitOpen;
 
             if (circuitBreakerEnabled)
             {
@@ -373,17 +378,28 @@ public sealed class ObserverHealthTracker(
             LastException = exception;
 
             var failureCount = _failureTimestamps.Count;
-            var circuitOpened = _circuitBreaker?.RecordFailure(exception) ?? false;
+
+            if (_circuitBreaker is not null)
+            {
+                var circuitOpened = _circuitBreaker.RecordFailure(exception);
+                if (circuitOpened)
+                {
+                    if (_markDeadOnCircuitOpen)
+                    {
+                        IsDead = true;
+                        return FailureResult.Dead;
+                    }
+
+                    return FailureResult.CircuitOpened;
+                }
+
+                return FailureResult.Healthy;
+            }
 
             if (failureCount >= _failureThreshold)
             {
                 IsDead = true;
                 return FailureResult.Dead;
-            }
-
-            if (circuitOpened)
-            {
-                return FailureResult.CircuitOpened;
             }
 
             return FailureResult.Healthy;

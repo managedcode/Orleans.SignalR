@@ -18,6 +18,7 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
 {
     private readonly ILogger<SignalRConnectionHeartbeatGrain> _logger;
     private readonly IPersistentState<ConnectionHeartbeatState> _state;
+    private readonly StateWriteLock _stateWriteLock = new();
     private ConnectionHeartbeatRegistration? _registration;
     private IDisposable? _timer;
 
@@ -51,11 +52,11 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
         ResetTimer(registration.Interval);
         _logger.LogDebug("Heartbeat started for connection grain {Key} (hub={Hub}, partitioned={Partitioned}, partitionId={PartitionId}).",
             this.GetPrimaryKeyString(), registration.HubKey, registration.UsePartitioning, registration.PartitionId);
-        await _state.WriteStateSafeAsync(state =>
+        await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
         {
             state.Registration = registration;
             return true;
-        });
+        }));
     }
 
     public async Task Stop()
@@ -63,11 +64,11 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
         ResetTimer(null);
         _registration = null;
         _logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());
-        await _state.WriteStateSafeAsync(state =>
+        await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
         {
             state.Registration = null;
             return true;
-        });
+        }));
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
@@ -75,14 +76,17 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
         ResetTimer(null);
         try
         {
-            if (_state.State.Registration is null)
+            await _stateWriteLock.RunAsync(async () =>
             {
-                await _state.ClearStateSafeAsync(cancellationToken);
-            }
-            else
-            {
-                await _state.WriteStateSafeAsync(cancellationToken);
-            }
+                if (_state.State.Registration is null)
+                {
+                    await _state.ClearStateSafeAsync(cancellationToken);
+                }
+                else
+                {
+                    await _state.WriteStateSafeAsync(cancellationToken);
+                }
+            });
         }
         catch (OrleansMessageRejectionException ex)
         {

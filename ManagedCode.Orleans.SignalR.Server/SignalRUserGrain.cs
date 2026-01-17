@@ -29,6 +29,7 @@ public class SignalRUserGrain(
     : SignalRObserverGrainBase<SignalRUserGrain>(logger, orleansSignalOptions, hubOptions), ISignalRUserGrain
 {
     private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions = orleansSignalOptions;
+    private readonly StateWriteLock _stateWriteLock = new();
 
     protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 
@@ -45,13 +46,13 @@ public class SignalRUserGrain(
     {
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
-        var persisted = await stateStorage.WriteStateSafeAsync(state =>
+        var persisted = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state =>
         {
             var hasExisting = state.ConnectionIds.TryGetValue(connectionId, out var existing);
             var changed = !hasExisting || !string.Equals(existing, observerKey, StringComparison.Ordinal);
             state.ConnectionIds[connectionId] = observerKey;
             return changed;
-        });
+        }));
 
         if (persisted)
         {
@@ -62,7 +63,7 @@ public class SignalRUserGrain(
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         UntrackConnection(connectionId, observer);
-        var removed = await stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId));
+        var removed = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId)));
 
         if (removed)
         {
@@ -70,14 +71,14 @@ public class SignalRUserGrain(
         }
     }
 
-    public Task SendToUser(HubMessage message)
+    public async Task SendToUser(HubMessage message)
     {
         Logs.SendToUser(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
 
         if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
-            return Task.CompletedTask;
+            return;
         }
 
         if (ObserverManager.Count == 0)
@@ -104,18 +105,18 @@ public class SignalRUserGrain(
             }
 
             messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
-            return Task.CompletedTask;
+            return;
         }
 
-        ObserverManager.Notify(s => s.OnNextAsync(message));
-        return Task.CompletedTask;
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
     }
 
-    public Task RequestMessage()
+    public async Task RequestMessage()
     {
         if (messagesStorage.State.Messages.Count == 0)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var currentDateTime = DateTime.UtcNow;
@@ -129,14 +130,13 @@ public class SignalRUserGrain(
                 }
                 else
                 {
-                    ObserverManager.Notify(s => s.OnNextAsync(message.Key));
+                    // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+                    await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message.Key)));
                 }
             }
 
             messagesStorage.State.Messages.Remove(message.Key);
         }
-
-        return Task.CompletedTask;
     }
 
     public Task Ping(ISignalRObserver observer)
@@ -154,11 +154,11 @@ public class SignalRUserGrain(
 
         if (!hasConnections)
         {
-            await stateStorage.ClearStateSafeAsync(cancellationToken);
+            await _stateWriteLock.RunAsync(() => stateStorage.ClearStateSafeAsync(cancellationToken));
         }
         else
         {
-            await stateStorage.WriteStateSafeAsync(cancellationToken);
+            await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(cancellationToken));
         }
 
         var currentDateTime = DateTime.UtcNow;
@@ -172,11 +172,11 @@ public class SignalRUserGrain(
 
         if (messagesStorage.State.Messages.Count == 0)
         {
-            await messagesStorage.ClearStateSafeAsync(cancellationToken);
+            await _stateWriteLock.RunAsync(() => messagesStorage.ClearStateSafeAsync(cancellationToken));
         }
         else
         {
-            await messagesStorage.WriteStateSafeAsync(cancellationToken);
+            await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(cancellationToken));
         }
     }
 

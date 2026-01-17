@@ -115,6 +115,11 @@ If no new rule is detected -> do not update the file.
 - Always run required builds and tests yourself; do not ask the user to execute them (explicit user directive)
 - Commit messages are short and imperative; common prefixes in history include `fix:`, `tests:`, and `code style`
 
+### Reviews
+
+- For code reviews, be extra thorough and explicitly call out low-value/AI-sounding changes and whether changes actually improve behavior, performance, or safety
+- Never run SignalR work on Orleans scheduler/context; offload to dedicated tasks/threads to avoid blocking
+
 ### Documentation (ALL TASKS)
 
 - All docs live in `docs/` (or `.wiki/`)
@@ -143,6 +148,7 @@ If no new rule is detected -> do not update the file.
 ### Testing (ALL TASKS)
 
 - Framework: xUnit + Shouldly; tests live in `ManagedCode.Orleans.SignalR.Tests` and end with `*Tests.cs`
+- Avoid introducing new `[GenerateSerializer]` state types in tests; reuse production models to keep Orleans serialization types in product code.
 - Integration tests use Orleans TestingHost with fixtures in `ManagedCode.Orleans.SignalR.Tests/Cluster` and the minimal host in `ManagedCode.Orleans.SignalR.Tests/TestApp`
 - Prefer TDD for new behaviour and bugfixes: write a failing test first, then implement the smallest change to make it pass, then refactor safely
 - Every behaviour change needs sufficient automated tests to cover its cases; one is the minimum, not the target
@@ -179,6 +185,10 @@ If no new rule is detected -> do not update the file.
 - Avoid `this.` qualification; prefer predefined types (`int` over `Int32`)
 - Never use `ConfigureAwait(false)`
 - No magic literals - extract to constants, enums, config
+
+### Comments
+
+- When offloading SignalR observer sends with Task.Run, add a critical comment explaining it must not run on the Orleans scheduler to avoid blocking
 
 ### Critical (NEVER violate)
 

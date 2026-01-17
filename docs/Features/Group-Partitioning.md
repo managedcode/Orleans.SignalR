@@ -14,6 +14,11 @@ Group operations are routed through a coordinator grain that assigns group names
 - Connection partitioning and routing.
 - Observer health/circuit breaker behavior.
 
+## Implementation plan (step-by-step)
+
+- [x] Keep existing group-to-partition assignments stable when partition count scales.
+- [x] Add tests that assert stable assignments across scaling.
+
 ## Main flow
 
 ```mermaid
@@ -28,7 +33,8 @@ flowchart TD
 
 ## Behavior notes
 
-- Group names are mapped to partitions via the coordinator, which persists assignments and epoch data.
+- Group names are mapped to partitions via the coordinator, which persists assignments and tracks partition-count epochs.
+- Existing group assignments stay stable when the partition count grows.
 - Partition grains hold `group -> connection -> observer` mappings and emit fan-out to observers.
 - Empty groups trigger cleanup so partitions can shed state.
 
