@@ -6,16 +6,11 @@ using Orleans.Runtime;
 
 namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
-public class Subscription(SignalRObserver observer) : IDisposable
+public sealed class Subscription(SignalRObserver observer) : IDisposable
 {
     private readonly HashSet<IObserverConnectionManager> _grains = new();
     private readonly HashSet<GrainId> _heartbeatGrainIds = new();
     private bool _disposed;
-
-    ~Subscription()
-    {
-        Dispose();
-    }
 
     public ISignalRObserver Reference { get; private set; } = default!;
 
@@ -54,6 +49,12 @@ public class Subscription(SignalRObserver observer) : IDisposable
     {
         _grains.Remove(grain);
         _heartbeatGrainIds.Remove(((GrainReference)grain).GrainId);
+    }
+
+    public void ClearGrains()
+    {
+        _grains.Clear();
+        _heartbeatGrainIds.Clear();
     }
 
     public void SetReference(ISignalRObserver reference)

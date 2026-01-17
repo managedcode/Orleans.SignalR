@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Net.Http;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -63,7 +58,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TargetedConnectionSendShouldWorkWhenKeepAliveDisabled()
+    public async Task TargetedConnectionSendShouldWorkWhenKeepAliveDisabledAsync()
     {
         if (_app is null)
         {
@@ -111,7 +106,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task IdleConnectionShouldReceiveDirectSendAfterIdleWindow()
+    public async Task IdleConnectionShouldReceiveDirectSendAfterIdleWindowAsync()
     {
         if (_app is null)
         {
@@ -153,7 +148,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task KeepAliveDisabledShouldPreserveUserDeliveryAfterIdleInterval()
+    public async Task KeepAliveDisabledShouldPreserveUserDeliveryAfterIdleIntervalAsync()
     {
         if (_app is null)
         {
@@ -211,7 +206,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GroupSendShouldWorkWhenKeepAliveDisabled()
+    public async Task GroupSendShouldWorkWhenKeepAliveDisabledAsync()
     {
         if (_app is null)
         {
@@ -300,7 +295,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ActiveTargetedSendShouldNotDropWhenKeepAliveDisabled()
+    public async Task ActiveTargetedSendShouldNotDropWhenKeepAliveDisabledAsync()
     {
         if (_app is null)
         {
@@ -357,7 +352,7 @@ public class KeepAliveDisabledTests : IAsyncLifetime
         }
     }
 
-    private static Task<string> WaitForMessageAsync(Task<string> task, string description)
+    private static Task<string> WaitForMessageAsync(Task<string> task, string _)
     {
         return task.WaitAsync(TimeSpan.FromSeconds(30));
     }

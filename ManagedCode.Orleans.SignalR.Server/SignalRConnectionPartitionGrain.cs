@@ -67,20 +67,21 @@ public class SignalRConnectionPartitionGrain(
         }
     }
 
-    public async Task SendToPartition(HubMessage message)
+    public Task SendToPartition(HubMessage message)
     {
         Logs.SendToAll(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
 
         if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
-            return;
+            return Task.CompletedTask;
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
+        ObserverManager.Notify(s => s.OnNextAsync(message));
+        return Task.CompletedTask;
     }
 
-    public async Task SendToPartitionExcept(HubMessage message, string[] excludedConnectionIds)
+    public Task SendToPartitionExcept(HubMessage message, string[] excludedConnectionIds)
     {
         Logs.SendToAllExcept(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), excludedConnectionIds);
 
@@ -89,7 +90,7 @@ public class SignalRConnectionPartitionGrain(
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
             DispatchToLiveObservers(targets, message);
-            return;
+            return Task.CompletedTask;
         }
 
         var hashSet = new HashSet<string>();
@@ -101,11 +102,12 @@ public class SignalRConnectionPartitionGrain(
             }
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
+        ObserverManager.Notify(s => s.OnNextAsync(message),
+            connection => !hashSet.Contains(connection.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
-    public async Task<bool> SendToConnection(HubMessage message, string connectionId)
+    public Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
         Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
 
@@ -116,13 +118,13 @@ public class SignalRConnectionPartitionGrain(
                 connectionId,
                 stateStorage.State.ConnectionIds.Count,
                 LiveObservers.Count);
-            return false;
+            return Task.FromResult(false);
         }
 
         if (TryGetLiveObserver(connectionId, out var live))
         {
             _ = live.OnNextAsync(message);
-            return true;
+            return Task.FromResult(true);
         }
 
         Logger.LogDebug("Partition {PartitionId} falling back to observer manager for {ConnectionId} (live={LiveObserversCount}).",
@@ -130,13 +132,13 @@ public class SignalRConnectionPartitionGrain(
             connectionId,
             LiveObservers.Count);
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => connection.GetPrimaryKeyString() == observer));
+        ObserverManager.Notify(s => s.OnNextAsync(message),
+            connection => connection.GetPrimaryKeyString() == observer);
 
-        return true;
+        return Task.FromResult(true);
     }
 
-    public async Task SendToConnections(HubMessage message, string[] connectionIds)
+    public Task SendToConnections(HubMessage message, string[] connectionIds)
     {
         Logs.SendToConnections(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionIds);
 
@@ -155,7 +157,7 @@ public class SignalRConnectionPartitionGrain(
             if (targets is not null)
             {
                 DispatchToLiveObservers(targets, message);
-                return;
+                return Task.CompletedTask;
             }
         }
 
@@ -168,8 +170,9 @@ public class SignalRConnectionPartitionGrain(
             }
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => hashSet.Contains(connection.GetPrimaryKeyString())));
+        ObserverManager.Notify(s => s.OnNextAsync(message),
+            connection => hashSet.Contains(connection.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
     public Task Ping(ISignalRObserver observer)
@@ -185,13 +188,21 @@ public class SignalRConnectionPartitionGrain(
         var hasConnections = stateStorage.State.ConnectionIds.Count > 0;
         ClearObserverTracking();
 
-        if (!hasConnections)
+        try
         {
-            await stateStorage.ClearStateAsync(cancellationToken);
+            if (!hasConnections)
+            {
+                await stateStorage.ClearStateSafeAsync(cancellationToken);
+            }
+            else
+            {
+                await stateStorage.WriteStateSafeAsync(cancellationToken);
+            }
         }
-        else
+        catch (OrleansMessageRejectionException ex)
         {
-            await stateStorage.WriteStateAsync(cancellationToken);
+            // Storage grains may be unavailable during silo shutdown
+            Logger.LogDebug(ex, "Unable to persist state during deactivation for partition {PartitionId} - storage unavailable.", this.GetPrimaryKeyLong());
         }
     }
 

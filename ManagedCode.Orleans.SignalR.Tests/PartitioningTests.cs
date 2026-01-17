@@ -15,8 +15,8 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 [Collection(nameof(SmokeCluster))]
 public class PartitioningTests
 {
-    private static readonly TimeSpan WaitInterval = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan _waitInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan _logInterval = TimeSpan.FromSeconds(1);
     private const int ApplicationInstances = 4;
 
     private readonly ITestOutputHelper _testOutputHelper;
@@ -41,7 +41,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task DefaultConfigurationShouldUseConnectionPartitioning()
+    public async Task DefaultConfigurationShouldUseConnectionPartitioningAsync()
     {
         // Arrange
         var connection = _apps[0].CreateSignalRClient(nameof(PartitionTestHub));
@@ -66,7 +66,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task DefaultGroupConfigurationShouldUseGroupPartitioning()
+    public async Task DefaultGroupConfigurationShouldUseGroupPartitioningAsync()
     {
         // Arrange
         const int groupCount = 100;
@@ -100,7 +100,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task PartitionedSendToAllShouldReachAllConnections()
+    public async Task PartitionedSendToAllShouldReachAllConnectionsAsync()
     {
         // Arrange
         const int connectionsPerApp = 100;
@@ -197,7 +197,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task PartitionedSendToGroupShouldOnlyReachGroupMembers()
+    public async Task PartitionedSendToGroupShouldOnlyReachGroupMembersAsync()
     {
         // Arrange
         var connection1 = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
@@ -265,7 +265,7 @@ public class PartitioningTests
     }
 
     [Fact]
-    public async Task PartitionedGroupMembershipCleansUpOnDisconnect()
+    public async Task PartitionedGroupMembershipCleansUpOnDisconnectAsync()
     {
         const string groupName = "cleanup-group";
 
@@ -329,7 +329,7 @@ public class PartitioningTests
             }
 
             var elapsed = DateTime.UtcNow - start;
-            if (elapsed - lastLog >= LogInterval)
+            if (elapsed - lastLog >= _logInterval)
             {
                 if (progress is not null)
                 {
@@ -344,7 +344,7 @@ public class PartitioningTests
                 lastLog = elapsed;
             }
 
-            await Task.Delay(WaitInterval);
+            await Task.Delay(_waitInterval);
         }
 
         if (progress is not null)

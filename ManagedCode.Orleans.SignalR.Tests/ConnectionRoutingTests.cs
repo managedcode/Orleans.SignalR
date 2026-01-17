@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -41,7 +37,7 @@ public class ConnectionRoutingTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DirectMessagesShouldRouteBetween100Connections()
+    public async Task DirectMessagesShouldRouteBetween100ConnectionsAsync()
     {
         if (_app is null)
         {

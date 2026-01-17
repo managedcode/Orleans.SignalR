@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -37,7 +35,7 @@ public class CustomTimeoutTests
 
     [Theory]
     [MemberData(nameof(TimeoutConfigurations))]
-    public async Task DirectSendShouldSurviveIdleWithCustomTimeouts(
+    public async Task DirectSendShouldSurviveIdleWithCustomTimeoutsAsync(
         string scenario,
         double keepAliveSeconds,
         double clientTimeoutSeconds,

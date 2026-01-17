@@ -1,26 +1,22 @@
-using System;
 using System.Reflection;
 using ManagedCode.Orleans.SignalR.Server;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.SignalR;
-using Orleans;
 using Orleans.Configuration;
-using Orleans.Hosting;
 using Orleans.TestingHost;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Cluster;
 
 public class LongIdleSiloConfigurator : ISiloConfigurator
 {
-    private static readonly TimeSpan IdleAge = TimeSpan.FromSeconds(6);
-    private static readonly TimeSpan Quantum = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan _idleAge = TimeSpan.FromSeconds(6);
+    private static readonly TimeSpan _quantum = TimeSpan.FromSeconds(2);
 
     public void Configure(ISiloBuilder siloBuilder)
     {
         siloBuilder.Configure<GrainCollectionOptions>(options =>
         {
-            options.CollectionAge = IdleAge;
-            options.CollectionQuantum = Quantum;
+            options.CollectionAge = _idleAge;
+            options.CollectionQuantum = _quantum;
 
             SetSpecificCollectionAge<SignalRGroupGrain>(options);
             SetSpecificCollectionAge<SignalRGroupPartitionGrain>(options);
@@ -40,7 +36,7 @@ public class LongIdleSiloConfigurator : ISiloConfigurator
         var grainType = attribute.GetGrainType(null!, null!).ToString();
         if (!string.IsNullOrEmpty(grainType))
         {
-            options.ClassSpecificCollectionAge[grainType] = IdleAge;
+            options.ClassSpecificCollectionAge[grainType] = _idleAge;
         }
     }
 }

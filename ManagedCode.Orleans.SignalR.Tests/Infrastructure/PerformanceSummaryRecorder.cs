@@ -7,16 +7,10 @@ public static class PerformanceSummaryRecorder
 {
     private sealed record ScenarioRun(string Implementation, bool UseOrleans, double DurationMilliseconds, double Throughput, DateTimeOffset Timestamp);
 
-    private sealed class ScenarioSummary
+    private sealed class ScenarioSummary(string key, string displayName)
     {
-        public ScenarioSummary(string key, string displayName)
-        {
-            Key = key;
-            DisplayName = displayName;
-        }
-
-        public string Key { get; }
-        public string DisplayName { get; }
+        public string Key { get; } = key;
+        public string DisplayName { get; } = displayName;
         public ScenarioRun? Orleans { get; private set; }
         public ScenarioRun? InMemory { get; private set; }
 
@@ -43,8 +37,8 @@ public static class PerformanceSummaryRecorder
                 : null;
     }
 
-    private static readonly ConcurrentDictionary<string, ScenarioSummary> Summaries = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    private static readonly ConcurrentDictionary<string, ScenarioSummary> _summaries = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
@@ -58,13 +52,13 @@ public static class PerformanceSummaryRecorder
             throughput,
             DateTimeOffset.UtcNow);
 
-        var summary = Summaries.GetOrAdd(scenarioKey, key => new ScenarioSummary(key, displayName));
+        var summary = _summaries.GetOrAdd(scenarioKey, key => new ScenarioSummary(key, displayName));
         summary.Record(run);
 
-        WriteSummaries();
+        Write_summaries();
     }
 
-    private static void WriteSummaries()
+    private static void Write_summaries()
     {
         var path = GetSummaryPath();
         if (string.IsNullOrEmpty(path))
@@ -78,7 +72,7 @@ public static class PerformanceSummaryRecorder
             Directory.CreateDirectory(directory);
         }
 
-        var payload = Summaries.Values
+        var payload = _summaries.Values
             .OrderBy(summary => summary.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Select(summary => new
             {
@@ -90,7 +84,7 @@ public static class PerformanceSummaryRecorder
                 summary.Ratio
             });
 
-        File.WriteAllText(path, JsonSerializer.Serialize(payload, JsonOptions));
+        File.WriteAllText(path, JsonSerializer.Serialize(payload, _jsonOptions));
     }
 
     private static string GetSummaryPath()

@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
@@ -44,7 +42,7 @@ public class OrleansHubLifetimeManagerShutdownTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ApplicationStoppingShouldRemoveAllConnectionsFromCoordinator()
+    public async Task ApplicationStoppingShouldRemoveAllConnectionsFromCoordinatorAsync()
     {
         var app = EnsureApp();
         var first = app.CreateSignalRClient(nameof(SimpleTestHub));
@@ -87,7 +85,7 @@ public class OrleansHubLifetimeManagerShutdownTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ApplicationStoppingShouldFlushCoordinatorState()
+    public async Task ApplicationStoppingShouldFlushCoordinatorStateAsync()
     {
         var app = EnsureApp();
         var connection = app.CreateSignalRClient(nameof(SimpleTestHub));
@@ -181,7 +179,7 @@ public class OrleansHubLifetimeManagerShutdownNoKeepAliveTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ShutdownShouldRemoveConnectionsWithoutKeepAlive()
+    public async Task ShutdownShouldRemoveConnectionsWithoutKeepAliveAsync()
     {
         var app = EnsureApp();
         var connection = app.CreateSignalRClient(nameof(SimpleTestHub));

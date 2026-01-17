@@ -1,13 +1,9 @@
-using System;
-using System.Globalization;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Protocol;
-using Orleans;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -15,19 +11,13 @@ using Xunit.Abstractions;
 namespace ManagedCode.Orleans.SignalR.Tests;
 
 [Collection(nameof(SmokeCluster))]
-public sealed class GrainPersistenceTests
+public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutputHelper output)
 {
-    private readonly SmokeClusterFixture _cluster;
-    private readonly ITestOutputHelper _output;
-
-    public GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutputHelper output)
-    {
-        _cluster = cluster;
-        _output = output;
-    }
+    private readonly SmokeClusterFixture _cluster = cluster;
+    private readonly ITestOutputHelper _output = output;
 
     [Fact]
-    public async Task ConnectionPartitionPersistsConnectionStateAfterDeactivation()
+    public async Task ConnectionPartitionPersistsConnectionStateAfterDeactivationAsync()
     {
         var client = _cluster.Cluster.Client;
         var management = client.GetGrain<IManagementGrain>(0);
@@ -58,7 +48,7 @@ public sealed class GrainPersistenceTests
     }
 
     [Fact]
-    public async Task ConnectionPartitionRetainsMultipleConnectionsThroughSequentialEvictions()
+    public async Task ConnectionPartitionRetainsMultipleConnectionsThroughSequentialEvictionsAsync()
     {
         var client = _cluster.Cluster.Client;
         var management = client.GetGrain<IManagementGrain>(0);
@@ -108,7 +98,7 @@ public sealed class GrainPersistenceTests
     }
 
     [Fact]
-    public async Task ConnectionsForDistinctHubsDoNotInterfere()
+    public async Task ConnectionsForDistinctHubsDoNotInterfereAsync()
     {
         var client = _cluster.Cluster.Client;
         var sharedConnectionId = $"conn-shared-{Guid.NewGuid():N}";

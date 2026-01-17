@@ -11,7 +11,6 @@ public interface ISignalRConnectionCoordinatorGrain : IGrainWithStringKey
     [AlwaysInterleave]
     Task<int> GetPartitionCount();
 
-    [ReadOnly]
     [AlwaysInterleave]
     Task<int> GetPartitionForConnection(string connectionId);
 

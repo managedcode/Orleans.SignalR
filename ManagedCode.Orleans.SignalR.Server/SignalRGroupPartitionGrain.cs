@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -38,7 +37,7 @@ public class SignalRGroupPartitionGrain(
         await base.OnActivateAsync(cancellationToken);
     }
 
-    public async Task SendToGroups(HubMessage message, string[] groupNames)
+    public Task SendToGroups(HubMessage message, string[] groupNames)
     {
         Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
             this.GetPrimaryKeyLong(),
@@ -51,17 +50,18 @@ public class SignalRGroupPartitionGrain(
         {
             var targetConnections = CollectConnectionIds(groupNames, excludedConnections: null);
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
-            return;
+            return Task.CompletedTask;
         }
 
         var targetObservers = CollectObservers(groupNames, excludedConnections: null);
 
-        await Task.Run(() => ObserverManager.Notify(
+        ObserverManager.Notify(
             observer => observer.OnNextAsync(message),
-            observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
+            observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
-    public async Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
+    public Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
     {
         Logger.LogDebug("SendToGroupsExcept invoked for partition {PartitionId} with groups {Groups}, excluded {Excluded} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
             this.GetPrimaryKeyLong(),
@@ -75,15 +75,16 @@ public class SignalRGroupPartitionGrain(
         {
             var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
-            return;
+            return Task.CompletedTask;
         }
 
         var excluded = new HashSet<string>(excludedConnectionIds);
         var targetObservers = CollectObservers(groupNames, excluded);
 
-        await Task.Run(() => ObserverManager.Notify(
+        ObserverManager.Notify(
             observer => observer.OnNextAsync(message),
-            observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
+            observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
     public async Task AddConnection(string connectionId, ISignalRObserver observer)
@@ -239,10 +240,10 @@ public class SignalRGroupPartitionGrain(
 
         if (!hasState)
         {
-            return state.ClearStateAsync(cancellationToken);
+            return state.ClearStateSafeAsync(cancellationToken);
         }
 
-        return state.WriteStateAsync(cancellationToken);
+        return state.WriteStateSafeAsync(cancellationToken);
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)

@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "ManagedCode.Orleans.SignalR.Server": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:56459;http://localhost:56461"
+    }
+  }
+}

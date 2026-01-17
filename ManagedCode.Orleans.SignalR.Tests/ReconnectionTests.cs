@@ -1,6 +1,3 @@
-using System;
-using System.Net.Http;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -40,7 +37,7 @@ public class ReconnectionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ReconnectedUserShouldReceivePendingMessages()
+    public async Task ReconnectedUserShouldReceivePendingMessagesAsync()
     {
         if (_app is null)
         {

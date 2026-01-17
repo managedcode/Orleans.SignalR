@@ -21,9 +21,9 @@ public class HubLoadTests
     private readonly ITestOutputHelper _output;
     private readonly TestOutputHelperAccessor _loggerAccessor = new();
 
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan _defaultTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan _pollInterval = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan _logInterval = TimeSpan.FromSeconds(1);
 
     public HubLoadTests(LoadClusterFixture cluster, ITestOutputHelper output)
     {
@@ -35,7 +35,7 @@ public class HubLoadTests
     }
 
     [Fact]
-    public async Task ManyConnectionsReceiveBroadcast()
+    public async Task ManyConnectionsReceiveBroadcastAsync()
     {
         const int connectionCount = 60;
         _output.WriteLine($"Starting broadcast load test with {connectionCount} connections.");
@@ -73,7 +73,7 @@ public class HubLoadTests
     }
 
     [Fact]
-    public async Task GroupBroadcastScalesAcrossPartitions()
+    public async Task GroupBroadcastScalesAcrossPartitionsAsync()
     {
         const int groupSize = 48;
         const string groupName = "load-group";
@@ -115,7 +115,7 @@ public class HubLoadTests
     }
 
     [Fact]
-    public async Task UserFanOutUnderLoad()
+    public async Task UserFanOutUnderLoadAsync()
     {
         const int users = 12;
         const int connectionsPerUser = 3;
@@ -313,7 +313,7 @@ public class HubLoadTests
         TimeSpan? timeout = null,
         Func<string>? progress = null)
     {
-        var limit = timeout ?? DefaultTimeout;
+        var limit = timeout ?? _defaultTimeout;
         var start = DateTime.UtcNow;
         var lastLog = TimeSpan.Zero;
 
@@ -326,7 +326,7 @@ public class HubLoadTests
             }
 
             var elapsed = DateTime.UtcNow - start;
-            if (elapsed - lastLog >= LogInterval)
+            if (elapsed - lastLog >= _logInterval)
             {
                 var status = progress?.Invoke();
                 _output.WriteLine(status is null
@@ -335,7 +335,7 @@ public class HubLoadTests
                 lastLog = elapsed;
             }
 
-            await Task.Delay(PollInterval);
+            await Task.Delay(_pollInterval);
         }
 
         var finalStatus = progress?.Invoke();

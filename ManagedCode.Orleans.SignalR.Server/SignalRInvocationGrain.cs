@@ -4,6 +4,7 @@ using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Server.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Microsoft.Extensions.Logging;
@@ -37,14 +38,14 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
 
-    public async Task TryCompleteResult(string connectionId, HubMessage message)
+    public Task TryCompleteResult(string connectionId, HubMessage message)
     {
         Logs.TryCompleteResult(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), connectionId);
         _logger.LogInformation("Hub: {PrimaryKeyString}; TryCompleteResult: {ConnectionId}", this.GetPrimaryKeyString(),
             connectionId);
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         if (message is CompletionMessage completionMessage)
@@ -52,7 +53,8 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
             _completionSource?.TrySetResult(completionMessage);
         }
 
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
+        _observerManager.Notify(s => s.OnNextAsync(message));
+        return Task.CompletedTask;
     }
 
     public Task<ReturnType> TryGetReturnType()
@@ -72,12 +74,12 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
     public Task AddInvocation(ISignalRObserver? observer, InvocationInfo invocationInfo)
     {
-        Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
-
-        if (invocationInfo?.InvocationId is null || invocationInfo?.ConnectionId is null)
+        if (invocationInfo.InvocationId is null || invocationInfo.ConnectionId is null)
         {
             return Task.CompletedTask;
         }
+
+        Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
 
         _completionSource = new TaskCompletionSource<CompletionMessage?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -97,7 +99,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _completionSource?.TrySetCanceled();
         _completionSource = null;
         var into = _stateStorage.State;
-        await _stateStorage.ClearStateAsync();
+        await _stateStorage.ClearStateSafeAsync();
         DeactivateOnIdle();
         return into;
     }
@@ -127,7 +129,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         Logs.RemoveConnection(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), connectionId);
         _observerManager.Unsubscribe(observer);
         _observerManager.Clear();
-        await _stateStorage.ClearStateAsync();
+        await _stateStorage.ClearStateSafeAsync();
         DeactivateOnIdle();
     }
 
@@ -140,11 +142,11 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         if (string.IsNullOrEmpty(_stateStorage.State.ConnectionId) ||
             string.IsNullOrEmpty(_stateStorage.State.InvocationId))
         {
-            await _stateStorage.ClearStateAsync(cancellationToken);
+            await _stateStorage.ClearStateSafeAsync(cancellationToken);
         }
         else
         {
-            await _stateStorage.WriteStateAsync(cancellationToken);
+            await _stateStorage.WriteStateSafeAsync(cancellationToken);
         }
     }
 }

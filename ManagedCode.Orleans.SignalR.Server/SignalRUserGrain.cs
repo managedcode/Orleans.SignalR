@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -71,30 +70,52 @@ public class SignalRUserGrain(
         }
     }
 
-    public async Task SendToUser(HubMessage message)
+    public Task SendToUser(HubMessage message)
     {
         Logs.SendToUser(Logger, nameof(SignalRUserGrain), this.GetPrimaryKeyString());
 
         if (LiveObservers.Count > 0)
         {
             DispatchToLiveObservers(LiveObservers.Values, message);
-            return;
+            return Task.CompletedTask;
         }
 
         if (ObserverManager.Count == 0)
         {
+            // Enforce message queue limit to prevent unbounded memory growth
+            var maxMessages = _orleansSignalOptions.Value.MaxQueuedMessagesPerUser;
+            if (maxMessages > 0 && messagesStorage.State.Messages.Count >= maxMessages)
+            {
+                // Remove oldest messages to make room
+                var toRemove = messagesStorage.State.Messages.Count - maxMessages + 1;
+                var oldestMessages = messagesStorage.State.Messages
+                    .OrderBy(kvp => kvp.Value)
+                    .Take(toRemove)
+                    .Select(kvp => kvp.Key)
+                    .ToList();
+
+                foreach (var oldMessage in oldestMessages)
+                {
+                    messagesStorage.State.Messages.Remove(oldMessage);
+                }
+
+                Logger.LogWarning("Dropped {Count} oldest messages for user {User} due to queue limit {Limit}",
+                    toRemove, this.GetPrimaryKeyString(), maxMessages);
+            }
+
             messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
-            return;
+            return Task.CompletedTask;
         }
 
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
+        ObserverManager.Notify(s => s.OnNextAsync(message));
+        return Task.CompletedTask;
     }
 
-    public async Task RequestMessage()
+    public Task RequestMessage()
     {
         if (messagesStorage.State.Messages.Count == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         var currentDateTime = DateTime.UtcNow;
@@ -108,12 +129,14 @@ public class SignalRUserGrain(
                 }
                 else
                 {
-                    await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message.Key)));
+                    ObserverManager.Notify(s => s.OnNextAsync(message.Key));
                 }
             }
 
             messagesStorage.State.Messages.Remove(message.Key);
         }
+
+        return Task.CompletedTask;
     }
 
     public Task Ping(ISignalRObserver observer)
@@ -131,11 +154,11 @@ public class SignalRUserGrain(
 
         if (!hasConnections)
         {
-            await stateStorage.ClearStateAsync(cancellationToken);
+            await stateStorage.ClearStateSafeAsync(cancellationToken);
         }
         else
         {
-            await stateStorage.WriteStateAsync(cancellationToken);
+            await stateStorage.WriteStateSafeAsync(cancellationToken);
         }
 
         var currentDateTime = DateTime.UtcNow;
@@ -149,11 +172,11 @@ public class SignalRUserGrain(
 
         if (messagesStorage.State.Messages.Count == 0)
         {
-            await messagesStorage.ClearStateAsync(cancellationToken);
+            await messagesStorage.ClearStateSafeAsync(cancellationToken);
         }
         else
         {
-            await messagesStorage.WriteStateAsync(cancellationToken);
+            await messagesStorage.WriteStateSafeAsync(cancellationToken);
         }
     }
 

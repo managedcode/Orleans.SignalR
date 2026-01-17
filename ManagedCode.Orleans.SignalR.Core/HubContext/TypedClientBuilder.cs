@@ -16,12 +16,12 @@ internal static class TypedClientBuilder<T>
     // There is one static instance of _builder per T
     private static readonly Lazy<Func<IClientProxy, T>> _builder = new(GenerateClientBuilder);
 
-    private static readonly PropertyInfo CancellationTokenNoneProperty =
+    private static readonly PropertyInfo _cancellationTokenNoneProperty =
         typeof(CancellationToken).GetProperty("None", BindingFlags.Public | BindingFlags.Static)!;
 
-    private static readonly ConstructorInfo ObjectConstructor = typeof(object).GetConstructors().Single();
+    private static readonly ConstructorInfo _objectConstructor = typeof(object).GetConstructors().Single();
 
-    private static readonly Type[] ParameterTypes = [typeof(IClientProxy)];
+    private static readonly Type[] _parameterTypes = [typeof(IClientProxy)];
 
     public static T Build(IClientProxy proxy)
     {
@@ -89,13 +89,13 @@ internal static class TypedClientBuilder<T>
 
     private static ConstructorInfo BuildConstructor(TypeBuilder type, FieldInfo proxyField)
     {
-        var ctor = type.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, ParameterTypes);
+        var ctor = type.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, _parameterTypes);
 
         var generator = ctor.GetILGenerator();
 
         // Call object constructor
         generator.Emit(OpCodes.Ldarg_0);
-        generator.Emit(OpCodes.Call, ObjectConstructor);
+        generator.Emit(OpCodes.Call, _objectConstructor);
 
         // Assign constructor argument to the proxyField
         generator.Emit(OpCodes.Ldarg_0); // type
@@ -217,7 +217,7 @@ internal static class TypedClientBuilder<T>
         else
         {
             // Get 'CancellationToken.None' and put it on the stack, for when method does not have CancellationToken
-            generator.Emit(OpCodes.Call, CancellationTokenNoneProperty.GetMethod!);
+            generator.Emit(OpCodes.Call, _cancellationTokenNoneProperty.GetMethod!);
         }
 
         // Send!
@@ -229,7 +229,7 @@ internal static class TypedClientBuilder<T>
     private static void BuildFactoryMethod(TypeBuilder type, ConstructorInfo ctor)
     {
         var method = type.DefineMethod(nameof(Build), MethodAttributes.Public | MethodAttributes.Static,
-            CallingConventions.Standard, typeof(T), ParameterTypes);
+            CallingConventions.Standard, typeof(T), _parameterTypes);
 
         var generator = method.GetILGenerator();
 

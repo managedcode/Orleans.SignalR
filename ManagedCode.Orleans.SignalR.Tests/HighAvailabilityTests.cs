@@ -1,12 +1,7 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
-using Orleans.TestingHost;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -54,7 +49,6 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
         var connections = await CreateConnectionsAsync(_app, 50);
         var cluster = _cluster.Cluster;
 
-
         try
         {
             await WarmUpConnectionsAsync(connections);
@@ -65,14 +59,10 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
             await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
             await WarmUpConnectionsAsync(connections);
 
-
-
             await cluster.StartAdditionalSiloAsync();
             connections.AddRange(await CreateConnectionsAsync(_app, 100 ));
             await WarmUpConnectionsAsync(connections);
             await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
-
-
 
             var extraSilos = cluster.Silos.Skip(2).ToArray();
 
@@ -195,14 +185,6 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
         }
     }
 
-    private static async Task RestartAllConnectionsAsync(IEnumerable<BroadcastConnection> connections)
-    {
-        foreach (var connection in connections)
-        {
-            await connection.RestartAsync();
-        }
-    }
-
     private static async Task WarmUpConnectionsAsync(IEnumerable<BroadcastConnection> connections)
     {
         var tasks = connections.Select(async connection =>
@@ -266,7 +248,7 @@ public sealed class HighAvailabilityTests : IAsyncLifetime
 
         public void ResetReceipt() => _receipt = CreateReceipt();
 
-        public async Task<bool> WaitForReceiptAsync(TimeSpan timeout, string payload)
+        public async Task<bool> WaitForReceiptAsync(TimeSpan timeout, string _)
         {
             if (!IsConnected)
             {

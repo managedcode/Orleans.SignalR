@@ -1,5 +1,3 @@
-using System;
-using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
@@ -53,7 +51,7 @@ public class LongIdleServerPushTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ServerCanPushAfterSimulatedFiveMinuteIdle()
+    public async Task ServerCanPushAfterSimulatedFiveMinuteIdleAsync()
     {
         if (_app is null)
         {
