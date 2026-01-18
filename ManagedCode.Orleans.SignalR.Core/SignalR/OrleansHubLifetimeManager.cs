@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Diagnostics;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
@@ -29,6 +30,8 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     private readonly IOptions<HubOptions<THub>> _hubOptions;
     private readonly ILogger _logger;
     private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions;
+    private readonly SignalRMetrics _metrics = SignalRMetrics.Instance;
+    private readonly string _hubKey;
 
     public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger, IClusterClient clusterClient,
         IHostApplicationLifetime hostLifetime, IOptions<OrleansSignalROptions> orleansSignalOptions,
@@ -39,6 +42,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _globalHubOptions = globalHubOptions;
         _hubOptions = hubOptions;
         _clusterClient = clusterClient;
+        _hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
 
         hostLifetime.ApplicationStopping.Register(OnApplicationStopping);
     }
@@ -48,7 +52,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _connections.Add(connection);
         var subscription = CreateConnectionObserver(connection);
 
-        var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
         var usePartitions = _orleansSignalOptions.Value.ConnectionPartitionCount > 1;
         var partitionId = 0;
 
@@ -90,7 +93,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             }
         }
 
-        subscription.SetConnectionMetadata(hubKey, usePartitions, partitionId);
+        subscription.SetConnectionMetadata(_hubKey, usePartitions, partitionId);
 
         if (!string.IsNullOrEmpty(connection.UserIdentifier))
         {
@@ -108,12 +111,14 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             }
         }
 
+        _metrics.RecordConnectionEstablished(_hubKey);
         await UpdateConnectionHeartbeatAsync(connection.ConnectionId, subscription);
     }
 
     public override async Task OnDisconnectedAsync(HubConnectionContext connection)
     {
         _connections.Remove(connection);
+        _metrics.RecordConnectionClosed(_hubKey);
 
         var subscription = connection.Features.Get<Subscription>();
 
@@ -121,8 +126,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             try
             {
-                var hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
-                var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connection.ConnectionId);
+                var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, _hubKey, connection.ConnectionId);
                 await heartbeatGrain.Stop();
             }
             catch (OrleansMessageRejectionException ex)
@@ -183,6 +187,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     public override Task SendAllAsync(string methodName, object?[] args, CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.All);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient).SendToAll(message), cancellationToken);
@@ -197,6 +202,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         IReadOnlyList<string> excludedConnectionIds, CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.AllExcept);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
@@ -213,6 +219,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Connection);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
@@ -229,6 +236,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Connections, connectionIds.Count);
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
@@ -245,6 +253,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Group);
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient).SendToGroup(groupName, message), cancellationToken);
@@ -259,6 +268,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Groups, groupNames.Count);
 
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
@@ -290,6 +300,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         IReadOnlyList<string> excludedConnectionIds, CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.GroupExcept);
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient)
@@ -306,6 +317,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.User);
         return Task.Run(() => NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, userId).SendToUser(message), cancellationToken);
     }
 
@@ -313,6 +325,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         CancellationToken cancellationToken = new())
     {
         var message = new InvocationMessage(methodName, args);
+        _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Users, userIds.Count);
 
         // Fire-and-forget to avoid blocking hub execution on large user fan-out.
         _ = Task.Run(async () =>

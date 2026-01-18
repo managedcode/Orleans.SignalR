@@ -38,6 +38,11 @@ public class SignalRGroupPartitionGrain(
         await base.OnActivateAsync(cancellationToken);
     }
 
+    protected override string? ResolveMetricsHubName()
+    {
+        return _hubKey;
+    }
+
     public async Task SendToGroups(HubMessage message, string[] groupNames)
     {
         Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",

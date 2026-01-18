@@ -79,6 +79,7 @@ flowchart LR
 - Orleans runtime (package references): `Directory.Packages.props`
 - Orleans storage provider key: `ManagedCode.Orleans.SignalR.Core/Config/OrleansSignalROptions.cs`
 - Connected clients (test harness): `ManagedCode.Orleans.SignalR.Tests/HubSmokeTests.cs`
+- SignalR metrics: `docs/Features/Diagnostics-Metrics.md`
 
 ## Key ADRs and feature specs
 
@@ -95,6 +96,7 @@ flowchart LR
 - Features
   - `docs/Features/Connection-Partitioning.md`
   - `docs/Features/Group-Partitioning.md`
+  - `docs/Features/Diagnostics-Metrics.md`
   - `docs/Features/Hub-Lifetime-Manager-Integration.md`
   - `docs/Features/Observer-Health-and-Circuit-Breaker.md`
   - `docs/Features/Connection-Heartbeat.md`

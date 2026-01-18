@@ -186,6 +186,11 @@ If no new rule is detected -> do not update the file.
 - Never use `ConfigureAwait(false)`
 - No magic literals - extract to constants, enums, config
 
+### Diagnostics
+
+- Use simple metrics counters; avoid concurrent collections or per-hub observable gauges unless explicitly requested
+- Do not use string literals for metrics names, targets, or reasons; define and reuse constants
+
 ### Comments
 
 - When offloading SignalR observer sends with Task.Run, add a critical comment explaining it must not run on the Orleans scheduler to avoid blocking

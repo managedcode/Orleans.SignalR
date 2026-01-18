@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Diagnostics;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
@@ -100,11 +101,13 @@ public class SignalRUserGrain(
                     messagesStorage.State.Messages.Remove(oldMessage);
                 }
 
+                Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.OfflineQueueLimit, toRemove);
                 Logger.LogWarning("Dropped {Count} oldest messages for user {User} due to queue limit {Limit}",
                     toRemove, this.GetPrimaryKeyString(), maxMessages);
             }
 
             messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
+            Metrics.RecordMessageBuffered(MetricsHubName);
             return;
         }
 

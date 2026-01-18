@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
+using ManagedCode.Orleans.SignalR.Core.Diagnostics;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
@@ -26,6 +27,10 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     private readonly bool _circuitBreakerEnabled;
     private readonly bool _gracePeriodEnabled;
     private IDisposable? _observerRefreshTimer;
+
+    protected SignalRMetrics Metrics { get; } = SignalRMetrics.Instance;
+
+    protected string? MetricsHubName => field ??= ResolveMetricsHubName();
 
     protected SignalRObserverGrainBase(
         ILogger<TGrain> logger,
@@ -67,6 +72,33 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
     protected abstract int TrackedConnectionCount { get; }
 
+    protected virtual string? ResolveMetricsHubName()
+    {
+        var key = this.GetPrimaryKeyString();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        var separatorIndex = key.IndexOf("::", StringComparison.Ordinal);
+        if (separatorIndex > 0)
+        {
+            return key[..separatorIndex];
+        }
+
+        var allDigits = true;
+        foreach (var c in key)
+        {
+            if (!char.IsDigit(c))
+            {
+                allDigits = false;
+                break;
+            }
+        }
+
+        return allDigits ? null : key;
+    }
+
     /// <summary>
     /// Gets the health tracker for monitoring observer failures and circuit breaker state.
     /// </summary>
@@ -99,6 +131,10 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         ObserverManager.Unsubscribe(observer);
         _liveObservers.Remove(connectionId);
         _observerToConnectionId.Remove(observer);
+        if (_gracePeriodEnabled && HealthTracker.IsInGracePeriod(connectionId))
+        {
+            Metrics.RecordGracePeriodEnded(MetricsHubName);
+        }
         HealthTracker.RemoveConnection(connectionId);
         ReleaseWhenIdle();
         StopObserverRefreshTimerIfIdle();
@@ -224,15 +260,25 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
                     {
                         if (HealthTracker.BufferMessage(connectionId, message))
                         {
+                            Metrics.RecordMessageBuffered(MetricsHubName);
                             if (Logger.IsEnabled(LogLevel.Debug))
                             {
                                 Logger.LogDebug("Buffered message for connection {ConnectionId} in grace period.", connectionId);
                             }
                         }
+                        else
+                        {
+                            Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.BufferFull);
+                        }
                     }
-                    else if (Logger.IsEnabled(LogLevel.Debug))
+                    else
                     {
-                        Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
+                        if (Logger.IsEnabled(LogLevel.Debug))
+                        {
+                            Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
+                        }
+
+                        Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.CircuitOpen);
                     }
                     continue;
                 }
@@ -262,15 +308,24 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
                     {
                         if (HealthTracker.BufferMessage(connectionId, message))
                         {
+                            Metrics.RecordMessageBuffered(MetricsHubName);
                             if (Logger.IsEnabled(LogLevel.Debug))
                             {
                                 Logger.LogDebug("Buffered message for connection {ConnectionId} in grace period.", connectionId);
                             }
                         }
+                        else
+                        {
+                            Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.BufferFull);
+                        }
                     }
-                    else if (Logger.IsEnabled(LogLevel.Debug))
                     {
-                        Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
+                        if (Logger.IsEnabled(LogLevel.Debug))
+                        {
+                            Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
+                        }
+
+                        Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.CircuitOpen);
                     }
                 }
                 continue;
@@ -293,12 +348,20 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     {
         try
         {
+            var circuitState = connectionId is null
+                ? CircuitState.Closed
+                : HealthTracker.GetCircuitState(connectionId);
             await pending;
 
             // Record success - this closes circuit breaker if in half-open state
             if (connectionId is not null)
             {
                 HealthTracker.RecordSuccess(connectionId);
+                if (circuitState == CircuitState.HalfOpen &&
+                    HealthTracker.GetCircuitState(connectionId) == CircuitState.Closed)
+                {
+                    Metrics.RecordCircuitBreakerClosed(MetricsHubName);
+                }
             }
         }
         catch (Exception exception)
@@ -309,6 +372,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
                 return;
             }
 
+            Metrics.RecordObserverFailure(MetricsHubName, exception.GetType().Name);
             // Record failure and handle result
             var result = HealthTracker.RecordFailure(connectionId, exception);
 
@@ -346,9 +410,11 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// </summary>
     protected virtual void OnCircuitOpened(string connectionId, ISignalRObserver observer, Exception lastException)
     {
+        Metrics.RecordCircuitBreakerOpened(MetricsHubName);
         // Start grace period buffering if enabled
         if (_gracePeriodEnabled && HealthTracker.StartGracePeriod(connectionId))
         {
+            Metrics.RecordGracePeriodStarted(MetricsHubName);
             Logger.LogDebug(
                 "Started grace period for connection {ConnectionId}. Messages will be buffered until recovery or expiration.",
                 connectionId);
@@ -361,6 +427,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// </summary>
     protected virtual void OnObserverDead(string connectionId, ISignalRObserver observer, Exception lastException)
     {
+        Metrics.RecordObserverDead(MetricsHubName);
         // Remove from live observers - connection cleanup will happen via normal disconnect flow
         _liveObservers.Remove(connectionId);
         _observerToConnectionId.Remove(observer);
@@ -379,9 +446,14 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// <returns>Number of buffered messages replayed.</returns>
     protected async Task<int> RestoreObserverFromGracePeriodAsync(string connectionId, ISignalRObserver observer)
     {
+        var wasInGracePeriod = _gracePeriodEnabled && HealthTracker.IsInGracePeriod(connectionId);
         var bufferedMessages = HealthTracker.RestoreFromGracePeriod(connectionId);
         if (bufferedMessages.Count == 0)
         {
+            if (wasInGracePeriod)
+            {
+                Metrics.RecordGracePeriodEnded(MetricsHubName);
+            }
             return 0;
         }
 
@@ -417,6 +489,11 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
                 connectionId);
         }
 
+        if (wasInGracePeriod)
+        {
+            Metrics.RecordGracePeriodEnded(MetricsHubName);
+        }
+
         return replayedCount;
     }
 
@@ -437,6 +514,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
         foreach (var connectionId in expiredConnectionIds)
         {
+            Metrics.RecordGracePeriodEnded(MetricsHubName);
             if (_liveObservers.TryGetValue(connectionId, out var observer))
             {
                 OnObserverDead(connectionId, observer, new TimeoutException("Observer grace period expired."));
