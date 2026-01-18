@@ -6,14 +6,9 @@ using Xunit;
 namespace ManagedCode.Orleans.SignalR.Tests;
 
 [Collection(nameof(SmokeCluster))]
-public class StateWriteLockTests
+public class StateWriteLockTests(SmokeClusterFixture cluster)
 {
-    private readonly SmokeClusterFixture _cluster;
-
-    public StateWriteLockTests(SmokeClusterFixture cluster)
-    {
-        _cluster = cluster;
-    }
+    private readonly SmokeClusterFixture _cluster = cluster;
 
     [Fact]
     public async Task ReentrantStateWritesAreSerializedAsync()
