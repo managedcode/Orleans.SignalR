@@ -44,13 +44,11 @@
         <PackageReference Include="Microsoft.Orleans.Sdk" />
         <PackageReference Include="Microsoft.Orleans.Serialization.SystemTextJson" />
         <PackageReference Include="Microsoft.Orleans.Serialization.TestKit" />
-        <PackageReference Include="ManagedCode.Communication" />
-        <PackageReference Include="ManagedCode.Communication.Orleans" />
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\ManagedCode.Orleans.SignalR.Client\ManagedCode.Orleans.SignalR.Client.csproj"/>
-        <ProjectReference Include="..\ManagedCode.Orleans.SignalR.Server\ManagedCode.Orleans.SignalR.Server.csproj"/>
+        <ProjectReference Include="..\ManagedCode.Orleans.SignalR.Client\ManagedCode.Orleans.SignalR.Client.csproj" />
+        <ProjectReference Include="..\ManagedCode.Orleans.SignalR.Server\ManagedCode.Orleans.SignalR.Server.csproj" />
     </ItemGroup>
 
 
