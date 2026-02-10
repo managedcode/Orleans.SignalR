@@ -3,7 +3,7 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="DotNet.ReproducibleBuilds" Version="1.2.39" />
+    <PackageVersion Include="DotNet.ReproducibleBuilds" Version="2.0.2" />
     <PackageVersion Include="ManagedCode.Communication" Version="10.0.0" />
     <PackageVersion Include="ManagedCode.Communication.Orleans" Version="10.0.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.2" />
@@ -14,14 +14,14 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.2" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.2" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageVersion Include="Microsoft.Orleans.Analyzers" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.Client" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.Sdk" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.Serialization" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.Serialization.SystemTextJson" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.Serialization.TestKit" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.Server" Version="9.2.1" />
-    <PackageVersion Include="Microsoft.Orleans.TestingHost" Version="9.2.1" />
+    <PackageVersion Include="Microsoft.Orleans.Analyzers" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.Client" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.Sdk" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.Serialization" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.Serialization.SystemTextJson" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.Serialization.TestKit" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.Server" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Orleans.TestingHost" Version="10.0.1" />
     <PackageVersion Include="Shouldly" Version="4.3.0" />
     <PackageVersion Include="System.Linq.Async" Version="7.0.0" />
     <PackageVersion Include="System.IO.Hashing" Version="10.0.2" />
