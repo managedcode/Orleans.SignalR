@@ -19,7 +19,13 @@ public interface ISignalRGroupPartitionGrain : IGrainWithIntegerKey, IObserverCo
     Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer);
 
     [AlwaysInterleave]
+    Task<string[]> AddConnectionToGroups(string connectionId, string[] groupNames, ISignalRObserver observer);
+
+    [AlwaysInterleave]
     Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer);
+
+    [AlwaysInterleave]
+    Task<string[]> RemoveConnectionFromGroups(string connectionId, string[] groupNames, ISignalRObserver observer);
 
     [ReadOnly]
     [AlwaysInterleave]

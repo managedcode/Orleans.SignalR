@@ -187,69 +187,108 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     public async Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
-        var membership = GroupMembership.TryGetValue(groupName, out var count) ? count + 1 : 1;
-        GroupMembership[groupName] = membership;
+        await AddConnectionToGroups([groupName], connectionId, observer);
+    }
 
-        var partitionGrain = await GetPartitionGrainAsync(partition);
-        await partitionGrain.AddConnectionToGroup(groupName, connectionId, observer);
-
-        // Persist state changes to ensure consistency after reactivation
-        if (_stateDirty)
+    public async Task<int[]> AddConnectionToGroups(string[] groupNames, string connectionId, ISignalRObserver observer)
+    {
+        var groupsByPartition = GetPartitionsForGroups(groupNames, assignIfMissing: true);
+        if (groupsByPartition.Count == 0)
         {
-            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
+            return [];
+        }
+
+        var tasks = ArrayPool<Task<string[]>>.Shared.Rent(groupsByPartition.Count);
+        var partitions = ArrayPool<int>.Shared.Rent(groupsByPartition.Count);
+
+        try
+        {
+            var taskIndex = 0;
+            foreach (var kvp in groupsByPartition)
             {
-                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
-                state.GroupPartitions = GroupPartitions;
-                state.GroupMembership = GroupMembership;
-                state.CurrentPartitionCount = _currentPartitionCount;
-                state.PartitionEpoch = _partitionEpoch;
-                return true;
-            }));
-            _stateDirty = false;
+                var partitionGrain = await GetPartitionGrainAsync(kvp.Key);
+                tasks[taskIndex] = partitionGrain.AddConnectionToGroups(connectionId, CollectionsMarshal.AsSpan(kvp.Value).ToArray(), observer);
+                partitions[taskIndex] = kvp.Key;
+                taskIndex++;
+            }
+
+            await Task.WhenAll(tasks.AsSpan(0, taskIndex));
+
+            for (var index = 0; index < taskIndex; index++)
+            {
+                foreach (var affectedGroupName in tasks[index].Result)
+                {
+                    var membership = GroupMembership.TryGetValue(affectedGroupName, out var count) ? count + 1 : 1;
+                    GroupMembership[affectedGroupName] = membership;
+                }
+            }
+
+            await PersistCoordinatorStateIfDirtyAsync();
+
+            return partitions.AsSpan(0, taskIndex).ToArray();
+        }
+        finally
+        {
+            ArrayPool<Task<string[]>>.Shared.Return(tasks, clearArray: true);
+            ArrayPool<int>.Shared.Return(partitions, clearArray: true);
         }
     }
 
     public async Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
-        int partition;
-        if (GroupPartitions.TryGetValue(groupName, out var existingAssignment))
+        await RemoveConnectionFromGroups([groupName], connectionId, observer);
+    }
+
+    public async Task<int[]> RemoveConnectionFromGroups(string[] groupNames, string connectionId, ISignalRObserver observer)
+    {
+        var groupsByPartition = GetPartitionsForGroups(groupNames, assignIfMissing: false);
+        if (groupsByPartition.Count == 0)
         {
-            partition = existingAssignment.PartitionId;
-        }
-        else
-        {
-            partition = PartitionHelper.GetPartitionId(groupName, (uint)_currentPartitionCount);
+            return [];
         }
 
-        var partitionGrain = await GetPartitionGrainAsync(partition);
-        await partitionGrain.RemoveConnectionFromGroup(groupName, connectionId, observer);
+        var tasks = ArrayPool<Task<string[]>>.Shared.Rent(groupsByPartition.Count);
+        var partitions = ArrayPool<int>.Shared.Rent(groupsByPartition.Count);
 
-        if (GroupMembership.TryGetValue(groupName, out var count))
+        try
         {
-            if (count <= 1)
+            var taskIndex = 0;
+            foreach (var kvp in groupsByPartition)
             {
-                ReleaseGroup(groupName);
+                var partitionGrain = await GetPartitionGrainAsync(kvp.Key);
+                tasks[taskIndex] = partitionGrain.RemoveConnectionFromGroups(connectionId, CollectionsMarshal.AsSpan(kvp.Value).ToArray(), observer);
+                partitions[taskIndex] = kvp.Key;
+                taskIndex++;
             }
-            else
-            {
-                GroupMembership[groupName] = count - 1;
-            }
-        }
 
-        // Persist state changes to ensure consistency after reactivation
-        if (_stateDirty)
-        {
-            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
+            await Task.WhenAll(tasks.AsSpan(0, taskIndex));
+
+            for (var index = 0; index < taskIndex; index++)
             {
-                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
-                state.GroupPartitions = GroupPartitions;
-                state.GroupMembership = GroupMembership;
-                state.CurrentPartitionCount = _currentPartitionCount;
-                state.PartitionEpoch = _partitionEpoch;
-                return true;
-            }));
-            _stateDirty = false;
+                foreach (var affectedGroupName in tasks[index].Result)
+                {
+                    if (GroupMembership.TryGetValue(affectedGroupName, out var count))
+                    {
+                        if (count <= 1)
+                        {
+                            ReleaseGroup(affectedGroupName);
+                        }
+                        else
+                        {
+                            GroupMembership[affectedGroupName] = count - 1;
+                        }
+                    }
+                }
+            }
+
+            await PersistCoordinatorStateIfDirtyAsync();
+
+            return partitions.AsSpan(0, taskIndex).ToArray();
+        }
+        finally
+        {
+            ArrayPool<Task<string[]>>.Shared.Return(tasks, clearArray: true);
+            ArrayPool<int>.Shared.Return(partitions, clearArray: true);
         }
     }
 
@@ -257,19 +296,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
     {
         ReleaseGroup(groupName);
 
-        if (_stateDirty)
-        {
-            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
-            {
-                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
-                state.GroupPartitions = GroupPartitions;
-                state.GroupMembership = GroupMembership;
-                state.CurrentPartitionCount = _currentPartitionCount;
-                state.PartitionEpoch = _partitionEpoch;
-                return true;
-            }));
-            _stateDirty = false;
-        }
+        await PersistCoordinatorStateIfDirtyAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
@@ -363,6 +390,39 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         return _currentPartitionCount;
     }
 
+    private Dictionary<int, List<string>> GetPartitionsForGroups(string[] groupNames, bool assignIfMissing)
+    {
+        var normalizedGroupNames = NormalizeGroupNames(groupNames);
+        var groupsByPartition = new Dictionary<int, List<string>>();
+
+        foreach (var groupName in normalizedGroupNames)
+        {
+            int partition;
+            if (assignIfMissing)
+            {
+                (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
+            }
+            else if (GroupPartitions.TryGetValue(groupName, out var existingAssignment))
+            {
+                partition = existingAssignment.PartitionId;
+            }
+            else
+            {
+                continue;
+            }
+
+            ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(groupsByPartition, partition, out var exists);
+            if (!exists)
+            {
+                list = [];
+            }
+
+            list!.Add(groupName);
+        }
+
+        return groupsByPartition;
+    }
+
     private void ReleaseGroup(string groupName)
     {
         var removedMembership = GroupMembership.Remove(groupName);
@@ -399,6 +459,46 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             _state.State.PartitionEpoch = _partitionEpoch;
             _activePartitions.Clear();
         }
+    }
+
+    private async Task PersistCoordinatorStateIfDirtyAsync()
+    {
+        if (!_stateDirty)
+        {
+            return;
+        }
+
+        await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
+        {
+            // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
+            state.GroupPartitions = GroupPartitions;
+            state.GroupMembership = GroupMembership;
+            state.CurrentPartitionCount = _currentPartitionCount;
+            state.PartitionEpoch = _partitionEpoch;
+            return true;
+        }));
+
+        _stateDirty = false;
+    }
+
+    private static string[] NormalizeGroupNames(string[] groupNames)
+    {
+        if (groupNames.Length == 0)
+        {
+            return [];
+        }
+
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        var normalized = new List<string>(groupNames.Length);
+        foreach (var groupName in groupNames)
+        {
+            if (unique.Add(groupName))
+            {
+                normalized.Add(groupName);
+            }
+        }
+
+        return normalized.ToArray();
     }
 
     private static Dictionary<string, PartitionAssignment> EnsureOrdinalDictionary(Dictionary<string, PartitionAssignment>? dictionary)

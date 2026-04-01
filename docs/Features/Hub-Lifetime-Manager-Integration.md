@@ -18,6 +18,7 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 
 - [x] Restore fire-and-forget fan-out for multi-group and multi-user sends.
 - [x] Ensure per-target send failures are logged without blocking hub execution.
+- [x] Route package-specific batch group membership calls through the Orleans lifetime manager.
 
 ## Main flow
 
@@ -25,16 +26,19 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 flowchart TD
   Host["ASP.NET Core host"]
   Hub["SignalR hub"]
+  Batch["Batch group helper"]
   Manager["OrleansHubLifetimeManager"]
   Grains["SignalR grains"]
 
-  Host --> Hub --> Manager --> Grains
+  Host --> Hub --> Batch --> Manager --> Grains
 ```
 
 ## Behavior notes
 
 - `AddOrleans()` registers `OrleansHubLifetimeManager<THub>` as the `HubLifetimeManager` implementation.
 - The lifetime manager creates a per-connection `Subscription` and registers observers with connection/group/user grains.
+- Package-specific batch group operations (`AddToGroupsAsync` / `RemoveFromGroupsAsync`) also route through the lifetime manager instead of looping over sequential single-group writes.
+- Detailed batching behavior and partition persistence rules live in `docs/Features/Group-Partitioning.md`.
 
 ## Configuration knobs
 
@@ -44,5 +48,7 @@ flowchart TD
 ## Key types and files
 
 - `ManagedCode.Orleans.SignalR.Client/Extensions/OrleansDependencyInjectionExtensions.cs`
+- `ManagedCode.Orleans.SignalR.Client/Extensions/OrleansHubGroupExtensions.cs`
+- `ManagedCode.Orleans.SignalR.Core/HubContext/IOrleansGroupManager.cs`
 - `ManagedCode.Orleans.SignalR.Core/SignalR/OrleansHubLifetimeManager.cs`
 - `ManagedCode.Orleans.SignalR.Core/SignalR/Observers/Subscription.cs`

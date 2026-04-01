@@ -31,7 +31,13 @@ public interface ISignalRGroupCoordinatorGrain : IGrainWithStringKey
     Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer);
 
     [AlwaysInterleave]
+    Task<int[]> AddConnectionToGroups(string[] groupNames, string connectionId, ISignalRObserver observer);
+
+    [AlwaysInterleave]
     Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer);
+
+    [AlwaysInterleave]
+    Task<int[]> RemoveConnectionFromGroups(string[] groupNames, string connectionId, ISignalRObserver observer);
 
     [AlwaysInterleave]
     Task NotifyGroupRemoved(string groupName);

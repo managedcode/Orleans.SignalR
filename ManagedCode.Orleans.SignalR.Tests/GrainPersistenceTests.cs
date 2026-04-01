@@ -176,6 +176,54 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         }
     }
 
+    [Fact]
+    public async Task GroupCoordinatorBatchMethodsShouldTrackMembershipAcrossTouchedPartitionsAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(client);
+        var connectionId = $"group-batch-{Guid.NewGuid():N}";
+        var groupNames = new[]
+        {
+            $"group-alpha-{Guid.NewGuid():N}",
+            $"group-beta-{Guid.NewGuid():N}",
+            $"group-gamma-{Guid.NewGuid():N}",
+            $"group-delta-{Guid.NewGuid():N}"
+        };
+
+        var observer = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
+
+        try
+        {
+            var addedPartitions = await coordinator.AddConnectionToGroups(groupNames, connectionId, observer);
+            addedPartitions.ShouldNotBeEmpty();
+
+            var expectedPartitions = (await Task.WhenAll(groupNames.Select(coordinator.GetPartitionForGroup)))
+                .Distinct()
+                .OrderBy(partitionId => partitionId)
+                .ToArray();
+            addedPartitions.OrderBy(partitionId => partitionId).ShouldBe(expectedPartitions);
+
+            foreach (var partitionId in expectedPartitions)
+            {
+                var partition = NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, partitionId);
+                (await partition.HasConnection(connectionId)).ShouldBeTrue();
+            }
+
+            var removedPartitions = await coordinator.RemoveConnectionFromGroups(groupNames, connectionId, observer);
+            removedPartitions.OrderBy(partitionId => partitionId).ShouldBe(expectedPartitions);
+
+            foreach (var partitionId in expectedPartitions)
+            {
+                var partition = NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, partitionId);
+                (await partition.HasConnection(connectionId)).ShouldBeFalse();
+            }
+        }
+        finally
+        {
+            await coordinator.RemoveConnectionFromGroups(groupNames, connectionId, observer);
+        }
+    }
+
     private static async Task AssertRoutedAsync(Func<Task<bool>> sendAction, string reason)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);

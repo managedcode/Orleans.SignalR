@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using ManagedCode.Orleans.SignalR.Client.Extensions;
 using Microsoft.AspNetCore.SignalR;
 
 namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
@@ -37,6 +38,16 @@ public class SimpleTestHub : Hub
     public async Task RemoveFromGroup(string groupName)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
+    }
+
+    public async Task AddToGroups(string[] groupNames)
+    {
+        await this.AddToGroupsAsync(groupNames);
+    }
+
+    public async Task RemoveFromGroups(string[] groupNames)
+    {
+        await this.RemoveFromGroupsAsync(groupNames);
     }
 
     public async Task GroupSendAsync(string groupName, string message)

@@ -13,6 +13,7 @@
 
 **Entry points to start from**
 - `ManagedCode.Orleans.SignalR.Core/SignalR/OrleansHubLifetimeManager.cs`
+- `ManagedCode.Orleans.SignalR.Client/Extensions/OrleansHubGroupExtensions.cs`
 - `ManagedCode.Orleans.SignalR.Server/SignalRConnectionCoordinatorGrain.cs`
 - `ManagedCode.Orleans.SignalR.Server/SignalRGroupCoordinatorGrain.cs`
 - `ManagedCode.Orleans.SignalR.Server/SignalRObserverGrainBase.cs`
@@ -47,7 +48,7 @@ flowchart LR
   - Responsibilities: core abstractions, options, hub lifetime manager, hashing helpers, and shared interfaces.
   - Boundaries: must not depend on Client, Server, or Tests; keep ASP.NET Core hosting out of this module.
 - ManagedCode.Orleans.SignalR.Client
-  - Responsibilities: DI extensions for wiring SignalR and Orleans in ASP.NET Core hosts.
+  - Responsibilities: DI extensions for wiring SignalR and Orleans in ASP.NET Core hosts, plus hub-facing helpers that expose package-specific batch group operations.
   - Boundaries: depends only on Core; no Orleans grains or server-specific plumbing.
 - ManagedCode.Orleans.SignalR.Server
   - Responsibilities: Orleans grains, persistence, routing coordinators, and server-side backplane mechanics.
@@ -74,6 +75,7 @@ flowchart LR
 - ASP.NET Core host: `ManagedCode.Orleans.SignalR.Tests/TestApp/HttpHostProgram.cs`
 - SignalR hubs: `ManagedCode.Orleans.SignalR.Tests/TestApp/Hubs/SimpleTestHub.cs`
 - ManagedCode.Orleans.SignalR.Client: `ManagedCode.Orleans.SignalR.Client/ManagedCode.Orleans.SignalR.Client.csproj`
+- Hub batch group extensions: `ManagedCode.Orleans.SignalR.Client/Extensions/OrleansHubGroupExtensions.cs`
 - ManagedCode.Orleans.SignalR.Core: `ManagedCode.Orleans.SignalR.Core/ManagedCode.Orleans.SignalR.Core.csproj`
 - ManagedCode.Orleans.SignalR.Server: `ManagedCode.Orleans.SignalR.Server/ManagedCode.Orleans.SignalR.Server.csproj`
 - Orleans runtime (package references): `Directory.Packages.props`

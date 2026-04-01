@@ -310,6 +310,121 @@ public class PartitioningTests
         }
     }
 
+    [Fact]
+    public async Task BatchGroupMembershipShouldAddAndRemoveAcrossMultipleGroupsAsync()
+    {
+        var groupNames = new[]
+        {
+            "batch-group-alpha",
+            "batch-group-beta",
+            "batch-group-gamma",
+            "batch-group-delta"
+        };
+
+        var member = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
+        var outsider = _apps[1].CreateSignalRClient(nameof(SimpleTestHub));
+        var memberMessages = new List<string>();
+        var outsiderMessages = new List<string>();
+
+        member.On<string>("SendAll", memberMessages.Add);
+        outsider.On<string>("SendAll", outsiderMessages.Add);
+
+        try
+        {
+            await member.StartAsync();
+            await outsider.StartAsync();
+
+            var connectionId = member.ConnectionId ?? throw new InvalidOperationException("ConnectionId was not initialized.");
+
+            await member.InvokeAsync("AddToGroups", groupNames);
+
+            var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(_siloCluster.Cluster.Client);
+            var partitionIds = (await Task.WhenAll(groupNames.Select(coordinator.GetPartitionForGroup)))
+                .Distinct()
+                .ToArray();
+            var partitions = partitionIds
+                .Select(partitionId => NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(_siloCluster.Cluster.Client, partitionId))
+                .ToArray();
+
+            var tracked = await WaitUntilAsync(
+                "batched groups to appear in touched partitions",
+                async () =>
+                {
+                    foreach (var partition in partitions)
+                    {
+                        if (!await partition.HasConnection(connectionId))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                },
+                progress: async () =>
+                {
+                    var states = new List<string>(partitions.Length);
+                    foreach (var partition in partitions)
+                    {
+                        states.Add(await partition.HasConnection(connectionId) ? "tracked" : "pending");
+                    }
+
+                    return string.Join(", ", states);
+                });
+
+            tracked.ShouldBeTrue();
+
+            var beforeSends = groupNames
+                .Select(groupName => outsider.InvokeAsync("GroupSendAsync", groupName, $"before:{groupName}"))
+                .ToArray();
+            await Task.WhenAll(beforeSends);
+
+            var delivered = await WaitUntilAsync(
+                "batched group delivery before removal",
+                () => Task.FromResult(groupNames.All(groupName =>
+                    memberMessages.Any(message => message.EndsWith($"send message: before:{groupName}.", StringComparison.Ordinal)))));
+
+            delivered.ShouldBeTrue();
+            outsiderMessages.ShouldNotContain(message => message.Contains("before:", StringComparison.Ordinal));
+
+            await member.InvokeAsync("RemoveFromGroups", groupNames);
+
+            var released = await WaitUntilAsync(
+                "batched groups to release connection from touched partitions",
+                async () =>
+                {
+                    foreach (var partition in partitions)
+                    {
+                        if (await partition.HasConnection(connectionId))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                });
+
+            released.ShouldBeTrue();
+
+            memberMessages.Clear();
+            outsiderMessages.Clear();
+
+            var afterSends = groupNames
+                .Select(groupName => outsider.InvokeAsync("GroupSendAsync", groupName, $"after:{groupName}"))
+                .ToArray();
+            await Task.WhenAll(afterSends);
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+
+            memberMessages.ShouldBeEmpty();
+            outsiderMessages.ShouldBeEmpty();
+        }
+        finally
+        {
+            await member.DisposeAsync();
+            await outsider.DisposeAsync();
+        }
+    }
+
     private async Task<bool> WaitUntilAsync(
         string description,
         Func<Task<bool>> condition,

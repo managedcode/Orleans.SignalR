@@ -134,24 +134,27 @@ public class SignalRGroupPartitionGrain(
 
     public async Task AddConnectionToGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
+        await AddConnectionToGroups(connectionId, [groupName], observer);
+    }
+
+    public async Task<string[]> AddConnectionToGroups(string connectionId, string[] groupNames, ISignalRObserver observer)
+    {
+        var normalizedGroupNames = NormalizeGroupNames(groupNames);
+        if (normalizedGroupNames.Length == 0)
+        {
+            return [];
+        }
+
         TrackConnection(connectionId, observer);
         var observerKey = observer.GetPrimaryKeyString();
+        List<string>? addedGroups = null;
 
         var persisted = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state =>
         {
+            addedGroups = null;
             var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existingObserver) ||
                                   !string.Equals(existingObserver, observerKey, StringComparison.Ordinal);
             state.ConnectionObservers[connectionId] = observerKey;
-
-            if (!state.Groups.TryGetValue(groupName, out var connections))
-            {
-                connections = new Dictionary<string, string>();
-                state.Groups[groupName] = connections;
-            }
-
-            var groupUpdated = !connections.TryGetValue(connectionId, out var mappedObserver) ||
-                               !string.Equals(mappedObserver, observerKey, StringComparison.Ordinal);
-            connections[connectionId] = observerKey;
 
             if (!state.ConnectionGroups.TryGetValue(connectionId, out var groups))
             {
@@ -159,56 +162,99 @@ public class SignalRGroupPartitionGrain(
                 state.ConnectionGroups[connectionId] = groups;
             }
 
-            var membershipAdded = groups.Add(groupName);
+            var changed = observerChanged;
 
-            return observerChanged || groupUpdated || membershipAdded;
+            foreach (var groupName in normalizedGroupNames)
+            {
+                if (!state.Groups.TryGetValue(groupName, out var connections))
+                {
+                    connections = new Dictionary<string, string>();
+                    state.Groups[groupName] = connections;
+                }
+
+                var groupUpdated = !connections.TryGetValue(connectionId, out var mappedObserver) ||
+                                   !string.Equals(mappedObserver, observerKey, StringComparison.Ordinal);
+                connections[connectionId] = observerKey;
+
+                var membershipAdded = groups.Add(groupName);
+                if (membershipAdded)
+                {
+                    addedGroups ??= [];
+                    addedGroups.Add(groupName);
+                }
+
+                changed |= groupUpdated || membershipAdded;
+            }
+
+            return changed;
         }));
 
         if (persisted)
         {
-            Logger.LogDebug("Adding connection {ConnectionId} to group {GroupName} in partition {PartitionId}",
-                connectionId, groupName, this.GetPrimaryKeyLong());
+            Logger.LogDebug("Adding connection {ConnectionId} to groups {GroupNames} in partition {PartitionId}",
+                connectionId, string.Join(",", normalizedGroupNames), this.GetPrimaryKeyLong());
         }
+
+        return addedGroups?.ToArray() ?? [];
     }
 
     public async Task RemoveConnectionFromGroup(string groupName, string connectionId, ISignalRObserver observer)
     {
+        await RemoveConnectionFromGroups(connectionId, [groupName], observer);
+    }
+
+    public async Task<string[]> RemoveConnectionFromGroups(string connectionId, string[] groupNames, ISignalRObserver observer)
+    {
+        var normalizedGroupNames = NormalizeGroupNames(groupNames);
+        if (normalizedGroupNames.Length == 0)
+        {
+            return [];
+        }
+
         List<string>? emptiedGroups = null;
+        List<string>? removedGroups = null;
         var connectionRemoved = false;
 
         var stateChanged = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state =>
         {
             emptiedGroups = null;
+            removedGroups = null;
             connectionRemoved = false;
             var changed = false;
 
-            if (state.Groups.TryGetValue(groupName, out var members) && members.Remove(connectionId))
+            foreach (var groupName in normalizedGroupNames)
             {
-                changed = true;
-                if (members.Count == 0)
+                if (state.Groups.TryGetValue(groupName, out var members) && members.Remove(connectionId))
                 {
-                    state.Groups.Remove(groupName);
-                    emptiedGroups ??= new List<string>();
-                    emptiedGroups.Add(groupName);
-                }
-            }
+                    changed = true;
+                    removedGroups ??= [];
+                    removedGroups.Add(groupName);
 
-            if (state.ConnectionGroups.TryGetValue(connectionId, out var groups) && groups.Remove(groupName))
-            {
-                changed = true;
-                if (groups.Count == 0)
-                {
-                    state.ConnectionGroups.Remove(connectionId);
-                    connectionRemoved = RemoveConnectionState(state, connectionId, out var additionalGroups);
-                    if (additionalGroups is not null)
+                    if (members.Count == 0)
                     {
-                        if (emptiedGroups is null)
+                        state.Groups.Remove(groupName);
+                        emptiedGroups ??= [];
+                        emptiedGroups.Add(groupName);
+                    }
+                }
+
+                if (state.ConnectionGroups.TryGetValue(connectionId, out var groups) && groups.Remove(groupName))
+                {
+                    changed = true;
+                    if (groups.Count == 0)
+                    {
+                        state.ConnectionGroups.Remove(connectionId);
+                        connectionRemoved = RemoveConnectionState(state, connectionId, out var additionalGroups);
+                        if (additionalGroups is not null)
                         {
-                            emptiedGroups = additionalGroups;
-                        }
-                        else
-                        {
-                            emptiedGroups.AddRange(additionalGroups);
+                            if (emptiedGroups is null)
+                            {
+                                emptiedGroups = additionalGroups;
+                            }
+                            else
+                            {
+                                emptiedGroups.AddRange(additionalGroups);
+                            }
                         }
                     }
                 }
@@ -219,8 +265,8 @@ public class SignalRGroupPartitionGrain(
 
         if (stateChanged)
         {
-            Logger.LogDebug("Removing connection {ConnectionId} from group {GroupName} in partition {PartitionId}",
-                connectionId, groupName, this.GetPrimaryKeyLong());
+            Logger.LogDebug("Removing connection {ConnectionId} from groups {GroupNames} in partition {PartitionId}",
+                connectionId, string.Join(",", normalizedGroupNames), this.GetPrimaryKeyLong());
 
             if (connectionRemoved)
             {
@@ -229,6 +275,8 @@ public class SignalRGroupPartitionGrain(
 
             NotifyRemovedGroups(emptiedGroups);
         }
+
+        return removedGroups?.ToArray() ?? [];
     }
 
     public Task<bool> HasConnection(string connectionId)
@@ -254,6 +302,26 @@ public class SignalRGroupPartitionGrain(
 
             await state.WriteStateSafeAsync(cancellationToken);
         });
+    }
+
+    private static string[] NormalizeGroupNames(string[] groupNames)
+    {
+        if (groupNames.Length == 0)
+        {
+            return [];
+        }
+
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        var normalized = new List<string>(groupNames.Length);
+        foreach (var groupName in groupNames)
+        {
+            if (unique.Add(groupName))
+            {
+                normalized.Add(groupName);
+            }
+        }
+
+        return normalized.ToArray();
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)
