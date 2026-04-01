@@ -371,15 +371,16 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
             var coordinatorGrain = NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient);
-            var partitionIds = await Task.Run(
-                () => coordinatorGrain.AddConnectionToGroups(uniqueGroupNames, connectionId, subscription.Reference),
-                cancellationToken);
-
-            foreach (var partitionId in partitionIds)
+            foreach (var groupName in uniqueGroupNames)
             {
+                var partitionId = await Task.Run(() => coordinatorGrain.GetPartitionForGroup(groupName), cancellationToken);
                 var partitionGrain = NameHelperGenerator.GetGroupPartitionGrain<THub>(_clusterClient, partitionId);
                 subscription.AddGrain(partitionGrain);
             }
+
+            await Task.Run(
+                () => coordinatorGrain.AddConnectionToGroups(uniqueGroupNames, connectionId, subscription.Reference),
+                cancellationToken);
         }
         else
         {

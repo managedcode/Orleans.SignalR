@@ -109,6 +109,7 @@ If no new rule is detected -> do not update the file.
   - run broader suites only when you have something real to verify (avoid re-running the same command without changes)
   - run coverage once per change (it is heavier than tests)
 - Run tests in layers: new/changed -> related suite -> broader regressions
+- Final verification for code changes requires the full `dotnet test -c Debug` suite to pass; targeted test runs are only for iteration, not for closing the task
 - After tests pass: run format
 - After format: run build (final check)
 - Summarize changes and test results before marking complete
@@ -185,6 +186,7 @@ If no new rule is detected -> do not update the file.
 - Avoid `this.` qualification; prefer predefined types (`int` over `Int32`)
 - Never use `ConfigureAwait(false)`
 - No magic literals - extract to constants, enums, config
+- In concurrency-sensitive paths like `OrleansHubLifetimeManager`, prefer the smallest behavior-preserving fix; avoid widening the async/concurrency shape unless tests prove it is necessary, because this code is easy to make unsafe
 
 ### Diagnostics
 

@@ -34,6 +34,13 @@ public static class OrleansHubGroupExtensions
     {
         var serviceProvider = (hub.Context.GetHttpContext()?.RequestServices) ?? throw new InvalidOperationException("Unable to resolve SignalR services for the current hub connection.");
 
-        return serviceProvider.GetRequiredService<IOrleansGroupManager<THub>>();
+        var groupManager = serviceProvider.GetService<IOrleansGroupManager<THub>>();
+        if (groupManager is not null)
+        {
+            return groupManager;
+        }
+
+        var lifetimeManager = serviceProvider.GetRequiredService<HubLifetimeManager<THub>>();
+        return new OrleansGroupManager<THub>(lifetimeManager);
     }
 }

@@ -408,7 +408,7 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             }
             else
             {
-                continue;
+                partition = PartitionHelper.GetPartitionId(groupName, (uint)_currentPartitionCount);
             }
 
             ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(groupsByPartition, partition, out var exists);

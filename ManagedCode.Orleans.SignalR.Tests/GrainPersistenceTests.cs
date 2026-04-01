@@ -224,6 +224,37 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         }
     }
 
+    [Fact]
+    public async Task GroupCoordinatorBatchRemoveShouldCleanupPartitionWhenAssignmentMetadataIsMissingAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(client);
+        var connectionId = $"group-cleanup-{Guid.NewGuid():N}";
+        var groupName = $"group-drift-{Guid.NewGuid():N}";
+        var observer = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
+
+        var partitionId = await coordinator.GetPartitionForGroup(groupName);
+        var partition = NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, partitionId);
+
+        try
+        {
+            var addedPartitions = await coordinator.AddConnectionToGroups([groupName], connectionId, observer);
+            addedPartitions.ShouldContain(partitionId);
+            (await partition.HasConnection(connectionId)).ShouldBeTrue();
+
+            await coordinator.NotifyGroupRemoved(groupName);
+            (await partition.HasConnection(connectionId)).ShouldBeTrue();
+
+            var removedPartitions = await coordinator.RemoveConnectionFromGroups([groupName], connectionId, observer);
+            removedPartitions.ShouldContain(partitionId);
+            (await partition.HasConnection(connectionId)).ShouldBeFalse();
+        }
+        finally
+        {
+            await coordinator.RemoveConnectionFromGroups([groupName], connectionId, observer);
+        }
+    }
+
     private static async Task AssertRoutedAsync(Func<Task<bool>> sendAction, string reason)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);

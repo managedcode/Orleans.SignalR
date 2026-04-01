@@ -425,6 +425,105 @@ public class PartitioningTests
         }
     }
 
+    [Fact]
+    public async Task BatchGroupMembershipShouldCleanupTouchedPartitionsWhenDisconnectHappensMidJoinAsync()
+    {
+        var groupNames = Enumerable.Range(0, 512)
+            .Select(index => $"batch-disconnect-group-{index}-{Guid.NewGuid():N}")
+            .ToArray();
+
+        var connection = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
+
+        try
+        {
+            await connection.StartAsync();
+            var connectionId = connection.ConnectionId ?? throw new InvalidOperationException("ConnectionId was not initialized.");
+
+            var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(_siloCluster.Cluster.Client);
+            var partitionIds = (await Task.WhenAll(groupNames.Select(coordinator.GetPartitionForGroup)))
+                .Distinct()
+                .ToArray();
+            partitionIds.Length.ShouldBeGreaterThan(0);
+
+            var partitions = partitionIds
+                .Select(partitionId => NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(_siloCluster.Cluster.Client, partitionId))
+                .ToArray();
+
+            var joinTask = connection.InvokeAsync("AddToGroups", groupNames);
+
+            var joinStarted = await WaitForBatchJoinToStartAsync(partitions, connectionId, joinTask, TimeSpan.FromSeconds(3));
+
+            joinStarted.ShouldBeTrue();
+
+            await connection.StopAsync();
+
+            try
+            {
+                await joinTask;
+            }
+            catch (Exception ex) when (ex is HubException or InvalidOperationException or TaskCanceledException)
+            {
+                _testOutputHelper.WriteLine($"Join invocation ended after disconnect: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            var released = await WaitUntilAsync(
+                "all touched partitions to release disconnected connection after batch join",
+                async () => await GetTrackedPartitionCountAsync(partitions, connectionId) == 0,
+                progress: async () =>
+                    $"tracked={await GetTrackedPartitionCountAsync(partitions, connectionId)}/{partitions.Length}",
+                timeout: TimeSpan.FromSeconds(15));
+
+            released.ShouldBeTrue();
+        }
+        finally
+        {
+            await connection.DisposeAsync();
+        }
+    }
+
+    private static async Task<int> GetTrackedPartitionCountAsync(
+        IReadOnlyCollection<Core.Interfaces.ISignalRGroupPartitionGrain> partitions,
+        string connectionId)
+    {
+        var tracked = 0;
+
+        foreach (var partition in partitions)
+        {
+            if (await partition.HasConnection(connectionId))
+            {
+                tracked++;
+            }
+        }
+
+        return tracked;
+    }
+
+    private static async Task<bool> WaitForBatchJoinToStartAsync(
+        IReadOnlyCollection<Core.Interfaces.ISignalRGroupPartitionGrain> partitions,
+        string connectionId,
+        Task joinTask,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await GetTrackedPartitionCountAsync(partitions, connectionId) > 0 && !joinTask.IsCompleted)
+            {
+                return true;
+            }
+
+            if (joinTask.IsCompleted)
+            {
+                return false;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(5));
+        }
+
+        return await GetTrackedPartitionCountAsync(partitions, connectionId) > 0 && !joinTask.IsCompleted;
+    }
+
     private async Task<bool> WaitUntilAsync(
         string description,
         Func<Task<bool>> condition,

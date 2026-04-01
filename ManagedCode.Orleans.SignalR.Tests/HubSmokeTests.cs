@@ -90,6 +90,52 @@ public class HubSmokeTests
     }
 
     [Fact]
+    public async Task BatchGroupHelpersShouldWorkWithoutOrleansRegistrationAsync()
+    {
+        using var app = new TestWebApplication(_cluster, 8089, useOrleans: false, loggerAccessor: _loggerAccessor);
+        var groupNames = new[]
+        {
+            $"plain-group-alpha-{Guid.NewGuid():N}",
+            $"plain-group-beta-{Guid.NewGuid():N}"
+        };
+
+        var received = new ConcurrentQueue<string>();
+        var member = await StartConnectionAsync(app, received.Enqueue, null, _output);
+        var sender = await StartConnectionAsync(app, _ => { }, null, _output);
+
+        try
+        {
+            await member.InvokeAsync("AddToGroups", groupNames);
+
+            foreach (var groupName in groupNames)
+            {
+                await sender.InvokeAsync("GroupSendAsync", groupName, $"before:{groupName}");
+            }
+
+            await WaitUntilAsync(() => received.Count >= groupNames.Length, TimeSpan.FromSeconds(10));
+
+            received.Count.ShouldBe(groupNames.Length);
+
+            await member.InvokeAsync("RemoveFromGroups", groupNames);
+            while (received.TryDequeue(out _))
+            {
+            }
+
+            foreach (var groupName in groupNames)
+            {
+                await sender.InvokeAsync("GroupSendAsync", groupName, $"after:{groupName}");
+            }
+
+            await Task.Delay(500);
+            received.ShouldBeEmpty();
+        }
+        finally
+        {
+            await DisposeAsync(member, sender);
+        }
+    }
+
+    [Fact]
     public async Task UserMessageIsDeliveredToSpecificUserAsync()
     {
         var httpClient = _firstApp.CreateHttpClient();

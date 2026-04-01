@@ -19,6 +19,8 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 - [x] Restore fire-and-forget fan-out for multi-group and multi-user sends.
 - [x] Ensure per-target send failures are logged without blocking hub execution.
 - [x] Route package-specific batch group membership calls through the Orleans lifetime manager.
+- [x] Keep batch group helper calls usable when the host is running plain `AddSignalR()`.
+- [x] Add regression coverage for the batch helper path without Orleans registration.
 
 ## Main flow
 
@@ -38,6 +40,7 @@ flowchart TD
 - `AddOrleans()` registers `OrleansHubLifetimeManager<THub>` as the `HubLifetimeManager` implementation.
 - The lifetime manager creates a per-connection `Subscription` and registers observers with connection/group/user grains.
 - Package-specific batch group operations (`AddToGroupsAsync` / `RemoveFromGroupsAsync`) also route through the lifetime manager instead of looping over sequential single-group writes.
+- Hub batch helpers fall back to the registered `HubLifetimeManager<THub>` when `IOrleansGroupManager<THub>` is not explicitly registered, so the API still works on plain `AddSignalR()` hosts.
 - Detailed batching behavior and partition persistence rules live in `docs/Features/Group-Partitioning.md`.
 
 ## Configuration knobs
