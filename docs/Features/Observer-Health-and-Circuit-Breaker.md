@@ -20,6 +20,7 @@ Observer delivery is protected by health tracking, circuit breaker logic, and op
 - [x] Route grace-period expiration to observer cleanup and health-state removal.
 - [x] Offload observer notifications from the Orleans scheduler and document why it is critical.
 - [x] Add tests for circuit-breaker threshold behavior (enabled vs disabled).
+- [x] Keep grace-period state transitions on the Orleans scheduler and offload only observer replay I/O.
 
 ## Main flow
 
@@ -41,6 +42,7 @@ flowchart TD
 - Failed deliveries are recorded in a rolling failure window.
 - When thresholds are exceeded, the circuit opens and delivery is skipped.
 - If a grace period is configured, messages are buffered and replayed on recovery; expired grace periods remove observers.
+- Grace-period recovery mutates `ObserverHealthTracker` on the grain scheduler first, then replays buffered observer callbacks off-scheduler so Orleans-owned state is never touched from a thread-pool turn.
 - Without a grace period, reaching the failure threshold removes the observer immediately.
 
 ## Configuration knobs
