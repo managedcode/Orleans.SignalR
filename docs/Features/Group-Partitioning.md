@@ -23,9 +23,10 @@ Group operations are routed through a coordinator grain that assigns group names
 - [x] Add package-level batch group APIs for hub and host-service callers.
 - [x] Batch coordinator and partition updates so one request does not force sequential writes per group.
 - [x] Cover batch add/remove with integration tests and direct coordinator verification.
-- [x] Restore disconnect-safe subscription tracking for partitioned batch adds.
+- [x] Restore disconnect-safe cleanup for partitioned batch adds.
 - [x] Restore the hashed cleanup fallback when batch removals see missing coordinator assignments.
 - [x] Add regression tests for disconnect cleanup and degraded coordinator state.
+- [x] Re-run partition cleanup when a disconnected batch join finishes late so late partition adds cannot outlive the connection.
 
 ## Main flow
 
@@ -47,7 +48,7 @@ flowchart TD
 - Partition grains hold `group -> connection -> observer` mappings and emit fan-out to observers.
 - Empty groups trigger cleanup so partitions can shed state.
 - Batch membership operations collapse repeated coordinator writes into one persistence step per request and one partition write per touched partition.
-- Partitioned batch adds pre-register touched partitions in the connection subscription before the coordinator write finishes so disconnect cleanup still reaches every touched partition.
+- If that coordinator write finishes after the connection has already disconnected, the lifetime manager immediately issues a compensating batch remove through the coordinator so late partition adds do not recreate stale membership.
 - Batch removals fall back to the hashed partition when coordinator assignment metadata is missing, which preserves cleanup in degraded-state recovery scenarios.
 
 ## Configuration knobs

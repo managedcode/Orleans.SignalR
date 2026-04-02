@@ -186,7 +186,10 @@ If no new rule is detected -> do not update the file.
 - Avoid `this.` qualification; prefer predefined types (`int` over `Int32`)
 - Never use `ConfigureAwait(false)`
 - No magic literals - extract to constants, enums, config
+- Prefer the simplest clear implementation over incidental complexity, especially on hot paths; if two fixes are correct, choose the one that is easier to reason about and keeps group operations fast
 - In concurrency-sensitive paths like `OrleansHubLifetimeManager`, prefer the smallest behavior-preserving fix; avoid widening the async/concurrency shape unless tests prove it is necessary, because this code is easy to make unsafe
+- Never introduce explicit `lock`/`Monitor` synchronization in Orleans-related paths; fix races via ordering, idempotent cleanup, or Orleans/concurrent primitives instead of `_syncRoot`-style locking
+- For Orleans-facing changes, follow the request scheduling model explicitly: prefer grain-aligned ordering/idempotency fixes over host-side synchronization, because group operations must stay fast and consistent with Orleans execution semantics
 
 ### Diagnostics
 

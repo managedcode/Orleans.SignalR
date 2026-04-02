@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -8,8 +9,9 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 
 public sealed class Subscription(SignalRObserver observer) : IDisposable
 {
-    private readonly HashSet<IObserverConnectionManager> _grains = new();
-    private readonly HashSet<GrainId> _heartbeatGrainIds = new();
+    // Use ConcurrentDictionary as a concurrent hash-set because batch group mutations can overlap disconnect cleanup.
+    private readonly ConcurrentDictionary<IObserverConnectionManager, bool> _grains = new();
+    private readonly ConcurrentDictionary<GrainId, bool> _heartbeatGrainIds = new();
     private bool _disposed;
 
     public ISignalRObserver Reference { get; private set; } = default!;
@@ -20,7 +22,7 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
 
     public int PartitionId { get; private set; }
 
-    public IReadOnlyCollection<IObserverConnectionManager> Grains => _grains;
+    public IReadOnlyCollection<IObserverConnectionManager> Grains => _grains.IsEmpty ? [] : [.. _grains.Keys];
 
     public void Dispose()
     {
@@ -30,6 +32,7 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
         }
 
         _disposed = true;
+
         observer?.Dispose();
         _grains.Clear();
         _heartbeatGrainIds.Clear();
@@ -41,14 +44,14 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
 
     public void AddGrain(IObserverConnectionManager grain)
     {
-        _grains.Add(grain);
-        _heartbeatGrainIds.Add(((GrainReference)grain).GrainId);
+        _grains.TryAdd(grain, true);
+        _heartbeatGrainIds.TryAdd(((GrainReference)grain).GrainId, true);
     }
 
     public void RemoveGrain(IObserverConnectionManager grain)
     {
-        _grains.Remove(grain);
-        _heartbeatGrainIds.Remove(((GrainReference)grain).GrainId);
+        _grains.TryRemove(grain, out _);
+        _heartbeatGrainIds.TryRemove(((GrainReference)grain).GrainId, out _);
     }
 
     public void ClearGrains()
@@ -76,13 +79,13 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
 
     public ImmutableArray<GrainId> GetHeartbeatGrainIds()
     {
-        if (_heartbeatGrainIds.Count == 0)
+        if (_heartbeatGrainIds.IsEmpty)
         {
             return ImmutableArray<GrainId>.Empty;
         }
 
         var builder = ImmutableArray.CreateBuilder<GrainId>(_heartbeatGrainIds.Count);
-        foreach (var grainId in _heartbeatGrainIds)
+        foreach (var grainId in _heartbeatGrainIds.Keys)
         {
             builder.Add(grainId);
         }
