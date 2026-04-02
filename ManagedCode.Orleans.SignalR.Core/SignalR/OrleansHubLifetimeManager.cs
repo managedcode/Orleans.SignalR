@@ -368,19 +368,42 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             return;
         }
 
+        var subscriptionReference = subscription.Reference;
+
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
             var coordinatorGrain = NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient);
-            foreach (var groupName in uniqueGroupNames)
+            var partitionIds = await Task.Run(
+                () => coordinatorGrain.AddConnectionToGroups(uniqueGroupNames, connectionId, subscriptionReference),
+                cancellationToken);
+
+            if (IsConnectionDisconnected(connectionId))
             {
-                var partitionId = await Task.Run(() => coordinatorGrain.GetPartitionForGroup(groupName), cancellationToken);
+                await CleanupDisconnectedBatchPartitionMembershipAsync(
+                    coordinatorGrain,
+                    uniqueGroupNames,
+                    connectionId,
+                    subscriptionReference,
+                    cancellationToken);
+                return;
+            }
+
+            foreach (var partitionId in partitionIds)
+            {
                 var partitionGrain = NameHelperGenerator.GetGroupPartitionGrain<THub>(_clusterClient, partitionId);
                 subscription.AddGrain(partitionGrain);
             }
 
-            await Task.Run(
-                () => coordinatorGrain.AddConnectionToGroups(uniqueGroupNames, connectionId, subscription.Reference),
-                cancellationToken);
+            if (IsConnectionDisconnected(connectionId))
+            {
+                await CleanupDisconnectedBatchPartitionMembershipAsync(
+                    coordinatorGrain,
+                    uniqueGroupNames,
+                    connectionId,
+                    subscriptionReference,
+                    cancellationToken);
+                return;
+            }
         }
         else
         {
@@ -389,18 +412,46 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 .Distinct()
                 .ToArray();
 
-            foreach (var groupGrain in groupGrains)
-            {
-                subscription.AddGrain(groupGrain);
-            }
-
             var tasks = groupGrains
-                .Select(groupGrain => Task.Run(() => groupGrain.AddConnection(connectionId, subscription.Reference), cancellationToken))
+                .Select(groupGrain => Task.Run(() => groupGrain.AddConnection(connectionId, subscriptionReference), cancellationToken))
                 .ToArray();
 
             if (tasks.Length > 0)
             {
                 await Task.WhenAll(tasks);
+            }
+
+            if (IsConnectionDisconnected(connectionId))
+            {
+                var cleanupTasks = groupGrains
+                    .Select(groupGrain => Task.Run(() => groupGrain.RemoveConnection(connectionId, subscriptionReference), cancellationToken))
+                    .ToArray();
+
+                if (cleanupTasks.Length > 0)
+                {
+                    await Task.WhenAll(cleanupTasks);
+                }
+
+                return;
+            }
+
+            foreach (var groupGrain in groupGrains)
+            {
+                subscription.AddGrain(groupGrain);
+            }
+
+            if (IsConnectionDisconnected(connectionId))
+            {
+                var cleanupTasks = groupGrains
+                    .Select(groupGrain => Task.Run(() => groupGrain.RemoveConnection(connectionId, subscriptionReference), cancellationToken))
+                    .ToArray();
+
+                if (cleanupTasks.Length > 0)
+                {
+                    await Task.WhenAll(cleanupTasks);
+                }
+
+                return;
             }
         }
 
@@ -428,11 +479,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             return;
         }
 
+        var subscriptionReference = subscription.Reference;
+
         if (_orleansSignalOptions.Value.GroupPartitionCount > 1)
         {
             var coordinatorGrain = NameHelperGenerator.GetGroupCoordinatorGrain<THub>(_clusterClient);
             var partitionIds = await Task.Run(
-                () => coordinatorGrain.RemoveConnectionFromGroups(uniqueGroupNames, connectionId, subscription.Reference),
+                () => coordinatorGrain.RemoveConnectionFromGroups(uniqueGroupNames, connectionId, subscriptionReference),
                 cancellationToken);
 
             foreach (var partitionId in partitionIds)
@@ -455,7 +508,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 .ToArray();
 
             var tasks = groupGrains
-                .Select(groupGrain => Task.Run(() => groupGrain.RemoveConnection(connectionId, subscription.Reference), cancellationToken))
+                .Select(groupGrain => Task.Run(() => groupGrain.RemoveConnection(connectionId, subscriptionReference), cancellationToken))
                 .ToArray();
 
             if (tasks.Length > 0)
@@ -723,9 +776,29 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         return ordered.ToArray();
     }
 
+    private static async Task CleanupDisconnectedBatchPartitionMembershipAsync(
+        ISignalRGroupCoordinatorGrain coordinatorGrain,
+        string[] groupNames,
+        string connectionId,
+        ISignalRObserver subscriptionReference,
+        CancellationToken cancellationToken)
+    {
+        await Task.Run(
+            () => coordinatorGrain.RemoveConnectionFromGroups(groupNames, connectionId, subscriptionReference),
+            cancellationToken);
+    }
+
+    private bool IsConnectionDisconnected(string connectionId)
+    {
+        var connection = _connections[connectionId];
+        return connection is null || connection.ConnectionAborted.IsCancellationRequested;
+    }
+
     private Task UpdateConnectionHeartbeatAsync(string connectionId, Subscription subscription)
     {
-        if (!_orleansSignalOptions.Value.KeepEachConnectionAlive || string.IsNullOrEmpty(subscription.HubKey))
+        if (!_orleansSignalOptions.Value.KeepEachConnectionAlive ||
+            string.IsNullOrEmpty(subscription.HubKey) ||
+            IsConnectionDisconnected(connectionId))
         {
             return Task.CompletedTask;
         }

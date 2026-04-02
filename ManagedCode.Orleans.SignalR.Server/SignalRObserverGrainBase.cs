@@ -121,8 +121,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
         if (_gracePeriodEnabled && HealthTracker.IsInGracePeriod(connectionId))
         {
-            // Critical: do NOT replay buffered SignalR messages on the Orleans scheduler.
-            _ = Task.Run(() => RestoreObserverFromGracePeriodAsync(connectionId, observer));
+            _ = RestoreObserverFromGracePeriodAsync(connectionId, observer);
         }
     }
 
@@ -149,8 +148,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         if (_gracePeriodEnabled && _observerToConnectionId.TryGetValue(observer, out var connectionId) &&
             HealthTracker.IsInGracePeriod(connectionId))
         {
-            // Critical: do NOT replay buffered SignalR messages on the Orleans scheduler.
-            _ = Task.Run(() => RestoreObserverFromGracePeriodAsync(connectionId, observer));
+            _ = RestoreObserverFromGracePeriodAsync(connectionId, observer);
         }
     }
 
@@ -462,23 +460,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             connectionId,
             bufferedMessages.Count);
 
-        var replayedCount = 0;
-        foreach (var message in bufferedMessages)
-        {
-            try
-            {
-                await observer.OnNextAsync(message);
-                replayedCount++;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(
-                    ex,
-                    "Failed to replay buffered message to connection {ConnectionId}. Stopping replay.",
-                    connectionId);
-                break;
-            }
-        }
+        var replayedCount = await ReplayBufferedMessagesAsync(connectionId, observer, bufferedMessages);
 
         if (replayedCount > 0)
         {
@@ -495,6 +477,36 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         }
 
         return replayedCount;
+    }
+
+    private async Task<int> ReplayBufferedMessagesAsync(
+        string connectionId,
+        ISignalRObserver observer,
+        IReadOnlyList<HubMessage> bufferedMessages)
+    {
+        // Critical: do NOT replay buffered SignalR messages on the Orleans scheduler.
+        return await Task.Run(async () =>
+        {
+            var replayedCount = 0;
+            foreach (var message in bufferedMessages)
+            {
+                try
+                {
+                    await observer.OnNextAsync(message);
+                    replayedCount++;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(
+                        ex,
+                        "Failed to replay buffered message to connection {ConnectionId}. Stopping replay.",
+                        connectionId);
+                    break;
+                }
+            }
+
+            return replayedCount;
+        });
     }
 
     /// <summary>
