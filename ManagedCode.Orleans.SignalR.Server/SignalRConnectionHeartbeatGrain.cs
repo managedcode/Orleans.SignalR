@@ -30,6 +30,7 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
     private IDisposable? _timer;
     private long _leaseRenewedAtTimestamp;
     private int _registrationVersion;
+    private bool _registrationPersisted;
 
     public SignalRConnectionHeartbeatGrain(
         ILogger<SignalRConnectionHeartbeatGrain> logger,
@@ -47,6 +48,7 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
         if (_state.State.Registration is { } stored)
         {
             _registration = stored;
+            _registrationPersisted = true;
             RenewLease();
             _registrationVersion++;
             ResetTimer(stored.Interval);
@@ -60,23 +62,55 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
     public async Task Start(ConnectionHeartbeatRegistration registration)
     {
         var registrationChanged = !MatchesCurrentRegistration(registration);
+        if (registrationChanged)
+        {
+            _registrationPersisted = false;
+        }
+
         _registration = registration;
         RenewLease();
 
-        if (!registrationChanged && _timer is not null)
+        if (!registrationChanged && _timer is not null && _registrationPersisted)
         {
             return;
         }
 
-        _registrationVersion++;
-        ResetTimer(registration.Interval);
-        _logger.LogDebug("Heartbeat started or updated for connection grain {Key} (hub={Hub}, partitioned={Partitioned}, partitionId={PartitionId}).",
-            this.GetPrimaryKeyString(), registration.HubKey, registration.UsePartitioning, registration.PartitionId);
-        await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
+        if (registrationChanged || _timer is null)
         {
-            state.Registration = registration;
-            return true;
-        }));
+            _registrationVersion++;
+            ResetTimer(registration.Interval);
+            _logger.LogDebug("Heartbeat started or updated for connection grain {Key} (hub={Hub}, partitioned={Partitioned}, partitionId={PartitionId}).",
+                this.GetPrimaryKeyString(), registration.HubKey, registration.UsePartitioning, registration.PartitionId);
+        }
+
+        var persistenceVersion = _registrationVersion;
+        try
+        {
+            var persisted = await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
+            {
+                if (persistenceVersion != _registrationVersion || !MatchesCurrentRegistration(registration))
+                {
+                    return false;
+                }
+
+                state.Registration = registration;
+                return true;
+            }));
+
+            if (persisted && persistenceVersion == _registrationVersion && MatchesCurrentRegistration(registration))
+            {
+                _registrationPersisted = true;
+            }
+        }
+        catch
+        {
+            if (persistenceVersion == _registrationVersion && MatchesCurrentRegistration(registration))
+            {
+                _registrationPersisted = false;
+            }
+
+            throw;
+        }
     }
 
     public async Task Stop()
@@ -89,6 +123,7 @@ public sealed class SignalRConnectionHeartbeatGrain : Grain, ISignalRConnectionH
         var stoppedRegistration = _registration;
         ResetTimer(null);
         _registration = null;
+        _registrationPersisted = false;
         _leaseRenewedAtTimestamp = 0;
         var stopVersion = ++_registrationVersion;
         _logger.LogDebug("Heartbeat stopped for connection grain {Key}.", this.GetPrimaryKeyString());

@@ -9,7 +9,7 @@ User-targeted messages must reach all active connections for a user and provide 
 
 ## Decision
 
-Use `SignalRUserGrain` to track all connections for a user. When observers are live, messages are sent immediately. When no observers are available, messages are queued in persistent state with an expiration window and a maximum queue length. On reconnect, the user grain delivers buffered messages via `RequestMessage`.
+Use `SignalRUserGrain` to track all connections for a user. When observers are live, messages are sent immediately. When no observers are available, messages are added to a bounded persistent queue and the write completes before `SendToUser` returns. On reconnect, the user grain delivers buffered messages via `RequestMessage`; a message remains durable until the connection host confirms that its SignalR `WriteAsync` succeeded. This is at-least-once replay, so a crash can duplicate a delivery but cannot silently delete it before acknowledgement.
 
 ## Consequences
 
@@ -36,6 +36,10 @@ flowchart TD
 - [x] Track user connections and observers in `SignalRUserGrain`.
 - [x] Buffer messages when no observers are present with expiration metadata.
 - [x] Deliver buffered messages on reconnect via `RequestMessage`.
+- [x] Persist each offline enqueue in the request turn rather than waiting for deactivation.
+- [x] Give queued messages stable delivery IDs and retain them until a host-side write acknowledgement is durably applied.
+- [x] Replace the legacy dictionary payload with the acknowledged queue format for the new major version.
+- [x] Prove crash/reactivation retention and at-least-once acknowledgement semantics.
 
 ## References
 

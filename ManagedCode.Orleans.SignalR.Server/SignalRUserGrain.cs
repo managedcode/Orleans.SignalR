@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -78,68 +79,76 @@ public class SignalRUserGrain(
 
         if (LiveObservers.Count > 0)
         {
-            await DispatchToLiveObserversAsync(LiveObservers.Values, message);
+            DispatchToLiveObservers(LiveObservers.Values, message);
             return;
         }
 
-        if (ObserverManager.Count == 0)
+        var deliveryId = Guid.NewGuid();
+        var expiresAtUtc = DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval);
+        var maxMessages = _orleansSignalOptions.Value.MaxQueuedMessagesPerUser;
+        var removedByLimit = 0;
+        var persisted = await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
         {
-            // Enforce message queue limit to prevent unbounded memory growth
-            var maxMessages = _orleansSignalOptions.Value.MaxQueuedMessagesPerUser;
-            if (maxMessages > 0 && messagesStorage.State.Messages.Count >= maxMessages)
+            if (state.Queue.Any(item => item.DeliveryId == deliveryId))
             {
-                // Remove oldest messages to make room
-                var toRemove = messagesStorage.State.Messages.Count - maxMessages + 1;
-                var oldestMessages = messagesStorage.State.Messages
-                    .OrderBy(kvp => kvp.Value)
-                    .Take(toRemove)
-                    .Select(kvp => kvp.Key)
-                    .ToList();
-
-                foreach (var oldMessage in oldestMessages)
-                {
-                    messagesStorage.State.Messages.Remove(oldMessage);
-                }
-
-                Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.OfflineQueueLimit, toRemove);
-                Logger.LogWarning("Dropped {Count} oldest messages for user {User} due to queue limit {Limit}",
-                    toRemove, this.GetPrimaryKeyString(), maxMessages);
+                return false;
             }
 
-            messagesStorage.State.Messages.Add(message, DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval));
-            Metrics.RecordMessageBuffered(MetricsHubName);
+            RemoveExpiredMessages(state, DateTime.UtcNow);
+            state.Queue.Add(new QueuedHubMessage(deliveryId, message, expiresAtUtc));
+            removedByLimit = 0;
+            if (maxMessages > 0 && state.Queue.Count > maxMessages)
+            {
+                removedByLimit = state.Queue.Count - maxMessages;
+                state.Queue.RemoveRange(0, removedByLimit);
+            }
+
+            return true;
+        }));
+
+        if (!persisted)
+        {
             return;
         }
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
+        Metrics.RecordMessageBuffered(MetricsHubName);
+        if (removedByLimit > 0)
+        {
+            Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.OfflineQueueLimit, removedByLimit);
+            Logger.LogWarning(
+                "Dropped {Count} oldest messages for user {User} due to queue limit {Limit}",
+                removedByLimit,
+                this.GetPrimaryKeyString(),
+                maxMessages);
+        }
     }
 
     public async Task RequestMessage()
     {
-        if (messagesStorage.State.Messages.Count == 0)
+        List<QueuedHubMessage> pendingMessages = [];
+        await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
+        {
+            var removedExpired = RemoveExpiredMessages(state, DateTime.UtcNow);
+            pendingMessages = [.. state.Queue];
+            return removedExpired > 0;
+        }));
+
+        if (pendingMessages.Count == 0 || LiveObservers.Count == 0)
         {
             return;
         }
 
-        var currentDateTime = DateTime.UtcNow;
-        foreach (var message in messagesStorage.State.Messages.ToArray())
-        {
-            if (message.Value >= currentDateTime)
-            {
-                if (LiveObservers.Count > 0)
-                {
-                    await DispatchToLiveObserversAsync(LiveObservers.Values, message.Key);
-                }
-                else
-                {
-                    // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-                    await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message.Key)));
-                }
-            }
+        var observers = LiveObservers.Values.ToArray();
+        var userGrainKey = this.GetPrimaryKeyString();
+        var sourceGrainId = this.GetGrainId();
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        _ = Task.Run(() => ReplayPendingMessagesAsync(observers, pendingMessages, userGrainKey, sourceGrainId));
+    }
 
-            messagesStorage.State.Messages.Remove(message.Key);
-        }
+    public async Task AcknowledgeMessage(Guid deliveryId)
+    {
+        await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
+            state.Queue.RemoveAll(item => item.DeliveryId == deliveryId) > 0));
     }
 
     public Task Ping(ISignalRObserver observer)
@@ -164,16 +173,9 @@ public class SignalRUserGrain(
             await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(cancellationToken));
         }
 
-        var currentDateTime = DateTime.UtcNow;
-        foreach (var message in messagesStorage.State.Messages.ToArray())
-        {
-            if (message.Value <= currentDateTime)
-            {
-                messagesStorage.State.Messages.Remove(message.Key);
-            }
-        }
+        RemoveExpiredMessages(messagesStorage.State, DateTime.UtcNow);
 
-        if (messagesStorage.State.Messages.Count == 0)
+        if (messagesStorage.State.Queue.Count == 0)
         {
             await _stateWriteLock.RunAsync(() => messagesStorage.ClearStateSafeAsync(cancellationToken));
         }
@@ -181,6 +183,37 @@ public class SignalRUserGrain(
         {
             await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(cancellationToken));
         }
+    }
+
+    private async Task ReplayPendingMessagesAsync(
+        IReadOnlyList<ISignalRObserver> observers,
+        IReadOnlyList<QueuedHubMessage> messages,
+        string userGrainKey,
+        GrainId sourceGrainId)
+    {
+        foreach (var pending in messages)
+        {
+            foreach (var observer in observers)
+            {
+                try
+                {
+                    await observer.OnNextWithAcknowledgementAsync(
+                        pending.Message,
+                        pending.DeliveryId,
+                        userGrainKey,
+                        sourceGrainId);
+                }
+                catch (Exception exception)
+                {
+                    OnLiveObserverDispatchFailure(exception);
+                }
+            }
+        }
+    }
+
+    private static int RemoveExpiredMessages(HubMessageState state, DateTime utcNow)
+    {
+        return state.Queue.RemoveAll(item => item.ExpiresAtUtc <= utcNow);
     }
 
     protected override void OnLiveObserverDispatchFailure(Exception exception)

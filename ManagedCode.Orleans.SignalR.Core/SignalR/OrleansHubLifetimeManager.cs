@@ -609,7 +609,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         try
         {
             await invocationGrain.AddInvocation(null, invocationInfo);
-            var completionTask = invocationGrain.WaitForCompletion();
+            var completionTask = InvocationCompletionReader.ReadTerminalAsync(
+                invocationGrain,
+                connectionId,
+                invocationId,
+                cancellationToken);
 
             var invocationMessage = new InvocationMessage(invocationId, methodName, args);
 
@@ -644,7 +648,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
             try
             {
-                var completionMessage = await completionTask.WaitAsync(cancellationToken) ?? throw new IOException($"Invocation '{invocationId}' returned no result for connection '{connectionId}'.");
+                var completionMessage = await completionTask;
 
                 if (completionMessage.HasResult)
                 {
@@ -711,14 +715,31 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     private Subscription CreateConnectionObserver(HubConnectionContext connection)
     {
         WeakReference<HubConnectionContext> weakConnection = new(connection);
-        var subscription = CreateSubscription(message => OnNextAsync(weakConnection, message));
+        Subscription? subscription = null;
+        var observer = new SignalRObserver(
+            message => OnNextAsync(weakConnection, message),
+            (source, exception) => ObserverDeliveryFeedback.ReportFailureAsync(
+                _clusterClient,
+                source,
+                connection.ConnectionId,
+                subscription,
+                exception,
+                _logger),
+            source => ObserverDeliveryFeedback.RestoreAsync(
+                _clusterClient,
+                source,
+                connection.ConnectionId,
+                subscription,
+                _logger),
+            AcknowledgeUserMessageAsync);
+        subscription = CreateSubscription(observer);
         connection.Features.Set(subscription);
         return subscription;
     }
 
-    private Subscription CreateSubscription(Func<HubMessage, Task> onNextAction)
+    private Subscription CreateSubscription(SignalRObserver observer)
     {
-        var subscription = new Subscription(new SignalRObserver(onNextAction));
+        var subscription = new Subscription(observer);
         var reference = CreateObserverReference(subscription.GetObserver());
         subscription.SetReference(reference);
         return subscription;
@@ -733,7 +754,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         if (!connectionReference.TryGetTarget(out var connection))
         {
-            return;
+            throw new IOException("The target SignalR connection is no longer available.");
         }
         if (message is InvocationMessage { InvocationId: not null, Headers: not null } routedInvocation &&
             routedInvocation.Headers.TryGetValue(InvocationReturnTypeHeader, out var returnTypeName))
@@ -770,7 +791,13 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             //todo: maybe it's good idea to remove the connection?
 
             _logger.LogError(ex, "OnNextAsync connection {ConnectionConnectionId} failed", connection.ConnectionId);
+            throw;
         }
+    }
+
+    private Task AcknowledgeUserMessageAsync(Guid deliveryId, string userGrainKey)
+    {
+        return _clusterClient.GetGrain<ISignalRUserGrain>(userGrainKey).AcknowledgeMessage(deliveryId);
     }
 
     private static string GenerateInvocationId()

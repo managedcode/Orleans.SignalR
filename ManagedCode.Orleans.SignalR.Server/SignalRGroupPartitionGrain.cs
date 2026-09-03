@@ -43,7 +43,7 @@ public class SignalRGroupPartitionGrain(
         return _hubKey;
     }
 
-    public async Task SendToGroups(HubMessage message, string[] groupNames)
+    public Task SendToGroups(HubMessage message, string[] groupNames)
     {
         Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
             this.GetPrimaryKeyLong(),
@@ -55,19 +55,17 @@ public class SignalRGroupPartitionGrain(
         if (LiveObservers.Count > 0)
         {
             var targetConnections = CollectConnectionIds(groupNames, excludedConnections: null);
-            await DispatchToLiveObserversAsync(GetLiveObservers(targetConnections), message);
-            return;
+            DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
+            return Task.CompletedTask;
         }
 
         var targetObservers = CollectObservers(groupNames, excludedConnections: null);
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(
-            observer => observer.OnNextAsync(message),
-            observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
+        DispatchToObservers(message, observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
-    public async Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
+    public Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
     {
         Logger.LogDebug("SendToGroupsExcept invoked for partition {PartitionId} with groups {Groups}, excluded {Excluded} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
             this.GetPrimaryKeyLong(),
@@ -80,17 +78,15 @@ public class SignalRGroupPartitionGrain(
         if (LiveObservers.Count > 0)
         {
             var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
-            await DispatchToLiveObserversAsync(GetLiveObservers(targetConnections), message);
-            return;
+            DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
+            return Task.CompletedTask;
         }
 
         var excluded = new HashSet<string>(excludedConnectionIds);
         var targetObservers = CollectObservers(groupNames, excluded);
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(
-            observer => observer.OnNextAsync(message),
-            observer => targetObservers.Contains(observer.GetPrimaryKeyString())));
+        DispatchToObservers(message, observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
     public async Task AddConnection(string connectionId, ISignalRObserver observer)

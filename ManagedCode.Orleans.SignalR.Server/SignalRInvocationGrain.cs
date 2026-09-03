@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using ManagedCode.Communication.CQRS;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
@@ -24,7 +26,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     private readonly ObserverManager<ISignalRObserver> _observerManager;
     private readonly IPersistentState<InvocationInfo> _stateStorage;
     private readonly StateWriteLock _stateWriteLock = new();
-    private TaskCompletionSource<CompletionMessage?>? _completionSource;
+    private TaskCompletionSource<CompletionMessage> _completionAvailable = CreateCompletionSignal();
 
     public SignalRInvocationGrain(ILogger<SignalRInvocationGrain> logger,
         IOptions<OrleansSignalROptions> orleansSignalOptions, IOptions<HubOptions> hubOptions,
@@ -39,6 +41,17 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         _observerManager = new ObserverManager<ISignalRObserver>(expiration, _logger);
     }
 
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
+    {
+        await _stateStorage.ReadStateAsync(cancellationToken);
+        _stateStorage.State ??= new InvocationInfo();
+        if (_stateStorage.State.Completion is { } completion)
+        {
+            _completionAvailable.TrySetResult(completion);
+        }
+        await base.OnActivateAsync(cancellationToken);
+    }
+
     public async Task TryCompleteResult(string connectionId, HubMessage message)
     {
         Logs.TryCompleteResult(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), connectionId);
@@ -51,7 +64,12 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
 
         if (message is CompletionMessage completionMessage)
         {
-            _completionSource?.TrySetResult(completionMessage);
+            var persisted = await _stateWriteLock.RunAsync(() => _stateStorage.WriteStateSafeAsync(state =>
+                state.TryComplete(connectionId, completionMessage)));
+            if (persisted)
+            {
+                _completionAvailable.TrySetResult(completionMessage);
+            }
         }
 
         // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
@@ -61,7 +79,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     public Task<ReturnType> TryGetReturnType()
     {
         Logs.TryGetReturnType(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString());
-        if (_stateStorage.State == null)
+        if (_stateStorage.State is not { ConnectionId.Length: > 0, InvocationId.Length: > 0, Type.Length: > 0 } state)
         {
             return Task.FromResult(new ReturnType());
         }
@@ -69,46 +87,51 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         return Task.FromResult(new ReturnType
         {
             Result = true,
-            Type = _stateStorage.State.Type
+            Type = state.Type
         });
     }
 
-    public Task AddInvocation(ISignalRObserver? observer, InvocationInfo invocationInfo)
+    public async Task AddInvocation(ISignalRObserver? observer, InvocationInfo invocationInfo)
     {
         if (invocationInfo.InvocationId is null || invocationInfo.ConnectionId is null)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         Logs.AddInvocation(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), invocationInfo.InvocationId, invocationInfo.ConnectionId);
-
-        _completionSource = new TaskCompletionSource<CompletionMessage?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         if (observer is not null)
         {
             _observerManager.Subscribe(observer, observer);
         }
-        _stateStorage.State = invocationInfo;
-
-        return Task.CompletedTask;
+        await _stateWriteLock.RunAsync(() => _stateStorage.WriteStateSafeAsync(state => state.Register(invocationInfo)));
+        _completionAvailable = CreateCompletionSignal();
     }
 
     public async Task<InvocationInfo?> RemoveInvocation()
     {
         Logs.RemoveInvocation(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString());
         _observerManager.Clear();
-        _completionSource?.TrySetCanceled();
-        _completionSource = null;
         var into = _stateStorage.State;
         await _stateWriteLock.RunAsync(() => _stateStorage.ClearStateSafeAsync());
         DeactivateOnIdle();
         return into;
     }
 
-    public Task<CompletionMessage?> WaitForCompletion()
+    public IAsyncEnumerable<CqrsStreamChunk<InvocationProgress, CompletionMessage>> WaitForCompletion(
+        CancellationToken cancellationToken)
     {
-        var completionTask = _completionSource?.Task ?? Task.FromResult<CompletionMessage?>(null);
-        return completionTask;
+        return CqrsStream.Create<InvocationProgress, CompletionMessage>(async _ =>
+        {
+            if (_stateStorage.State.Completion is { } completion)
+            {
+                return completion;
+            }
+
+            // This signal is activation-local notification only. The terminal value is persisted
+            // before it is signalled and is restored on the next activation after a silo failure.
+            return await _completionAvailable.Task.WaitAsync(cancellationToken);
+        }, cancellationToken);
     }
 
     public Task Ping(ISignalRObserver observer)
@@ -150,4 +173,7 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
             await _stateWriteLock.RunAsync(() => _stateStorage.WriteStateSafeAsync(cancellationToken));
         }
     }
+
+    private static TaskCompletionSource<CompletionMessage> CreateCompletionSignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

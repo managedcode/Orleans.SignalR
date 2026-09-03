@@ -1,20 +1,379 @@
+using System.Collections.Concurrent;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
 
 namespace ManagedCode.Orleans.SignalR.Tests;
 
-[Collection(nameof(SmokeCluster))]
-public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutputHelper output)
+[Collection(nameof(SharedStorageCluster))]
+public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, ITestOutputHelper output)
 {
-    private readonly SmokeClusterFixture _cluster = cluster;
+    private readonly SharedStorageClusterFixture _cluster = cluster;
     private readonly ITestOutputHelper _output = output;
+
+    [Fact]
+    public async Task ObserverDeliveryFeedbackOpensCircuitAndRecoveryReplaysBufferedMessageAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var connectionId = $"feedback-{Guid.NewGuid():N}";
+        var partition = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, 0);
+        var delivered = new TaskCompletionSource<InvocationMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var localObserver = new SignalRObserver(message =>
+        {
+            if (message is InvocationMessage invocation)
+            {
+                delivered.TrySetResult(invocation);
+            }
+
+            return Task.CompletedTask;
+        });
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
+        var observerId = observer.GetPrimaryKeyString();
+
+        try
+        {
+            await partition.AddConnection(connectionId, observer);
+            for (var failure = 0; failure < 3; failure++)
+            {
+                await partition.AsReference<IObserverDeliveryFailureReporter>().ReportObserverDeliveryFailure(
+                    connectionId,
+                    observerId,
+                    nameof(IOException),
+                    "simulated SignalR WriteAsync failure");
+            }
+
+            (await partition.SendToConnection(
+                new InvocationMessage("buffered-during-open-circuit", Array.Empty<object?>()),
+                connectionId)).ShouldBeTrue();
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+            delivered.Task.IsCompleted.ShouldBeFalse("An open observer circuit must block immediate delivery.");
+
+            await partition.AddConnection(connectionId, observer);
+            var replayed = await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            replayed.Target.ShouldBe("buffered-during-open-circuit");
+        }
+        finally
+        {
+            await partition.RemoveConnection(connectionId, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+    }
+
+    [Fact]
+    public async Task ObserverDeliveryFailureIsReportedOnlyToTheSendingGrainAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var connectionId = $"feedback-source-{Guid.NewGuid():N}";
+        var userId = $"feedback-user-{Guid.NewGuid():N}";
+        var partition = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, 0);
+        var user = NameHelperGenerator.GetSignalRUserGrain<SimpleTestHub>(client, userId);
+        var failureReports = 0;
+        var allFailuresReported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var userDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Subscription? subscription = null;
+        using var localObserver = new SignalRObserver(
+            message => message is InvocationMessage { Target: "partition-failure" }
+                ? Task.FromException(new IOException("write failed"))
+                : CompleteUserDeliveryAsync(message, userDelivery),
+            async (source, exception) =>
+            {
+                await ObserverDeliveryFeedback.ReportFailureAsync(
+                    client,
+                    source,
+                    connectionId,
+                    subscription,
+                    exception,
+                    NullLogger.Instance);
+                if (Interlocked.Increment(ref failureReports) == 3)
+                {
+                    allFailuresReported.TrySetResult();
+                }
+            },
+            source => ObserverDeliveryFeedback.RestoreAsync(
+                client,
+                source,
+                connectionId,
+                subscription,
+                NullLogger.Instance));
+        subscription = new Subscription(localObserver);
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
+        subscription.SetReference(observer);
+
+        try
+        {
+            await partition.AddConnection(connectionId, observer);
+            await user.AddConnection(connectionId, observer);
+
+            for (var failure = 0; failure < 3; failure++)
+            {
+                (await partition.SendToConnection(
+                    new InvocationMessage("partition-failure", Array.Empty<object?>()),
+                    connectionId)).ShouldBeTrue();
+            }
+
+            await allFailuresReported.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await user.SendToUser(new InvocationMessage("user-probe", Array.Empty<object?>()));
+            await userDelivery.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            await partition.RemoveConnection(connectionId, observer);
+            await user.RemoveConnection(connectionId, observer);
+            subscription.DisposeReference(client.DeleteObjectReference<ISignalRObserver>);
+        }
+    }
+
+    [Fact]
+    public async Task OfflineUserMessageSurvivesReactivationAndIsRemovedOnlyAfterDeliveryAcknowledgementAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var management = client.GetGrain<IManagementGrain>(0);
+        var userId = $"offline/user?{Guid.NewGuid():N}";
+        var connectionId = $"offline-connection-{Guid.NewGuid():N}";
+        var user = NameHelperGenerator.GetSignalRUserGrain<SimpleTestHub>(client, userId);
+        var message = new InvocationMessage("offline-durable", ["payload"]);
+        var firstDelivery = new TaskCompletionSource<InvocationMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await user.SendToUser(message);
+        await management.ForceActivationCollection(TimeSpan.Zero);
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        using var firstLocalObserver = new SignalRObserver(
+            delivered =>
+            {
+                if (delivered is InvocationMessage invocation)
+                {
+                    firstDelivery.TrySetResult(invocation);
+                }
+
+                return Task.CompletedTask;
+            },
+            onDeliveryAcknowledged: (deliveryId, userGrainKey) =>
+            {
+                userGrainKey.ShouldBe(user.GetPrimaryKeyString());
+                return user.AcknowledgeMessage(deliveryId);
+            });
+        var firstObserver = client.CreateObjectReference<ISignalRObserver>(firstLocalObserver);
+
+        try
+        {
+            await user.AddConnection(connectionId, firstObserver);
+            await user.RequestMessage();
+
+            var delivered = await firstDelivery.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            delivered.Target.ShouldBe("offline-durable");
+            delivered.Arguments.ShouldBe(["payload"]);
+
+            await user.RemoveConnection(connectionId, firstObserver);
+            await management.ForceActivationCollection(TimeSpan.Zero);
+            await Task.Delay(TimeSpan.FromSeconds(2));
+
+            var duplicateDelivery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var secondLocalObserver = new SignalRObserver(_ =>
+            {
+                duplicateDelivery.TrySetResult();
+                return Task.CompletedTask;
+            });
+            var secondObserver = client.CreateObjectReference<ISignalRObserver>(secondLocalObserver);
+
+            try
+            {
+                await user.AddConnection(connectionId, secondObserver);
+                await user.RequestMessage();
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                duplicateDelivery.Task.IsCompleted.ShouldBeFalse("Acknowledged offline messages must not replay again.");
+                await user.RemoveConnection(connectionId, secondObserver);
+            }
+            finally
+            {
+                client.DeleteObjectReference<ISignalRObserver>(secondObserver);
+            }
+        }
+        finally
+        {
+            client.DeleteObjectReference<ISignalRObserver>(firstObserver);
+        }
+    }
+
+    [Fact]
+    public async Task OfflineUserQueueDropsOldestMessagesAtTheConfiguredBoundAsync()
+    {
+        const int queueLimit = 100;
+        var client = _cluster.Cluster.Client;
+        var user = NameHelperGenerator.GetSignalRUserGrain<SimpleTestHub>(
+            client,
+            $"bounded-user-{Guid.NewGuid():N}");
+
+        for (var index = 0; index < queueLimit + 2; index++)
+        {
+            await user.SendToUser(new InvocationMessage($"bounded-{index}", Array.Empty<object?>()));
+        }
+
+        var connectionId = $"bounded-connection-{Guid.NewGuid():N}";
+        var deliveredTargets = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        var allDelivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var localObserver = new SignalRObserver(
+            message =>
+            {
+                if (message is InvocationMessage invocation &&
+                    deliveredTargets.TryAdd(invocation.Target, 0) &&
+                    deliveredTargets.Count == queueLimit)
+                {
+                    allDelivered.TrySetResult();
+                }
+
+                return Task.CompletedTask;
+            },
+            onDeliveryAcknowledged: (deliveryId, _) => user.AcknowledgeMessage(deliveryId));
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
+
+        try
+        {
+            await user.AddConnection(connectionId, observer);
+            await user.RequestMessage();
+            await allDelivered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            deliveredTargets.Count.ShouldBe(queueLimit);
+            deliveredTargets.ContainsKey("bounded-0").ShouldBeFalse();
+            deliveredTargets.ContainsKey("bounded-1").ShouldBeFalse();
+            deliveredTargets.ContainsKey("bounded-2").ShouldBeTrue();
+            deliveredTargets.ContainsKey("bounded-101").ShouldBeTrue();
+        }
+        finally
+        {
+            await user.RemoveConnection(connectionId, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+    }
+
+    [Fact]
+    public async Task ExpiredOfflineUserMessageIsNotReplayedAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var user = NameHelperGenerator.GetSignalRUserGrain<SimpleTestHub>(
+            client,
+            $"expired-user-{Guid.NewGuid():N}");
+        await user.SendToUser(new InvocationMessage("expired-message", Array.Empty<object?>()));
+        await Task.Delay(TestDefaults.MessageRetention + TimeSpan.FromMilliseconds(500));
+
+        var connectionId = $"expired-connection-{Guid.NewGuid():N}";
+        var delivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var localObserver = new SignalRObserver(_ =>
+        {
+            delivered.TrySetResult();
+            return Task.CompletedTask;
+        });
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
+
+        try
+        {
+            await user.AddConnection(connectionId, observer);
+            await user.RequestMessage();
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+            delivered.Task.IsCompleted.ShouldBeFalse("Expired offline messages must be removed instead of replayed.");
+        }
+        finally
+        {
+            await user.RemoveConnection(connectionId, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+    }
+
+    [Fact]
+    public async Task InvocationCompletionRemainsObservableAfterReactivationAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var management = client.GetGrain<IManagementGrain>(0);
+        var connectionId = $"invocation-connection-{Guid.NewGuid():N}";
+        var invocationId = $"invocation/{Guid.NewGuid():N}";
+        var invocation = NameHelperGenerator.GetInvocationGrain<SimpleTestHub>(client, invocationId);
+        var completion = new CompletionMessage(invocationId, error: null, result: "durable-result", hasResult: true);
+
+        try
+        {
+            await invocation.AddInvocation(null, new InvocationInfo(connectionId, invocationId, typeof(GrainPersistenceTests)));
+            await invocation.TryCompleteResult(connectionId, completion);
+
+            await management.ForceActivationCollection(TimeSpan.Zero);
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            var restoredReturnType = await invocation.TryGetReturnType();
+            restoredReturnType.Result.ShouldBeTrue("Invocation registration was not restored after reactivation.");
+            restoredReturnType.GetReturnType().ShouldBe(
+                typeof(GrainPersistenceTests),
+                "The persisted assembly-qualified return type was not restored after reactivation.");
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            CompletionMessage? observed = null;
+            await foreach (var chunk in invocation.WaitForCompletion(cancellation.Token)
+                               .WithCancellation(cancellation.Token))
+            {
+                if (chunk.TryGetResult(out var result))
+                {
+                    observed = result;
+                    break;
+                }
+            }
+
+            observed.ShouldNotBeNull();
+            observed.InvocationId.ShouldBe(invocationId);
+            observed.Result.ShouldBe("durable-result");
+        }
+        finally
+        {
+            await invocation.RemoveInvocation();
+        }
+    }
+
+    [Fact]
+    public async Task EmptyInvocationStateDoesNotReportAReturnTypeAsync()
+    {
+        var invocation = NameHelperGenerator.GetInvocationGrain<SimpleTestHub>(
+            _cluster.Cluster.Client,
+            $"empty-invocation-{Guid.NewGuid():N}");
+
+        var returnType = await invocation.TryGetReturnType();
+
+        returnType.Result.ShouldBeFalse();
+        returnType.Type.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task InvocationCompletionStreamDoesNotBlockCompletionTurnAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var connectionId = $"stream-connection-{Guid.NewGuid():N}";
+        var invocationId = $"stream-invocation-{Guid.NewGuid():N}";
+        var invocation = NameHelperGenerator.GetInvocationGrain<SimpleTestHub>(client, invocationId);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await invocation.AddInvocation(null, new InvocationInfo(connectionId, invocationId, typeof(string)));
+            var terminalTask = ReadTerminalCompletionAsync(invocation, cancellation.Token);
+            await Task.Yield();
+
+            await invocation.TryCompleteResult(
+                connectionId,
+                new CompletionMessage(invocationId, error: null, result: "stream-result", hasResult: true));
+
+            var terminal = await terminalTask;
+            terminal.InvocationId.ShouldBe(invocationId);
+            terminal.Result.ShouldBe("stream-result");
+        }
+        finally
+        {
+            await invocation.RemoveInvocation();
+        }
+    }
 
     [Fact]
     public async Task ConnectionPartitionPersistsConnectionStateAfterDeactivationAsync()
@@ -271,6 +630,22 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         }
     }
 
+    private static async Task<CompletionMessage> ReadTerminalCompletionAsync(
+        ISignalRInvocationGrain invocation,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var chunk in invocation.WaitForCompletion(cancellationToken)
+                           .WithCancellation(cancellationToken))
+        {
+            if (chunk.TryGetResult(out var completion))
+            {
+                return completion;
+            }
+        }
+
+        throw new InvalidOperationException("Invocation completion stream ended without a terminal result.");
+    }
+
     private static async Task AssertRoutedAsync(Func<Task<bool>> sendAction, string reason)
     {
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
@@ -302,5 +677,15 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         }
 
         throw new InvalidOperationException("Unable to find a connection id that hashes to a different partition.");
+    }
+
+    private static Task CompleteUserDeliveryAsync(HubMessage message, TaskCompletionSource completion)
+    {
+        if (message is InvocationMessage { Target: "user-probe" })
+        {
+            completion.TrySetResult();
+        }
+
+        return Task.CompletedTask;
     }
 }

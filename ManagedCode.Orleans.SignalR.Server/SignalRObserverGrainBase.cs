@@ -18,7 +18,7 @@ using Orleans.Utilities;
 
 namespace ManagedCode.Orleans.SignalR.Server;
 
-public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : class, IGrain
+public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliveryFailureReporter where TGrain : class, IGrain
 {
     private readonly Dictionary<string, ISignalRObserver> _liveObservers = new(StringComparer.Ordinal);
     private readonly Dictionary<ISignalRObserver, string> _observerToConnectionId = new(ReferenceEqualityComparer.Instance);
@@ -246,7 +246,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// Failed observers are tracked and may have their circuits opened or be marked dead
     /// if they exceed the failure threshold.
     /// </summary>
-    protected Task DispatchToLiveObserversAsync(IEnumerable<ISignalRObserver> observers, HubMessage message)
+    protected void DispatchToLiveObservers(IEnumerable<ISignalRObserver> observers, HubMessage message)
     {
         ArgumentNullException.ThrowIfNull(observers);
 
@@ -256,14 +256,14 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             targets.Add((FindConnectionIdForObserver(observer), observer));
         }
 
-        return DispatchToLiveObserversCoreAsync(targets, message);
+        DispatchToLiveObserversCore(targets, message);
     }
 
     /// <summary>
     /// Dispatches a message to live observers with connection ID tracking for health monitoring.
     /// Respects circuit breaker state and buffers messages during grace period.
     /// </summary>
-    protected Task DispatchToLiveObserversWithTrackingAsync(IEnumerable<(string ConnectionId, ISignalRObserver Observer)> observers, HubMessage message)
+    protected void DispatchToLiveObserversWithTracking(IEnumerable<(string ConnectionId, ISignalRObserver Observer)> observers, HubMessage message)
     {
         ArgumentNullException.ThrowIfNull(observers);
 
@@ -273,11 +273,23 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             targets.Add((connectionId, observer));
         }
 
-        return DispatchToLiveObserversCoreAsync(targets, message);
+        DispatchToLiveObserversCore(targets, message);
     }
 
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "One observer failure must not terminate fan-out to the remaining observers.")]
-    private async Task DispatchToLiveObserversCoreAsync(
+    protected void DispatchToObservers(
+        HubMessage message,
+        Func<ISignalRObserver, bool>? predicate = null)
+    {
+        var sourceGrainId = this.GetGrainId();
+
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        // Observer calls are one-way, so the grain turn must not wait for their enqueue completion.
+        _ = Task.Run(() => ObserverManager.Notify(
+            observer => observer.OnNextWithDeliverySourceAsync(message, sourceGrainId),
+            predicate));
+    }
+
+    private void DispatchToLiveObserversCore(
         List<(string? ConnectionId, ISignalRObserver Observer)> candidates,
         HubMessage message)
     {
@@ -328,32 +340,10 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         }
 
         // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        // Keep one offloaded worker per fan-out and enqueue one-way observer calls sequentially;
-        // a Task.Run per observer creates an unbounded thread-pool burst under group/broadcast load.
-        var failures = await Task.Run(async () =>
-        {
-            var errors = new Exception?[targets.Count];
-            for (var index = 0; index < targets.Count; index++)
-            {
-                try
-                {
-                    await targets[index].Observer.OnNextAsync(message);
-                }
-                catch (Exception exception)
-                {
-                    errors[index] = exception;
-                }
-            }
-
-            return errors;
-        });
-
-        for (var index = 0; index < targets.Count; index++)
-        {
-            var failure = failures[index];
-            var completion = failure is null ? Task.CompletedTask : Task.FromException(failure);
-            await ObserveLiveObserverAsync(completion, targets[index].ConnectionId, targets[index].Observer);
-        }
+        // The upstream calls are one-way, so the grain must not wait for enqueue completion. Actual
+        // SignalR WriteAsync failure/recovery is reported separately by the connection host.
+        var sourceGrainId = this.GetGrainId();
+        _ = Task.Run(() => EnqueueObserverFanOutAsync(targets, message, sourceGrainId));
     }
 
     /// <summary>
@@ -364,63 +354,91 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         return _observerToConnectionId.GetValueOrDefault(observer);
     }
 
-    private async Task ObserveLiveObserverAsync(Task pending, string? connectionId, ISignalRObserver observer)
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "One observer enqueue failure must not terminate fan-out to the remaining observers.")]
+    private async Task EnqueueObserverFanOutAsync(
+        IReadOnlyList<(string? ConnectionId, ISignalRObserver Observer)> targets,
+        HubMessage message,
+        GrainId sourceGrainId)
     {
+        var pending = new List<Task>(targets.Count);
+        foreach (var target in targets)
+        {
+            try
+            {
+                pending.Add(target.Observer.OnNextWithDeliverySourceAsync(message, sourceGrainId));
+            }
+            catch (Exception exception)
+            {
+                OnLiveObserverDispatchFailure(exception);
+            }
+        }
+
         try
         {
-            var circuitState = connectionId is null
-                ? CircuitState.Closed
-                : HealthTracker.GetCircuitState(connectionId);
-            await pending;
-
-            // Record success - this closes circuit breaker if in half-open state
-            if (connectionId is not null)
-            {
-                HealthTracker.RecordSuccess(connectionId);
-                if (circuitState == CircuitState.HalfOpen &&
-                    HealthTracker.GetCircuitState(connectionId) == CircuitState.Closed)
-                {
-                    Metrics.RecordCircuitBreakerClosed(MetricsHubName);
-                }
-            }
+            await Task.WhenAll(pending);
         }
         catch (Exception exception)
         {
-            if (connectionId is null)
-            {
-                OnLiveObserverDispatchFailure(exception);
-                return;
-            }
-
-            Metrics.RecordObserverFailure(MetricsHubName, exception.GetType().Name);
-            // Record failure and handle result
-            var result = HealthTracker.RecordFailure(connectionId, exception);
-
-            switch (result)
-            {
-                case FailureResult.Dead:
-                    Logger.LogWarning(
-                        exception,
-                        "Observer for connection {ConnectionId} exceeded failure threshold ({Threshold}), marking as dead.",
-                        connectionId,
-                        _failureThreshold);
-                    OnObserverDead(connectionId, observer, exception);
-                    break;
-
-                case FailureResult.CircuitOpened:
-                    Logger.LogWarning(
-                        exception,
-                        "Circuit breaker opened for connection {ConnectionId} after failure threshold reached. Will retry after cooldown.",
-                        connectionId);
-                    OnCircuitOpened(connectionId, observer, exception);
-                    break;
-
-                case FailureResult.Healthy:
-                default:
-                    OnLiveObserverDispatchFailure(exception);
-                    break;
-            }
+            OnLiveObserverDispatchFailure(exception);
         }
+    }
+
+    public Task ReportObserverDeliveryFailure(
+        string connectionId,
+        string observerId,
+        string failureType,
+        string failureMessage)
+    {
+        if (!TryGetMatchingObserver(connectionId, observerId, out var observer))
+        {
+            return Task.CompletedTask;
+        }
+
+        var exception = new ObserverDeliveryException(failureType, failureMessage);
+        Metrics.RecordObserverFailure(MetricsHubName, failureType);
+        var result = HealthTracker.RecordFailure(connectionId, exception);
+
+        switch (result)
+        {
+            case FailureResult.Dead:
+                Logger.LogWarning(
+                    exception,
+                    "Observer for connection {ConnectionId} exceeded failure threshold ({Threshold}), marking as dead.",
+                    connectionId,
+                    _failureThreshold);
+                OnObserverDead(connectionId, observer, exception);
+                break;
+
+            case FailureResult.CircuitOpened:
+                Logger.LogWarning(
+                    exception,
+                    "Circuit breaker opened for connection {ConnectionId} after real SignalR write failures reached the threshold.",
+                    connectionId);
+                OnCircuitOpened(connectionId, observer, exception);
+                break;
+
+            case FailureResult.Healthy:
+            default:
+                OnLiveObserverDispatchFailure(exception);
+                break;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private bool TryGetMatchingObserver(string connectionId, string observerId, out ISignalRObserver observer)
+    {
+        if (!_liveObservers.TryGetValue(connectionId, out observer!))
+        {
+            return false;
+        }
+
+        return string.Equals(observer.GetPrimaryKeyString(), observerId, StringComparison.Ordinal);
+    }
+
+    private sealed class ObserverDeliveryException(string failureType, string failureMessage)
+        : Exception($"{failureType}: {failureMessage}")
+    {
     }
 
     /// <summary>
@@ -506,6 +524,8 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
         ISignalRObserver observer,
         IReadOnlyList<HubMessage> bufferedMessages)
     {
+        var sourceGrainId = this.GetGrainId();
+
         // Critical: do NOT replay buffered SignalR messages on the Orleans scheduler.
         return await Task.Run(async () =>
         {
@@ -514,7 +534,7 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
             {
                 try
                 {
-                    await observer.OnNextAsync(message);
+                    await observer.OnNextWithDeliverySourceAsync(message, sourceGrainId);
                     replayedCount++;
                 }
                 catch (Exception ex)

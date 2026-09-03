@@ -68,21 +68,21 @@ public class SignalRConnectionHolderGrain(
         }
     }
 
-    public async Task SendToAll(HubMessage message)
+    public Task SendToAll(HubMessage message)
     {
         Logs.SendToAll(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString());
 
         if (LiveObservers.Count > 0)
         {
-            await DispatchToLiveObserversAsync(LiveObservers.Values, message);
-            return;
+            DispatchToLiveObservers(LiveObservers.Values, message);
+            return Task.CompletedTask;
         }
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message)));
+        DispatchToObservers(message);
+        return Task.CompletedTask;
     }
 
-    public async Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds)
+    public Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds)
     {
         Logs.SendToAllExcept(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), excludedConnectionIds);
 
@@ -90,8 +90,8 @@ public class SignalRConnectionHolderGrain(
         {
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
-            await DispatchToLiveObserversAsync(targets, message);
-            return;
+            DispatchToLiveObservers(targets, message);
+            return Task.CompletedTask;
         }
 
         var hashSet = new HashSet<string>();
@@ -103,34 +103,31 @@ public class SignalRConnectionHolderGrain(
             }
         }
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => !hashSet.Contains(connection.GetPrimaryKeyString())));
+        DispatchToObservers(message, connection => !hashSet.Contains(connection.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
-    public async Task<bool> SendToConnection(HubMessage message, string connectionId)
+    public Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
         Logs.SendToConnection(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionId);
 
         if (!stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         if (TryGetLiveObserver(connectionId, out var liveObserver))
         {
-            _ = DispatchToLiveObserversAsync([liveObserver], message);
-            return true;
+            DispatchToLiveObservers([liveObserver], message);
+            return Task.FromResult(true);
         }
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => connection.GetPrimaryKeyString() == observer));
+        DispatchToObservers(message, connection => connection.GetPrimaryKeyString() == observer);
 
-        return true;
+        return Task.FromResult(true);
     }
 
-    public async Task SendToConnections(HubMessage message, string[] connectionIds)
+    public Task SendToConnections(HubMessage message, string[] connectionIds)
     {
         Logs.SendToConnections(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionIds);
 
@@ -148,8 +145,8 @@ public class SignalRConnectionHolderGrain(
 
             if (targets is not null)
             {
-                await DispatchToLiveObserversAsync(targets, message);
-                return;
+                DispatchToLiveObservers(targets, message);
+                return Task.CompletedTask;
             }
         }
 
@@ -162,9 +159,8 @@ public class SignalRConnectionHolderGrain(
             }
         }
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => ObserverManager.Notify(s => s.OnNextAsync(message),
-            connection => hashSet.Contains(connection.GetPrimaryKeyString())));
+        DispatchToObservers(message, connection => hashSet.Contains(connection.GetPrimaryKeyString()));
+        return Task.CompletedTask;
     }
 
     public Task Ping(ISignalRObserver observer)

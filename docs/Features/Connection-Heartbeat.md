@@ -20,7 +20,9 @@ When keep-alive is enabled, each connection is associated with a heartbeat grain
 - [x] Expire the lease and clean target routing state when renewal stops.
 - [x] Keep one connection's renewal failure from stopping renewals for other connections.
 - [x] Expose every renewal failure through a counter and rate-limit warning logs.
-- [x] Verify the full regression and coverage suites (87/87 tests; 65.66% line and 54.49% branch coverage); focused lease renewal, expiry, cleanup, metrics, HA, and load checks are complete.
+- [x] Retry persistence for an unchanged registration when the previous storage write failed.
+- [x] Prove the retry with a deterministic fail-first storage test.
+- [x] Verify the full regression and coverage suites (109/109 tests; 70.77% line and 61.65% branch coverage); focused lease renewal, expiry, cleanup, metrics, HA, and load checks are complete.
 
 ## Main flow
 

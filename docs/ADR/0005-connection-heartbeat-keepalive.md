@@ -54,6 +54,8 @@ flowchart TD
 - [x] Expire and deactivate an unrenewed heartbeat.
 - [x] Prove heartbeat and target-routing cleanup after a server-aborted connection and after lease loss.
 - [x] Make renewal failure observable without allowing one connection to terminate the renewal loop.
+- [x] Track whether the current registration was durably written and retry an unchanged renewal after a failed write.
+- [x] Add a regression test which fails the first write and proves the next identical renewal persists state.
 
 ## References
 

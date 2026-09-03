@@ -121,8 +121,9 @@ If no new rule is detected -> do not update the file.
 
 - For code reviews, be extra thorough and explicitly call out low-value/AI-sounding changes and whether changes actually improve behavior, performance, or safety
 - Never run SignalR work on Orleans scheduler/context; offload to dedicated tasks/threads to avoid blocking
+- Never add synthetic heartbeats, polling loops, or waits to long-running completion flows; publish the real durable terminal event through the CQRS stream and wait only where the caller's contract requires a result
 - Use one-way calls only for best-effort fan-out or cleanup; a completion which unblocks a request/response operation must be acknowledged, while its SignalR work remains off the Orleans scheduler
-- Preserve intentional `Task.Run` and fire-and-forget boundaries around SignalR observer notifications and long fan-out; never execute an observer callback directly on the Orleans scheduler. Upstream fan-out stays one-way, while a grain may await one bounded offloaded worker for backpressure because that await yields the scheduler instead of blocking its thread.
+- Preserve intentional `Task.Run` and fire-and-forget boundaries around SignalR observer notifications and long fan-out; never execute an observer callback directly on the Orleans scheduler. Upstream fan-out stays one-way and the grain must not await the offloaded observer-enqueue worker; use one bounded worker per fan-out instead of one `Task.Run` per observer.
 
 ### Documentation (ALL TASKS)
 
@@ -194,6 +195,8 @@ If no new rule is detected -> do not update the file.
 - In concurrency-sensitive paths like `OrleansHubLifetimeManager`, prefer the smallest behavior-preserving fix; avoid widening the async/concurrency shape unless tests prove it is necessary, because this code is easy to make unsafe
 - Never introduce explicit `lock`/`Monitor` synchronization in Orleans-related paths; fix races via ordering, idempotent cleanup, or Orleans/concurrent primitives instead of `_syncRoot`-style locking
 - For Orleans-facing changes, follow the request scheduling model explicitly: prefer grain-aligned ordering/idempotency fixes over host-side synchronization, because group operations must stay fast and consistent with Orleans execution semantics
+- Do not add public grain methods as implementation conveniences; reuse existing contracts where semantics remain correct, and add a method only when the required delivery/durability guarantee cannot be expressed by the existing API
+- For a new major library contract, do not retain legacy state/key compatibility unless explicitly requested; prefer one clean schema and accept the intentional breaking change
 
 ### Diagnostics
 

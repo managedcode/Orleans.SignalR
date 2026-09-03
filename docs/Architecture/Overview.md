@@ -81,6 +81,7 @@ flowchart TD
   GroupTarget["SignalRGroupGrain / SignalRGroupPartitionGrain"]
   Heartbeat["SignalRConnectionHeartbeatGrain"]
   ObserverBase["SignalRObserverGrainBase"]
+  KeyEncoder["NameHelperGenerator v2 leaf keys"]
 
   ClientDI --> Lifetime
   ServerDI --> Lifetime
@@ -90,6 +91,7 @@ flowchart TD
   Lifetime --> ConnCoordinator --> ConnTarget
   Lifetime --> GroupCoordinator --> GroupTarget
   Lifetime --> Heartbeat
+  Lifetime --> KeyEncoder
   ConnTarget --> ObserverBase
   GroupTarget --> ObserverBase
 ```
@@ -139,6 +141,7 @@ flowchart TD
 - Connection coordinator and targets: `ManagedCode.Orleans.SignalR.Server/SignalRConnectionCoordinatorGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRConnectionHolderGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRConnectionPartitionGrain.cs`
 - Group coordinator and targets: `ManagedCode.Orleans.SignalR.Server/SignalRGroupCoordinatorGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRGroupGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRGroupPartitionGrain.cs`
 - Connection heartbeat: `ManagedCode.Orleans.SignalR.Server/SignalRConnectionHeartbeatGrain.cs`
+- Versioned leaf-grain keys: `ManagedCode.Orleans.SignalR.Core/SignalR/NameHelperGenerator.cs`, `docs/Features/Versioned-Grain-Keys.md`
 - Microsoft.Orleans.Client / Microsoft.Orleans.Server: `Directory.Packages.props`
 - SignalR metrics: `docs/Features/Diagnostics-Metrics.md`
 
@@ -154,6 +157,7 @@ flowchart TD
   - `docs/ADR/0007-invocation-grain-for-client-invocations.md`
   - `docs/ADR/0008-typed-orleans-hub-context.md`
   - `docs/ADR/0009-user-fanout-and-offline-buffering.md`
+  - `docs/ADR/0010-versioned-grain-key-encoding.md`
 - Features
   - `docs/Features/Connection-Partitioning.md`
   - `docs/Features/Group-Partitioning.md`
@@ -165,3 +169,4 @@ flowchart TD
   - `docs/Features/Invocation-Routing.md`
   - `docs/Features/Typed-Hub-Context.md`
   - `docs/Features/User-Fanout-and-Offline-Buffering.md`
+  - `docs/Features/Versioned-Grain-Keys.md`

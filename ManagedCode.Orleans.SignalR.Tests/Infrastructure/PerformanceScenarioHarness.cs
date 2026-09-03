@@ -112,6 +112,8 @@ public sealed class PerformanceScenarioHarness(
         var receipts = new long[Settings.BroadcastConnections];
         var perAppConnectionCounts = new int[apps.Count];
         var connectionAppIndices = new int[Settings.BroadcastConnections];
+        var deliveryCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var expectedDeliveries = long.MaxValue;
         long totalDelivered = 0;
 
         try
@@ -125,7 +127,11 @@ public sealed class PerformanceScenarioHarness(
                 connection.On<string>("PerfBroadcast", _ =>
                 {
                     Interlocked.Increment(ref receipts[connectionIndex]);
-                    Interlocked.Increment(ref totalDelivered);
+                    var delivered = Interlocked.Increment(ref totalDelivered);
+                    if (delivered >= Volatile.Read(ref expectedDeliveries))
+                    {
+                        deliveryCompletion.TrySetResult();
+                    }
                 });
 
                 await connection.StartAsync();
@@ -167,7 +173,7 @@ public sealed class PerformanceScenarioHarness(
                 expectedPerConnection[idx] *= broadcastPasses;
             }
 
-            var expectedDeliveries = expectedPerConnection.Sum();
+            Volatile.Write(ref expectedDeliveries, expectedPerConnection.Sum());
             var senders = connections.Take(senderCount).ToArray();
 
             var scenarioLabel = $"{(useOrleans ? "Orleans" : "In-Memory")} broadcast";
@@ -187,7 +193,12 @@ public sealed class PerformanceScenarioHarness(
                 await Task.WhenAll(sendTasks);
             }
 
-            var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalDelivered), expectedDeliveries, Settings.BroadcastTimeout, scenarioLabel);
+            var completed = await AwaitCompletionWithProgressAsync(
+                deliveryCompletion.Task,
+                () => Interlocked.Read(ref totalDelivered),
+                expectedDeliveries,
+                Settings.BroadcastTimeout,
+                scenarioLabel);
             completed.ShouldBeTrue($"Timed out awaiting {scenarioLabel} deliveries.");
 
             stopwatch.Stop();
@@ -601,6 +612,45 @@ public sealed class PerformanceScenarioHarness(
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(250));
+        }
+
+        var final = currentValue();
+        _output.WriteLine($"{scenario} timed out after {timeout:c}: {final:N0}/{expected:N0}.");
+        return final >= expected;
+    }
+
+    private async Task<bool> AwaitCompletionWithProgressAsync(
+        Task completion,
+        Func<long> currentValue,
+        long expected,
+        TimeSpan timeout,
+        string scenario)
+    {
+        if (expected == 0)
+        {
+            _output.WriteLine($"{scenario} expected 0 deliverables; skipping wait.");
+            return true;
+        }
+
+        var watch = Stopwatch.StartNew();
+        var logInterval = TimeSpan.FromSeconds(10);
+        using var timeoutCancellation = new CancellationTokenSource(timeout);
+
+        while (!timeoutCancellation.IsCancellationRequested)
+        {
+            var progressDelay = Task.Delay(logInterval, timeoutCancellation.Token);
+            var completed = await Task.WhenAny(completion, progressDelay);
+            if (completed == completion)
+            {
+                var current = currentValue();
+                _output.WriteLine($"{scenario} reached {current:N0}/{expected:N0} after {watch.Elapsed:c}.");
+                return current >= expected;
+            }
+
+            if (!timeoutCancellation.IsCancellationRequested)
+            {
+                _output.WriteLine($"{scenario} progress {currentValue():N0}/{expected:N0} after {watch.Elapsed:c}.");
+            }
         }
 
         var final = currentValue();

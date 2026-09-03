@@ -24,7 +24,7 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 - [x] Update all existing NuGet dependencies to compatible stable versions and resolve vulnerable transitive dependencies without suppressing audit warnings.
 - [x] Add failing regression tests for every confirmed long-lived connection, concurrency, cleanup, or routing defect.
 - [x] Apply the smallest behavior-preserving fixes, keeping SignalR observer I/O off the Orleans scheduler.
-- [x] Run coverage (87/87 tests; 65.66% line and 54.49% branch coverage), the full test suite (87/87), format, and a final build; changed, reliability, HA, and performance suites are complete.
+- [x] Run coverage (109/109 tests; 70.77% line and 61.65% branch coverage), the full test suite (109/109), format, and a final build; changed, reliability, HA, and performance suites are complete.
 - [x] Restore fire-and-forget fan-out for multi-group and multi-user sends.
 - [x] Ensure per-target send failures are logged without blocking hub execution.
 - [x] Route package-specific batch group membership calls through the Orleans lifetime manager.
@@ -34,6 +34,9 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 - [x] Carry server-to-client invocation return types to the connection host in a reserved internal invocation header so SignalR's synchronous lookup never blocks on an Orleans request.
 - [x] Acknowledge required invocation completions while preserving one-way observer fan-out and keeping SignalR work off the Orleans scheduler.
 - [x] Measure server-to-client invocation throughput against the unchanged baseline.
+- [x] Remove the per-broadcast wait on the offloaded one-way observer enqueue loop.
+- [x] Repair the benchmark's polling quantization and compare repeated before/after Broadcast runs.
+- [x] Verify Broadcast, group, streaming, and invocation load after the reliability changes.
 
 ## Main flow
 

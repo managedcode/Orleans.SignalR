@@ -1,7 +1,11 @@
 using System;
 using System.Buffers;
+using System.Buffers.Binary;
+using System.Buffers.Text;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using ManagedCode.Orleans.SignalR.Core.Helpers;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Orleans;
@@ -52,25 +56,22 @@ public static class NameHelperGenerator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ISignalRInvocationGrain GetInvocationGrain<THub>(IGrainFactory grainFactory, string? invocationId)
     {
-        var typeName = GetCleanedTypeName<THub>();
-        var key = string.Concat(typeName, "::", invocationId ?? "unknown");
+        var key = CreateVersionedLeafKey(typeof(THub).FullName!, invocationId);
         return grainFactory.GetGrain<ISignalRInvocationGrain>(key);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ISignalRUserGrain GetSignalRUserGrain<THub>(IGrainFactory grainFactory, string userId)
     {
-        var typeName = GetCleanedTypeName<THub>();
-        var cleanUserId = CleanString(userId);
-        return grainFactory.GetGrain<ISignalRUserGrain>(string.Concat(typeName, "::", cleanUserId));
+        var key = CreateVersionedLeafKey(typeof(THub).FullName!, userId);
+        return grainFactory.GetGrain<ISignalRUserGrain>(key);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ISignalRGroupGrain GetSignalRGroupGrain<THub>(IGrainFactory grainFactory, string groupId)
     {
-        var typeName = GetCleanedTypeName<THub>();
-        var cleanGroupId = CleanString(groupId);
-        return grainFactory.GetGrain<ISignalRGroupGrain>(string.Concat(typeName, "::", cleanGroupId));
+        var key = CreateVersionedLeafKey(typeof(THub).FullName!, groupId);
+        return grainFactory.GetGrain<ISignalRGroupGrain>(key);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -101,9 +102,40 @@ public static class NameHelperGenerator
 
     public static ISignalRConnectionHeartbeatGrain GetConnectionHeartbeatGrain(IGrainFactory grainFactory, string hubKey, string connectionId)
     {
-        var cleanedHub = CleanString(hubKey);
-        var cleanedConnection = CleanString(connectionId);
-        return grainFactory.GetGrain<ISignalRConnectionHeartbeatGrain>(string.Concat(cleanedHub, "::", cleanedConnection));
+        return grainFactory.GetGrain<ISignalRConnectionHeartbeatGrain>(CreateVersionedLeafKey(hubKey, connectionId));
+    }
+
+    internal static string CreateVersionedLeafKey(string hubIdentity, string? logicalIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(hubIdentity);
+        return CreateHashedLeafKey(hubIdentity, logicalIdentity);
+    }
+
+    private static string CreateHashedLeafKey(string hubIdentity, string? logicalIdentity)
+    {
+        var hubByteCount = Encoding.UTF8.GetByteCount(hubIdentity);
+        var identityByteCount = logicalIdentity is null ? 0 : Encoding.UTF8.GetByteCount(logicalIdentity);
+        var input = ArrayPool<byte>.Shared.Rent(sizeof(int) + hubByteCount + sizeof(byte) + identityByteCount);
+
+        try
+        {
+            var inputSpan = input.AsSpan(0, sizeof(int) + hubByteCount + sizeof(byte) + identityByteCount);
+            BinaryPrimitives.WriteInt32BigEndian(inputSpan, hubByteCount);
+            Encoding.UTF8.GetBytes(hubIdentity, inputSpan[sizeof(int)..]);
+            inputSpan[sizeof(int) + hubByteCount] = logicalIdentity is null ? (byte)0 : (byte)1;
+            if (logicalIdentity is not null)
+            {
+                Encoding.UTF8.GetBytes(logicalIdentity, inputSpan[(sizeof(int) + hubByteCount + sizeof(byte))..]);
+            }
+
+            Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
+            SHA256.HashData(inputSpan, hash);
+            return string.Concat("v2:", Base64Url.EncodeToString(hash));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(input);
+        }
     }
 
     /// <summary>

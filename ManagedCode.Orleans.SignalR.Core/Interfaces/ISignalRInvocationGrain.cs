@@ -1,4 +1,7 @@
+using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
+using ManagedCode.Communication.CQRS;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans;
@@ -21,5 +24,6 @@ public interface ISignalRInvocationGrain : IGrainWithStringKey, IObserverConnect
     Task<InvocationInfo?> RemoveInvocation();
 
     [AlwaysInterleave]
-    Task<CompletionMessage?> WaitForCompletion();
+    IAsyncEnumerable<CqrsStreamChunk<InvocationProgress, CompletionMessage>> WaitForCompletion(
+        CancellationToken cancellationToken);
 }

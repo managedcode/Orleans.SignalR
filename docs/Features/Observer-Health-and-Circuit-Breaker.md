@@ -21,6 +21,9 @@ Observer delivery is protected by health tracking, circuit breaker logic, and op
 - [x] Offload observer notifications from the Orleans scheduler and document why it is critical.
 - [x] Add tests for circuit-breaker threshold behavior (enabled vs disabled).
 - [x] Keep grace-period state transitions on the Orleans scheduler and offload only observer replay I/O.
+- [x] Drive failure/recovery state from the connection host's actual `WriteAsync` outcome.
+- [x] Keep normal one-way fan-out free of per-message acknowledgement traffic.
+- [x] Add integration coverage which fails the host-side observer callback and verifies source-scoped recovery feedback.
 
 ## Main flow
 
@@ -44,7 +47,7 @@ flowchart TD
 - If a grace period is configured, messages are buffered and replayed on recovery; expired grace periods remove observers.
 - Grace-period recovery mutates `ObserverHealthTracker` on the grain scheduler first, then replays buffered observer callbacks off-scheduler so Orleans-owned state is never touched from a thread-pool turn.
 - Without a grace period, reaching the failure threshold removes the observer immediately.
-- Observer callbacks are intentionally one-way. Therefore, the grain-side health tracker can observe local enqueue/transport-dispatch failures, but it cannot observe an exception thrown later by the remote host's SignalR `WriteAsync`. Reacting to remote write failures requires an explicit feedback protocol; treating one-way completion as a delivery acknowledgement would be incorrect.
+- Observer callbacks are intentionally one-way. Their returned task only represents Orleans enqueue, never SignalR delivery. The local connection observer reports an actual failed write to the grain which sent that message, and reports the first successful write from that same source after a failure as recovery; healthy writes create no feedback traffic.
 
 ## Configuration knobs
 

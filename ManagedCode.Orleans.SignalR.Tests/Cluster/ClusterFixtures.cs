@@ -40,6 +40,40 @@ public sealed class SmokeCluster : ICollectionFixture<SmokeClusterFixture>
 {
 }
 
+public sealed class SharedStorageClusterFixture : ClusterFixtureBase
+{
+    public SharedStorageClusterFixture()
+        : base(builder =>
+        {
+            builder.Options.InitialSilosCount = 2;
+            builder.AddSiloBuilderConfigurator<SharedStorageSiloConfigurator>();
+        })
+    {
+    }
+}
+
+[CollectionDefinition(nameof(SharedStorageCluster), DisableParallelization = true)]
+public sealed class SharedStorageCluster : ICollectionFixture<SharedStorageClusterFixture>
+{
+}
+
+public sealed class HeartbeatWriteFailureClusterFixture : ClusterFixtureBase
+{
+    public HeartbeatWriteFailureClusterFixture()
+        : base(builder =>
+        {
+            builder.Options.InitialSilosCount = 2;
+            builder.AddSiloBuilderConfigurator<FailFirstHeartbeatWriteSiloConfigurator>();
+        })
+    {
+    }
+}
+
+[CollectionDefinition(nameof(HeartbeatWriteFailureCluster), DisableParallelization = true)]
+public sealed class HeartbeatWriteFailureCluster : ICollectionFixture<HeartbeatWriteFailureClusterFixture>
+{
+}
+
 public sealed class KeepAliveClusterFixture : ClusterFixtureBase
 {
     public KeepAliveClusterFixture()

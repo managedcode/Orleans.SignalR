@@ -20,6 +20,9 @@ Client invocations are routed through a dedicated `SignalRInvocationGrain` that 
 - [x] Carry the expected return type to the connection host and cache it before writing the invocation.
 - [x] Acknowledge the required completion-grain call without moving SignalR I/O onto the Orleans scheduler.
 - [x] Prove cross-host completion under concurrent load against an unchanged baseline.
+- [x] Persist invocation registration and terminal completion immediately.
+- [x] Replace activation-local results with a typed `IAsyncEnumerable<CqrsStreamChunk<InvocationProgress, CompletionMessage>>` contract.
+- [x] Add reactivation/reopen coverage and a bounded long-running stream scenario without `ResponseTimeout` or heartbeat workarounds.
 
 ## Main flow
 
@@ -36,7 +39,7 @@ flowchart TD
 ## Behavior notes
 
 - Each invocation is keyed by hub and invocation ID.
-- The invocation grain stores state and completes a `TaskCompletionSource` when it receives a completion message.
+- The invocation grain persists both registration and terminal completion. Callers consume a typed CQRS stream and may reopen it after transient activation loss.
 - Cross-host invocation messages include a reserved internal return-type header. The target host removes it and registers the type locally before SignalR performs its synchronous return-type lookup.
 - `TryCompleteResult` is an acknowledged grain call because its delivery is required to unblock the originating request. Observer fan-out remains one-way, and SignalR writes/notifications remain off the Orleans scheduler.
 
