@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -106,14 +107,18 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
     protected void TrackConnection(string connectionId, ISignalRObserver observer)
     {
-        ObserverManager.Subscribe(observer, observer);
-
         // Remove any existing mapping if the observer was previously tracked with a different connection
         if (_liveObservers.TryGetValue(connectionId, out var existingObserver) && !ReferenceEquals(existingObserver, observer))
         {
+            if (!existingObserver.Equals(observer))
+            {
+                ObserverManager.Unsubscribe(existingObserver);
+            }
+
             _observerToConnectionId.Remove(existingObserver);
         }
 
+        ObserverManager.Subscribe(observer, observer);
         _liveObservers[connectionId] = observer;
         _observerToConnectionId[observer] = connectionId;
         EnsureActiveWhileConnectionsTracked();
@@ -241,13 +246,45 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
     /// Failed observers are tracked and may have their circuits opened or be marked dead
     /// if they exceed the failure threshold.
     /// </summary>
-    protected void DispatchToLiveObservers(IEnumerable<ISignalRObserver> observers, HubMessage message)
+    protected Task DispatchToLiveObserversAsync(IEnumerable<ISignalRObserver> observers, HubMessage message)
     {
+        ArgumentNullException.ThrowIfNull(observers);
+
+        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>();
         foreach (var observer in observers)
         {
-            var connectionId = FindConnectionIdForObserver(observer);
+            targets.Add((FindConnectionIdForObserver(observer), observer));
+        }
 
-            // Check circuit breaker before dispatch
+        return DispatchToLiveObserversCoreAsync(targets, message);
+    }
+
+    /// <summary>
+    /// Dispatches a message to live observers with connection ID tracking for health monitoring.
+    /// Respects circuit breaker state and buffers messages during grace period.
+    /// </summary>
+    protected Task DispatchToLiveObserversWithTrackingAsync(IEnumerable<(string ConnectionId, ISignalRObserver Observer)> observers, HubMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(observers);
+
+        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>();
+        foreach (var (connectionId, observer) in observers)
+        {
+            targets.Add((connectionId, observer));
+        }
+
+        return DispatchToLiveObserversCoreAsync(targets, message);
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "One observer failure must not terminate fan-out to the remaining observers.")]
+    private async Task DispatchToLiveObserversCoreAsync(
+        List<(string? ConnectionId, ISignalRObserver Observer)> candidates,
+        HubMessage message)
+    {
+        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>(candidates.Count);
+        foreach (var target in candidates)
+        {
+            var connectionId = target.ConnectionId;
             if (connectionId is not null && !HealthTracker.AllowRequest(connectionId))
             {
                 var state = HealthTracker.GetCircuitState(connectionId);
@@ -278,59 +315,44 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain where TGrain : cl
 
                         Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.CircuitOpen);
                     }
-                    continue;
-                }
-            }
-
-            var pending = observer.OnNextAsync(message);
-            _ = ObserveLiveObserverAsync(pending, connectionId, observer);
-        }
-    }
-
-    /// <summary>
-    /// Dispatches a message to live observers with connection ID tracking for health monitoring.
-    /// Respects circuit breaker state and buffers messages during grace period.
-    /// </summary>
-    protected void DispatchToLiveObserversWithTracking(IEnumerable<(string ConnectionId, ISignalRObserver Observer)> observers, HubMessage message)
-    {
-        foreach (var (connectionId, observer) in observers)
-        {
-            // Check circuit breaker before dispatch
-            if (!HealthTracker.AllowRequest(connectionId))
-            {
-                var state = HealthTracker.GetCircuitState(connectionId);
-                if (state == CircuitState.Open)
-                {
-                    // Try to buffer the message if in grace period
-                    if (HealthTracker.IsInGracePeriod(connectionId))
-                    {
-                        if (HealthTracker.BufferMessage(connectionId, message))
-                        {
-                            Metrics.RecordMessageBuffered(MetricsHubName);
-                            if (Logger.IsEnabled(LogLevel.Debug))
-                            {
-                                Logger.LogDebug("Buffered message for connection {ConnectionId} in grace period.", connectionId);
-                            }
-                        }
-                        else
-                        {
-                            Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.BufferFull);
-                        }
-                    }
-                    {
-                        if (Logger.IsEnabled(LogLevel.Debug))
-                        {
-                            Logger.LogDebug("Skipping dispatch to connection {ConnectionId} - circuit breaker open.", connectionId);
-                        }
-
-                        Metrics.RecordMessageDropped(MetricsHubName, SignalRMetrics.DropReasons.CircuitOpen);
-                    }
                 }
                 continue;
             }
 
-            var pending = observer.OnNextAsync(message);
-            _ = ObserveLiveObserverAsync(pending, connectionId, observer);
+            targets.Add(target);
+        }
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+        // Keep one offloaded worker per fan-out and enqueue one-way observer calls sequentially;
+        // a Task.Run per observer creates an unbounded thread-pool burst under group/broadcast load.
+        var failures = await Task.Run(async () =>
+        {
+            var errors = new Exception?[targets.Count];
+            for (var index = 0; index < targets.Count; index++)
+            {
+                try
+                {
+                    await targets[index].Observer.OnNextAsync(message);
+                }
+                catch (Exception exception)
+                {
+                    errors[index] = exception;
+                }
+            }
+
+            return errors;
+        });
+
+        for (var index = 0; index < targets.Count; index++)
+        {
+            var failure = failures[index];
+            var completion = failure is null ? Task.CompletedTask : Task.FromException(failure);
+            await ObserveLiveObserverAsync(completion, targets[index].ConnectionId, targets[index].Observer);
         }
     }
 

@@ -78,7 +78,7 @@ public class SignalRUserGrain(
 
         if (LiveObservers.Count > 0)
         {
-            DispatchToLiveObservers(LiveObservers.Values, message);
+            await DispatchToLiveObserversAsync(LiveObservers.Values, message);
             return;
         }
 
@@ -129,7 +129,7 @@ public class SignalRUserGrain(
             {
                 if (LiveObservers.Count > 0)
                 {
-                    DispatchToLiveObservers(LiveObservers.Values, message.Key);
+                    await DispatchToLiveObserversAsync(LiveObservers.Values, message.Key);
                 }
                 else
                 {

@@ -55,7 +55,7 @@ public class SignalRGroupPartitionGrain(
         if (LiveObservers.Count > 0)
         {
             var targetConnections = CollectConnectionIds(groupNames, excludedConnections: null);
-            DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
+            await DispatchToLiveObserversAsync(GetLiveObservers(targetConnections), message);
             return;
         }
 
@@ -80,7 +80,7 @@ public class SignalRGroupPartitionGrain(
         if (LiveObservers.Count > 0)
         {
             var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
-            DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
+            await DispatchToLiveObserversAsync(GetLiveObservers(targetConnections), message);
             return;
         }
 

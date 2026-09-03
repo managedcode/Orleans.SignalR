@@ -1,9 +1,14 @@
+using ManagedCode.Orleans.SignalR.Core.Interfaces;
+using ManagedCode.Orleans.SignalR.Core.Models;
+using ManagedCode.Orleans.SignalR.Core.SignalR;
+using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.SignalR.Protocol;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -277,6 +282,115 @@ public class KeepAliveTests : IAsyncLifetime
         cleanupObserved.ShouldBeTrue("Connection-specific grains were not cleaned up after disconnect.");
     }
 
+    [Fact]
+    public async Task ServerAbortedConnectionShouldReleasePreviousHeartbeatActivationAsync()
+    {
+        if (_app is null)
+        {
+            throw new InvalidOperationException("Test host is not initialised.");
+        }
+
+        var management = _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0);
+        var connection = _app.CreateSignalRClient(nameof(SimpleTestHub));
+
+        try
+        {
+            await connection.StartAsync();
+            var connectionId = connection.ConnectionId ?? throw new InvalidOperationException("Connection identifier is missing.");
+            await connection.InvokeAsync<int>("Plus", 1, 1);
+
+            var heartbeat = NameHelperGenerator.GetConnectionHeartbeatGrain(
+                _siloCluster.Cluster.Client,
+                typeof(SimpleTestHub).FullName!,
+                connectionId);
+            var heartbeatId = ((GrainReference)heartbeat).GrainId;
+            var heartbeatType = GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHeartbeatGrain)}");
+            var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<SimpleTestHub>(_siloCluster.Cluster.Client);
+            var partitionId = await coordinator.GetPartitionForConnection(connectionId);
+            var partition = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(
+                _siloCluster.Cluster.Client,
+                partitionId);
+            var probe = new InvocationMessage("disconnected-probe", Array.Empty<object?>());
+
+            (await management.GetActiveGrains(heartbeatType)).ShouldContain(
+                heartbeatId,
+                "Heartbeat activation was not created for the connection.");
+
+            await connection.SendAsync("AbortConnection");
+
+            var cleanupObserved = await WaitUntilAsync(
+                async () =>
+                {
+                    await management.ForceActivationCollection(TimeSpan.Zero);
+                    var activeHeartbeats = await management.GetActiveGrains(heartbeatType);
+                    return !activeHeartbeats.Contains(heartbeatId) &&
+                           !await partition.SendToConnection(probe, connectionId);
+                },
+                timeout: TimeSpan.FromSeconds(20));
+
+            cleanupObserved.ShouldBeTrue("The aborted connection left its heartbeat activation or routing state alive.");
+        }
+        finally
+        {
+            await connection.StopAsync();
+            await connection.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UnrenewedHeartbeatLeaseShouldExpireAndDeactivateAsync()
+    {
+        var client = _siloCluster.Cluster.Client;
+        var management = client.GetGrain<IManagementGrain>(0);
+        var connectionId = $"orphan-heartbeat-{Guid.NewGuid():N}";
+        var heartbeat = NameHelperGenerator.GetConnectionHeartbeatGrain(
+            client,
+            typeof(SimpleTestHub).FullName!,
+            connectionId);
+        var heartbeatId = ((GrainReference)heartbeat).GrainId;
+        var heartbeatType = GrainType.Create($"ManagedCode.{nameof(SignalRConnectionHeartbeatGrain)}");
+        using var localObserver = new SignalRObserver(_ => Task.CompletedTask);
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
+        var partition = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, 0);
+        await partition.AddConnection(connectionId, observer);
+        var registration = new ConnectionHeartbeatRegistration(
+            typeof(SimpleTestHub).FullName!,
+            true,
+            0,
+            observer,
+            TimeSpan.FromSeconds(1),
+            [((GrainReference)partition).GrainId],
+            connectionId);
+        var probe = new InvocationMessage("expired-lease-probe", Array.Empty<object?>());
+
+        try
+        {
+            await heartbeat.Start(registration);
+            (await management.GetActiveGrains(heartbeatType)).ShouldContain(heartbeatId);
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            (await management.GetActiveGrains(heartbeatType)).ShouldContain(
+                heartbeatId,
+                "Heartbeat activation expired before its lease deadline.");
+
+            var cleanupObserved = await WaitUntilAsync(
+                async () =>
+                {
+                    var activeHeartbeats = await management.GetActiveGrains(heartbeatType);
+                    return !activeHeartbeats.Contains(heartbeatId) &&
+                           !await partition.SendToConnection(probe, connectionId);
+                },
+                timeout: TimeSpan.FromSeconds(5));
+
+            cleanupObserved.ShouldBeTrue("Heartbeat without a live host lease retained its activation or routing state.");
+        }
+        finally
+        {
+            await heartbeat.Stop();
+            client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+    }
+
     private static async Task<bool> WaitUntilAsync(Func<Task<bool>> predicate, TimeSpan timeout, TimeSpan? pollInterval = null)
     {
         var delay = pollInterval ?? TimeSpan.FromMilliseconds(250);
@@ -284,15 +398,15 @@ public class KeepAliveTests : IAsyncLifetime
 
         while (DateTime.UtcNow < deadline)
         {
-            if (await predicate().ConfigureAwait(false))
+            if (await predicate())
             {
                 return true;
             }
 
-            await Task.Delay(delay).ConfigureAwait(false);
+            await Task.Delay(delay);
         }
 
-        return await predicate().ConfigureAwait(false);
+        return await predicate();
     }
 
     private static async Task<GrainCounts> GetGrainCountsAsync(IManagementGrain management)

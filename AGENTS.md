@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Project: Orleans.SignalR (ManagedCode.Orleans.SignalR)
-Stack: C# (LangVersion 14) on .NET 10 (net10.0), Microsoft Orleans 9.2.1, ASP.NET Core SignalR 10.0.0, xUnit 2.9.3, Shouldly 4.3.0, Coverlet 6.0.4
+Stack: C# (LangVersion 14) on .NET 10 (net10.0), Microsoft Orleans 10.3.1, ASP.NET Core SignalR 10.0.11, xUnit 2.9.3, Shouldly 4.3.0, Coverlet 10.0.1, Roslynator 5.0.0
 
 Follows [MCAF](https://mcaf.managed-code.com/)
 
@@ -112,6 +112,7 @@ If no new rule is detected -> do not update the file.
 - Final verification for code changes requires the full `dotnet test -c Debug` suite to pass; targeted test runs are only for iteration, not for closing the task
 - After tests pass: run format
 - After format: run build (final check)
+- Always gate delivery on `dotnet format`, compiler/.NET analyzers, and Roslynator with zero warnings; include code-quality and complexity diagnostics instead of treating compilation alone as sufficient static analysis
 - Summarize changes and test results before marking complete
 - Always run required builds and tests yourself; do not ask the user to execute them (explicit user directive)
 - Commit messages are short and imperative; common prefixes in history include `fix:`, `tests:`, and `code style`
@@ -120,6 +121,8 @@ If no new rule is detected -> do not update the file.
 
 - For code reviews, be extra thorough and explicitly call out low-value/AI-sounding changes and whether changes actually improve behavior, performance, or safety
 - Never run SignalR work on Orleans scheduler/context; offload to dedicated tasks/threads to avoid blocking
+- Use one-way calls only for best-effort fan-out or cleanup; a completion which unblocks a request/response operation must be acknowledged, while its SignalR work remains off the Orleans scheduler
+- Preserve intentional `Task.Run` and fire-and-forget boundaries around SignalR observer notifications and long fan-out; never execute an observer callback directly on the Orleans scheduler. Upstream fan-out stays one-way, while a grain may await one bounded offloaded worker for backpressure because that await yields the scheduler instead of blocking its thread.
 
 ### Documentation (ALL TASKS)
 
@@ -163,6 +166,7 @@ If no new rule is detected -> do not update the file.
 - Each test verifies a real flow or scenario, not just calls a function - tests without meaningful assertions are forbidden
 - Check code coverage to see which functionality is actually tested; coverage is for finding gaps, not a number to chase
 - Flaky tests are failures: fix the test or the underlying behaviour, don't "retry until green"
+- For performance or concurrency changes, always run the relevant load tests and report measured baseline-versus-change results; never call a refactor an improvement without data.
 
 ### Autonomy
 

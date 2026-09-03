@@ -7,7 +7,7 @@ Expose lightweight counters for key SignalR/Orleans backplane behaviors via `Sys
 ## Scope
 
 **In scope**
-- Connection, message, and observer health counters.
+- Connection, message, observer health, and heartbeat-renewal counters.
 - Metrics wiring in hub lifetime manager and observer grains.
 
 **Out of scope**
@@ -38,6 +38,7 @@ flowchart LR
 
 - Metrics are counters and up/down counters only.
 - Metrics are emitted via a shared singleton instance.
+- `signalr.heartbeat.renewal.failures.total` records every failed lease-renewal attempt without using connection IDs as metric tags.
 
 ## Key types and files
 

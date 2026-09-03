@@ -92,7 +92,7 @@ public sealed class PerformanceScenarioHarness(
                 perConnection[index].ShouldBe(expectedPerConnectionCount, $"Device connection #{index} should receive all messages across {passes} passes.");
             }
 
-            var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
+            var throughput = CalculateThroughput(expected, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} msg/s.");
             PerformanceSummaryRecorder.RecordRun(DeviceScenarioKey, "Device Echo", useOrleans, stopwatch.Elapsed, throughput);
 
@@ -198,7 +198,7 @@ public sealed class PerformanceScenarioHarness(
                     $"Broadcast connection #{index} should receive all fan-out messages.");
             }
 
-            var throughput = expectedDeliveries / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
+            var throughput = CalculateThroughput(expectedDeliveries, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expectedDeliveries:N0}/{expectedDeliveries:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} deliveries/s.");
             PerformanceSummaryRecorder.RecordRun(BroadcastScenarioKey, "Broadcast Fan-Out", useOrleans, stopwatch.Elapsed, throughput);
 
@@ -368,7 +368,7 @@ public sealed class PerformanceScenarioHarness(
                 }
             }
 
-            var throughput = expected / Math.Max(1.0, sendStopwatch.Elapsed.TotalSeconds);
+            var throughput = CalculateThroughput(expected, sendStopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {sendStopwatch.Elapsed}. Throughput ≈ {throughput:N0} deliveries/s.");
             PerformanceSummaryRecorder.RecordRun(GroupScenarioKey, "Group Broadcast", useOrleans, sendStopwatch.Elapsed, throughput);
 
@@ -438,7 +438,7 @@ public sealed class PerformanceScenarioHarness(
                 perConnection[index].ShouldBe(expectedPerConnectionCount, $"Stream connection #{index} should receive all items.");
             }
 
-            var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
+            var throughput = CalculateThroughput(expected, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} items/s.");
             PerformanceSummaryRecorder.RecordRun(StreamScenarioKey, "Streaming", useOrleans, stopwatch.Elapsed, throughput);
 
@@ -502,7 +502,7 @@ public sealed class PerformanceScenarioHarness(
                 perConnection[index].ShouldBe(expectedPerConnectionCount, $"Invocation connection #{index} should complete all invocations across all passes.");
             }
 
-            var throughput = expected / Math.Max(1.0, stopwatch.Elapsed.TotalSeconds);
+            var throughput = CalculateThroughput(expected, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} completed {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} calls/s.");
             PerformanceSummaryRecorder.RecordRun(InvocationScenarioKey, "Invocation", useOrleans, stopwatch.Elapsed, throughput);
 
@@ -556,6 +556,13 @@ public sealed class PerformanceScenarioHarness(
                 await connection.DisposeAsync();
             }
         }
+    }
+
+    private static double CalculateThroughput(long completedOperations, TimeSpan elapsed)
+    {
+        return elapsed > TimeSpan.Zero
+            ? completedOperations / elapsed.TotalSeconds
+            : double.PositiveInfinity;
     }
 
     private static void DisposeApplications(IEnumerable<TestWebApplication> apps)

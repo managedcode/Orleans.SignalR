@@ -44,6 +44,7 @@ flowchart TD
 - If a grace period is configured, messages are buffered and replayed on recovery; expired grace periods remove observers.
 - Grace-period recovery mutates `ObserverHealthTracker` on the grain scheduler first, then replays buffered observer callbacks off-scheduler so Orleans-owned state is never touched from a thread-pool turn.
 - Without a grace period, reaching the failure threshold removes the observer immediately.
+- Observer callbacks are intentionally one-way. Therefore, the grain-side health tracker can observe local enqueue/transport-dispatch failures, but it cannot observe an exception thrown later by the remote host's SignalR `WriteAsync`. Reacting to remote write failures requires an explicit feedback protocol; treating one-way completion as a delivery acknowledgement would be incorrect.
 
 ## Configuration knobs
 

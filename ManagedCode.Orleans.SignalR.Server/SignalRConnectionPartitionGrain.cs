@@ -75,7 +75,7 @@ public class SignalRConnectionPartitionGrain(
 
         if (LiveObservers.Count > 0)
         {
-            DispatchToLiveObservers(LiveObservers.Values, message);
+            await DispatchToLiveObserversAsync(LiveObservers.Values, message);
             return;
         }
 
@@ -91,7 +91,7 @@ public class SignalRConnectionPartitionGrain(
         {
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
-            DispatchToLiveObservers(targets, message);
+            await DispatchToLiveObserversAsync(targets, message);
             return;
         }
 
@@ -125,7 +125,7 @@ public class SignalRConnectionPartitionGrain(
 
         if (TryGetLiveObserver(connectionId, out var live))
         {
-            _ = live.OnNextAsync(message);
+            _ = DispatchToLiveObserversAsync([live], message);
             return true;
         }
 
@@ -152,14 +152,14 @@ public class SignalRConnectionPartitionGrain(
             {
                 if (TryGetLiveObserver(connectionId, out var observer))
                 {
-                    targets ??= new List<ISignalRObserver>();
+                    targets ??= [];
                     targets.Add(observer);
                 }
             }
 
             if (targets is not null)
             {
-                DispatchToLiveObservers(targets, message);
+                await DispatchToLiveObserversAsync(targets, message);
                 return;
             }
         }

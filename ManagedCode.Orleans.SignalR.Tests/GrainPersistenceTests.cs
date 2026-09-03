@@ -27,7 +27,8 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         var partitionId = await coordinator.GetPartitionForConnection(connectionId);
         var partition = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, partitionId);
 
-        var observer = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
+        using var localObserver = new SignalRObserver(_ => Task.CompletedTask);
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
 
         try
         {
@@ -44,6 +45,7 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         finally
         {
             await partition.RemoveConnection(connectionId, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
         }
     }
 
@@ -62,8 +64,10 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         var partitionBId = await coordinator.GetPartitionForConnection(connectionB);
         var partitionB = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, partitionBId);
 
-        var observerA = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
-        var observerB = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
+        using var localObserverA = new SignalRObserver(_ => Task.CompletedTask);
+        using var localObserverB = new SignalRObserver(_ => Task.CompletedTask);
+        var observerA = client.CreateObjectReference<ISignalRObserver>(localObserverA);
+        var observerB = client.CreateObjectReference<ISignalRObserver>(localObserverB);
 
         try
         {
@@ -94,6 +98,8 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         {
             await partitionA.RemoveConnection(connectionA, observerA);
             await partitionB.RemoveConnection(connectionB, observerB);
+            client.DeleteObjectReference<ISignalRObserver>(observerA);
+            client.DeleteObjectReference<ISignalRObserver>(observerB);
         }
     }
 
@@ -119,7 +125,7 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         var routedB = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         var routedC = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var observerA = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(message =>
+        using var localObserverA = new SignalRObserver(message =>
         {
             if (message is InvocationMessage invocation)
             {
@@ -127,9 +133,9 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
             }
 
             return Task.CompletedTask;
-        }));
+        });
 
-        var observerB = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(message =>
+        using var localObserverB = new SignalRObserver(message =>
         {
             if (message is InvocationMessage invocation)
             {
@@ -137,8 +143,8 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
             }
 
             return Task.CompletedTask;
-        }));
-        var observerC = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(message =>
+        });
+        using var localObserverC = new SignalRObserver(message =>
         {
             if (message is InvocationMessage invocation)
             {
@@ -146,7 +152,10 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
             }
 
             return Task.CompletedTask;
-        }));
+        });
+        var observerA = client.CreateObjectReference<ISignalRObserver>(localObserverA);
+        var observerB = client.CreateObjectReference<ISignalRObserver>(localObserverB);
+        var observerC = client.CreateObjectReference<ISignalRObserver>(localObserverC);
 
         try
         {
@@ -173,6 +182,9 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
             await partitionA.RemoveConnection(sharedConnectionId, observerA);
             await partitionB.RemoveConnection(sharedConnectionId, observerB);
             await partitionC.RemoveConnection(sharedConnectionId, observerC);
+            client.DeleteObjectReference<ISignalRObserver>(observerA);
+            client.DeleteObjectReference<ISignalRObserver>(observerB);
+            client.DeleteObjectReference<ISignalRObserver>(observerC);
         }
     }
 
@@ -190,7 +202,8 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
             $"group-delta-{Guid.NewGuid():N}"
         };
 
-        var observer = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
+        using var localObserver = new SignalRObserver(_ => Task.CompletedTask);
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
 
         try
         {
@@ -221,6 +234,7 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         finally
         {
             await coordinator.RemoveConnectionFromGroups(groupNames, connectionId, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
         }
     }
 
@@ -231,7 +245,8 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(client);
         var connectionId = $"group-cleanup-{Guid.NewGuid():N}";
         var groupName = $"group-drift-{Guid.NewGuid():N}";
-        var observer = client.CreateObjectReference<ISignalRObserver>(new SignalRObserver(_ => Task.CompletedTask));
+        using var localObserver = new SignalRObserver(_ => Task.CompletedTask);
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
 
         var partitionId = await coordinator.GetPartitionForGroup(groupName);
         var partition = NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, partitionId);
@@ -252,6 +267,7 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         finally
         {
             await coordinator.RemoveConnectionFromGroups([groupName], connectionId, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
         }
     }
 
@@ -260,15 +276,15 @@ public sealed class GrainPersistenceTests(SmokeClusterFixture cluster, ITestOutp
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (DateTime.UtcNow < deadline)
         {
-            if (await sendAction().ConfigureAwait(false))
+            if (await sendAction())
             {
                 return;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
         }
 
-        (await sendAction().ConfigureAwait(false)).ShouldBeTrue($"Routing failed for {reason} after retries.");
+        (await sendAction()).ShouldBeTrue($"Routing failed for {reason} after retries.");
     }
 
     private static async Task<string> FindConnectionInDifferentPartitionAsync(

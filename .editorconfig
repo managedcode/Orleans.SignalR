@@ -228,6 +228,13 @@ dotnet_diagnostic.CA1305.severity = warning
 # CA1507: Use nameof to express symbol names (critical for AGENTS.md)
 dotnet_diagnostic.CA1507.severity = warning
 
+# Maintainability gates: detect excessive inheritance, cyclomatic complexity,
+# aggregate maintainability risk, and type coupling.
+dotnet_diagnostic.CA1501.severity = warning
+dotnet_diagnostic.CA1502.severity = warning
+dotnet_diagnostic.CA1505.severity = warning
+dotnet_diagnostic.CA1506.severity = warning
+
 # CA1510: Use ArgumentNullException throw helper
 dotnet_diagnostic.CA1510.severity = warning
 

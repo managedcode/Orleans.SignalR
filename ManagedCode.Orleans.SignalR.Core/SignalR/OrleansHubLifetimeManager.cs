@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -24,14 +25,20 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where THub : Hub
 {
+    private const double HeartbeatRenewalIntervalDivisor = 2;
+    private const double MinimumHeartbeatRenewalIntervalMilliseconds = 500;
+    private const double MinimumHeartbeatRenewalWarningIntervalSeconds = 5;
+    private const string InvocationReturnTypeHeader = "ManagedCode.Orleans.SignalR.ReturnType";
     private readonly IClusterClient _clusterClient;
     private readonly HubConnectionStore _connections = new();
+    private readonly ConcurrentDictionary<string, InvocationReturnType> _invocationReturnTypes = new(StringComparer.Ordinal);
     private readonly IOptions<HubOptions> _globalHubOptions;
     private readonly IOptions<HubOptions<THub>> _hubOptions;
     private readonly ILogger _logger;
     private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions;
     private readonly SignalRMetrics _metrics = SignalRMetrics.Instance;
     private readonly string _hubKey;
+    private long _lastHeartbeatRenewalWarningTimestamp;
 
     public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger, IClusterClient clusterClient,
         IHostApplicationLifetime hostLifetime, IOptions<OrleansSignalROptions> orleansSignalOptions,
@@ -45,6 +52,10 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _hubKey = NameHelperGenerator.CleanString(typeof(THub).FullName!);
 
         hostLifetime.ApplicationStopping.Register(OnApplicationStopping);
+        if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
+        {
+            _ = Task.Run(() => RunConnectionHeartbeatRenewalAsync(hostLifetime.ApplicationStopping));
+        }
     }
 
     public override async Task OnConnectedAsync(HubConnectionContext connection)
@@ -52,72 +63,123 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         _connections.Add(connection);
         var subscription = CreateConnectionObserver(connection);
 
-        var usePartitions = _orleansSignalOptions.Value.ConnectionPartitionCount > 1;
-        var partitionId = 0;
+        try
+        {
 
-        // Retry logic for silo restart scenarios where grain directory has stale entries
-        const int maxRetries = 3;
-        for (var attempt = 1; attempt <= maxRetries; attempt++)
+            var usePartitions = _orleansSignalOptions.Value.ConnectionPartitionCount > 1;
+            var partitionId = 0;
+
+            // Retry logic for silo restart scenarios where grain directory has stale entries
+            const int maxRetries = 3;
+            for (var attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    if (usePartitions)
+                    {
+                        var coordinatorGrain = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
+                        partitionId = await coordinatorGrain.GetPartitionForConnection(connection.ConnectionId);
+                        var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain<THub>(_clusterClient, partitionId);
+                        subscription.AddGrain(partitionGrain);
+                        await partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference);
+                    }
+                    else
+                    {
+                        var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
+                        subscription.AddGrain(connectionHolderGrain);
+                        await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference);
+                    }
+
+                    // Success - break out of retry loop
+                    break;
+                }
+                catch (OrleansMessageRejectionException ex) when (attempt < maxRetries)
+                {
+                    // Silo was restarted - grain directory has stale entries
+                    // Wait briefly and retry as the new silo should activate fresh grains
+                    _logger.LogWarning(ex,
+                        "Grain call failed on attempt {Attempt}/{MaxRetries} for connection {ConnectionId}, retrying after delay",
+                        attempt, maxRetries, connection.ConnectionId);
+                    await Task.Delay(100 * attempt); // Exponential backoff: 100ms, 200ms
+                    subscription.ClearGrains();
+                }
+            }
+
+            subscription.SetConnectionMetadata(_hubKey, usePartitions, partitionId);
+
+            if (!string.IsNullOrEmpty(connection.UserIdentifier))
+            {
+                try
+                {
+                    var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!);
+                    subscription.AddGrain(userGrain);
+                    await userGrain.AddConnection(connection.ConnectionId, subscription.Reference);
+                    _ = Task.Run(userGrain.RequestMessage);
+                }
+                catch (OrleansMessageRejectionException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to register user grain for connection {ConnectionId}", connection.ConnectionId);
+                    // Continue - connection can still work without user-specific messaging
+                }
+            }
+
+            await UpdateConnectionHeartbeatAsync(connection.ConnectionId, subscription);
+            _metrics.RecordConnectionEstablished(_hubKey);
+        }
+        catch
+        {
+            await CleanupFailedConnectionAsync(connection, subscription);
+            throw;
+        }
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Best-effort rollback must preserve the original connection failure.")]
+    private async Task CleanupFailedConnectionAsync(HubConnectionContext connection, Subscription subscription)
+    {
+        _connections.Remove(connection);
+
+        if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
         {
             try
             {
-                if (usePartitions)
-                {
-                    var coordinatorGrain = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
-                    partitionId = await coordinatorGrain.GetPartitionForConnection(connection.ConnectionId);
-                    var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain<THub>(_clusterClient, partitionId);
-                    subscription.AddGrain(partitionGrain);
-                    await partitionGrain.AddConnection(connection.ConnectionId, subscription.Reference);
-                    await partitionGrain.Ping(subscription.Reference);
-                }
-                else
-                {
-                    var connectionHolderGrain = NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient);
-                    subscription.AddGrain(connectionHolderGrain);
-                    await connectionHolderGrain.AddConnection(connection.ConnectionId, subscription.Reference);
-                    await connectionHolderGrain.Ping(subscription.Reference);
-                }
-
-                // Success - break out of retry loop
-                break;
+                var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, _hubKey, connection.ConnectionId);
+                await heartbeatGrain.Stop();
             }
-            catch (OrleansMessageRejectionException ex) when (attempt < maxRetries)
+            catch (Exception ex)
             {
-                // Silo was restarted - grain directory has stale entries
-                // Wait briefly and retry as the new silo should activate fresh grains
-                _logger.LogWarning(ex,
-                    "Grain call failed on attempt {Attempt}/{MaxRetries} for connection {ConnectionId}, retrying after delay",
-                    attempt, maxRetries, connection.ConnectionId);
-                await Task.Delay(100 * attempt); // Exponential backoff: 100ms, 200ms
-                subscription.ClearGrains();
+                _logger.LogDebug(ex, "Failed to stop heartbeat for partially registered connection {ConnectionId}.", connection.ConnectionId);
             }
         }
 
-        subscription.SetConnectionMetadata(_hubKey, usePartitions, partitionId);
-
-        if (!string.IsNullOrEmpty(connection.UserIdentifier))
+        try
         {
-            try
-            {
-                var userGrain = NameHelperGenerator.GetSignalRUserGrain<THub>(_clusterClient, connection.UserIdentifier!);
-                subscription.AddGrain(userGrain);
-                await userGrain.AddConnection(connection.ConnectionId, subscription.Reference);
-                _ = Task.Run(userGrain.RequestMessage);
-            }
-            catch (OrleansMessageRejectionException ex)
-            {
-                _logger.LogWarning(ex, "Failed to register user grain for connection {ConnectionId}", connection.ConnectionId);
-                // Continue - connection can still work without user-specific messaging
-            }
-        }
+            var removalTasks = subscription.Grains
+                .Select(grain => SafeRemoveConnectionAsync(grain, connection.ConnectionId, subscription.Reference))
+                .ToArray();
 
-        _metrics.RecordConnectionEstablished(_hubKey);
-        await UpdateConnectionHeartbeatAsync(connection.ConnectionId, subscription);
+            if (removalTasks.Length > 0)
+            {
+                await Task.WhenAll(removalTasks);
+            }
+
+            var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
+            await coordinator.NotifyConnectionRemoved(connection.ConnectionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to clean up partially registered connection {ConnectionId}.", connection.ConnectionId);
+        }
+        finally
+        {
+            DisposeSubscription(subscription);
+            connection.Features.Set<Subscription?>(null);
+        }
     }
 
     public override async Task OnDisconnectedAsync(HubConnectionContext connection)
     {
         _connections.Remove(connection);
+        RemoveInvocationReturnTypes(connection.ConnectionId);
         _metrics.RecordConnectionClosed(_hubKey);
 
         var subscription = connection.Features.Get<Subscription>();
@@ -138,7 +200,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
         if (subscription is not null)
         {
-            using (subscription)
+            try
             {
                 try
                 {
@@ -156,8 +218,12 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                     _logger.LogDebug(ex, "Failed to remove connections from grains during disconnect for {ConnectionId}", connection.ConnectionId);
                 }
             }
-
-            connection.Features.Set<Subscription?>(null);
+            finally
+            {
+                // Target removals and heartbeat Stop are one-way, but only use the observer identity for cleanup.
+                DisposeSubscription(subscription);
+                connection.Features.Set<Subscription?>(null);
+            }
         }
 
         try
@@ -540,50 +606,17 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         var invocationGrain = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId);
         var invocationInfo = new InvocationInfo(connectionId, invocationId, typeof(T));
 
-        TaskCompletionSource<T>? completionSource = null;
-        Subscription? subscription = null;
-        Task<CompletionMessage?>? completionTask = null;
-
         try
         {
-            try
-            {
-                completionSource = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-                subscription = CreateSubscription(message =>
-                {
-                    if (message is CompletionMessage completionMessage)
-                    {
-                        if (completionMessage.HasResult)
-                        {
-                            completionSource.TrySetResult((T)completionMessage.Result!);
-                        }
-                        else
-                        {
-                            completionSource.TrySetException(new HubException(completionMessage.Error));
-                        }
-                    }
-
-                    return Task.CompletedTask;
-                });
-
-                subscription.AddGrain(invocationGrain);
-                await invocationGrain.AddInvocation(subscription.Reference, invocationInfo);
-            }
-            catch (InvalidOperationException ex) when (IsLocalObjectReferenceException(ex))
-            {
-                completionSource = null;
-                subscription?.Dispose();
-                subscription = null;
-
-                await invocationGrain.AddInvocation(null, invocationInfo);
-                completionTask = invocationGrain.WaitForCompletion();
-            }
+            await invocationGrain.AddInvocation(null, invocationInfo);
+            var completionTask = invocationGrain.WaitForCompletion();
 
             var invocationMessage = new InvocationMessage(invocationId, methodName, args);
 
             if (connection == null)
             {
                 // TODO: Need to handle other server going away while waiting for connection result
+                AttachInvocationReturnType(invocationMessage, typeof(T));
                 var invocation = _orleansSignalOptions.Value.ConnectionPartitionCount > 1
                     ? await Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
                         .SendToConnection(invocationMessage, connectionId), cancellationToken)
@@ -597,6 +630,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             }
             else
             {
+                _invocationReturnTypes[invocationId] = new InvocationReturnType(typeof(T), connectionId);
                 try
                 {
                     await Task.Run(() => connection.WriteAsync(invocationMessage, cancellationToken), cancellationToken);
@@ -610,12 +644,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
             try
             {
-                if (completionSource is not null)
-                {
-                    return await Task.Run(() => completionSource.Task, cancellationToken);
-                }
-
-                var completionMessage = await completionTask!.WaitAsync(cancellationToken) ?? throw new IOException($"Invocation '{invocationId}' returned no result for connection '{connectionId}'.");
+                var completionMessage = await completionTask.WaitAsync(cancellationToken) ?? throw new IOException($"Invocation '{invocationId}' returned no result for connection '{connectionId}'.");
 
                 if (completionMessage.HasResult)
                 {
@@ -636,46 +665,43 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         }
         finally
         {
-            if (subscription is not null && connection is not null)
-            {
-                var removalTasks = subscription.Grains
-                    .Select(grain => grain.RemoveConnection(connection.ConnectionId, subscription.Reference))
-                    .ToArray();
-
-                if (removalTasks.Length > 0)
-                {
-                    await Task.WhenAll(removalTasks);
-                }
-            }
-
+            _invocationReturnTypes.TryRemove(invocationId, out _);
             await invocationGrain.RemoveInvocation();
+        }
+    }
 
-            subscription?.Dispose();
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Observer reference deletion is best-effort during connection teardown.")]
+    private void DisposeSubscription(Subscription subscription)
+    {
+        try
+        {
+            subscription.DisposeReference(_clusterClient.DeleteObjectReference<ISignalRObserver>);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to delete Orleans observer object reference for hub {HubKey}.", _hubKey);
         }
     }
 
     public override async Task SetConnectionResultAsync(string connectionId, CompletionMessage result)
     {
+        ArgumentNullException.ThrowIfNull(result);
+
+        if (!string.IsNullOrEmpty(result.InvocationId))
+        {
+            _invocationReturnTypes.TryRemove(result.InvocationId, out _);
+        }
+
         await Task.Run(() => NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, result.InvocationId)
             .TryCompleteResult(connectionId, result));
     }
 
     public override bool TryGetReturnType(string invocationId, [NotNullWhen(true)] out Type? type)
     {
-        var returnTypeTask = NameHelperGenerator.GetInvocationGrain<THub>(_clusterClient, invocationId).TryGetReturnType();
-
-        var timeSpan = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
-        var timeout = TimeSpan.FromMilliseconds(timeSpan.TotalMilliseconds * 0.8);
-
-        // Use async wait with timeout to avoid blocking thread pool threads
-        // This is required because the base class method is synchronous
-        var completed = returnTypeTask.Wait(timeout);
-
-        if (completed && returnTypeTask.IsCompletedSuccessfully)
+        if (_invocationReturnTypes.TryGetValue(invocationId, out var registration))
         {
-            var result = returnTypeTask.Result;
-            type = result.GetReturnType();
-            return result.Result;
+            type = registration.Type;
+            return true;
         }
 
         type = null;
@@ -709,8 +735,23 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         {
             return;
         }
+        if (message is InvocationMessage { InvocationId: not null, Headers: not null } routedInvocation &&
+            routedInvocation.Headers.TryGetValue(InvocationReturnTypeHeader, out var returnTypeName))
+        {
+            routedInvocation.Headers.Remove(InvocationReturnTypeHeader);
+            if (routedInvocation.Headers.Count == 0)
+            {
+                routedInvocation.Headers = null;
+            }
+
+            _invocationReturnTypes[routedInvocation.InvocationId] = new InvocationReturnType(
+                Type.GetType(returnTypeName, throwOnError: true)!,
+                connection.ConnectionId);
+        }
+
         try
         {
+            // Critical: SignalR writes must not execute on Orleans' serial observer dispatcher.
             await Task.Run(() => connection.WriteAsync(message));
         }
         catch (Exception ex)
@@ -745,6 +786,25 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         // Trim the two '=='
         Debug.Assert(base64.EndsWith("=="));
         return new string(base64[..^2]);
+    }
+
+    private static void AttachInvocationReturnType(InvocationMessage invocationMessage, Type returnType)
+    {
+        invocationMessage.Headers = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [InvocationReturnTypeHeader] = returnType.AssemblyQualifiedName ?? returnType.FullName ?? returnType.Name
+        };
+    }
+
+    private void RemoveInvocationReturnTypes(string connectionId)
+    {
+        foreach (var (invocationId, registration) in _invocationReturnTypes)
+        {
+            if (string.Equals(registration.ConnectionId, connectionId, StringComparison.Ordinal))
+            {
+                _invocationReturnTypes.TryRemove(invocationId, out _);
+            }
+        }
     }
 
     private Subscription? GetSubscription(string connectionId)
@@ -796,35 +856,147 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
     private Task UpdateConnectionHeartbeatAsync(string connectionId, Subscription subscription)
     {
-        if (!_orleansSignalOptions.Value.KeepEachConnectionAlive ||
-            string.IsNullOrEmpty(subscription.HubKey) ||
-            IsConnectionDisconnected(connectionId))
+        if (!TryCreateHeartbeatRegistration(connectionId, subscription, out var heartbeatGrain, out var registration))
         {
             return Task.CompletedTask;
         }
 
-        var hubKey = subscription.HubKey!;
-        var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(_orleansSignalOptions, _globalHubOptions, _hubOptions);
-        var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connectionId);
-        var targets = subscription.GetHeartbeatGrainIds();
-        var registration = new ConnectionHeartbeatRegistration(
-            hubKey,
-            subscription.UsePartitioning,
-            subscription.PartitionId,
-            subscription.Reference,
-            heartbeatInterval,
-            targets,
-            connectionId);
-
         return heartbeatGrain.Start(registration);
     }
 
-    private static bool IsLocalObjectReferenceException(Exception ex)
+    private bool TryCreateHeartbeatRegistration(
+        string connectionId,
+        Subscription subscription,
+        out ISignalRConnectionHeartbeatGrain heartbeatGrain,
+        out ConnectionHeartbeatRegistration registration)
     {
-        return ex is InvalidOperationException invalid &&
-               invalid.Message.Contains("Cannot create a local object reference from a grain", StringComparison.OrdinalIgnoreCase);
+        var hubKey = subscription.HubKey;
+        var observer = subscription.Reference;
+        if (!_orleansSignalOptions.Value.KeepEachConnectionAlive ||
+            string.IsNullOrEmpty(hubKey) ||
+            observer is null ||
+            IsConnectionDisconnected(connectionId))
+        {
+            heartbeatGrain = default!;
+            registration = default!;
+            return false;
+        }
+
+        var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(
+            _orleansSignalOptions,
+            _globalHubOptions,
+            _hubOptions);
+        heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, hubKey, connectionId);
+        registration = new ConnectionHeartbeatRegistration(
+            hubKey,
+            subscription.UsePartitioning,
+            subscription.PartitionId,
+            observer,
+            heartbeatInterval,
+            subscription.GetHeartbeatGrainIds(),
+            connectionId);
+        return true;
     }
 
+    private async Task RunConnectionHeartbeatRenewalAsync(CancellationToken cancellationToken)
+    {
+        var heartbeatInterval = TimeIntervalHelper.GetClientTimeoutInterval(
+            _orleansSignalOptions,
+            _globalHubOptions,
+            _hubOptions);
+        if (heartbeatInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        var renewalInterval = TimeSpan.FromMilliseconds(Math.Max(
+            MinimumHeartbeatRenewalIntervalMilliseconds,
+            heartbeatInterval.TotalMilliseconds / HeartbeatRenewalIntervalDivisor));
+        using var timer = new PeriodicTimer(renewalInterval);
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                var renewals = new List<Task>();
+                foreach (var connection in _connections)
+                {
+                    var subscription = connection.Features.Get<Subscription>();
+                    if (subscription is not null &&
+                        TryCreateHeartbeatRegistration(
+                            connection.ConnectionId,
+                            subscription,
+                            out var heartbeatGrain,
+                            out var registration))
+                    {
+                        renewals.Add(RenewConnectionHeartbeatAsync(connection.ConnectionId, heartbeatGrain, registration));
+                    }
+                }
+
+                if (renewals.Count > 0)
+                {
+                    await Task.WhenAll(renewals);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "One failed connection must not terminate heartbeat renewal for every connection on the host.")]
+    private async Task RenewConnectionHeartbeatAsync(
+        string connectionId,
+        ISignalRConnectionHeartbeatGrain heartbeatGrain,
+        ConnectionHeartbeatRegistration registration)
+    {
+        try
+        {
+            await heartbeatGrain.Start(registration);
+        }
+        catch (Exception ex)
+        {
+            _metrics.RecordHeartbeatRenewalFailure(_hubKey, ex.GetType().Name);
+            if (ShouldLogHeartbeatRenewalWarning())
+            {
+                _logger.LogWarning(ex,
+                    "Failed to renew heartbeat lease for connection {ConnectionId}; the lease was not extended and will be retried.",
+                    connectionId);
+            }
+            else
+            {
+                _logger.LogDebug(ex, "Failed to renew heartbeat lease for connection {ConnectionId}.", connectionId);
+            }
+        }
+    }
+
+    private bool ShouldLogHeartbeatRenewalWarning()
+    {
+        var warningInterval = TimeIntervalHelper.GetClientTimeoutInterval(
+            _orleansSignalOptions,
+            _globalHubOptions,
+            _hubOptions);
+        warningInterval = TimeSpan.FromSeconds(Math.Max(
+            MinimumHeartbeatRenewalWarningIntervalSeconds,
+            warningInterval.TotalSeconds));
+
+        while (true)
+        {
+            var now = Stopwatch.GetTimestamp();
+            var lastWarning = Volatile.Read(ref _lastHeartbeatRenewalWarningTimestamp);
+            if (lastWarning != 0 && Stopwatch.GetElapsedTime(lastWarning, now) < warningInterval)
+            {
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _lastHeartbeatRenewalWarningTimestamp, now, lastWarning) == lastWarning)
+            {
+                return true;
+            }
+        }
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Shutdown cleanup is best-effort and must continue for the remaining connections.")]
     private void OnApplicationStopping()
     {
         foreach (var connection in _connections)
@@ -836,10 +1008,34 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
                 continue;
             }
 
-            foreach (var grain in subscription.Grains)
+            try
             {
-                _ = grain.RemoveConnection(connection.ConnectionId, subscription.Reference);
+                var reference = subscription.Reference;
+                foreach (var grain in subscription.Grains)
+                {
+                    _ = grain.RemoveConnection(connection.ConnectionId, reference);
+                }
+
+                if (_orleansSignalOptions.Value.KeepEachConnectionAlive)
+                {
+                    var heartbeatGrain = NameHelperGenerator.GetConnectionHeartbeatGrain(_clusterClient, _hubKey, connection.ConnectionId);
+                    _ = heartbeatGrain.Stop();
+                }
+
+                var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
+                _ = coordinator.NotifyConnectionRemoved(connection.ConnectionId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to schedule shutdown cleanup for connection {ConnectionId}.", connection.ConnectionId);
+            }
+            finally
+            {
+                DisposeSubscription(subscription);
+                connection.Features.Set<Subscription?>(null);
             }
         }
     }
+
+    private readonly record struct InvocationReturnType(Type Type, string ConnectionId);
 }

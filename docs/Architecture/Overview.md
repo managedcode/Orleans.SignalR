@@ -25,21 +25,73 @@
 ```mermaid
 flowchart LR
   Host["ASP.NET Core host"]
-  Hub["SignalR hubs"]
   ClientExt["ManagedCode.Orleans.SignalR.Client"]
   Core["ManagedCode.Orleans.SignalR.Core"]
   Server["ManagedCode.Orleans.SignalR.Server"]
-  Orleans["Orleans runtime"]
-  Storage["Orleans storage provider (ManagedCode.Orleans.SignalR.Storage)"]
-  Clients["Connected clients"]
+  OrleansClient["Microsoft.Orleans.Client"]
+  OrleansServer["Microsoft.Orleans.Server"]
 
-  Host --> Hub
-  Hub --> ClientExt
+  Host --> ClientExt
+  Host --> Server
   ClientExt --> Core
-  Core --> Server
-  Server --> Orleans
-  Server --> Storage
-  Orleans --> Clients
+  ClientExt --> OrleansClient
+  Server --> Core
+  Server --> OrleansServer
+```
+
+## Interfaces / contracts map
+
+```mermaid
+flowchart LR
+  Lifetime["OrleansHubLifetimeManager"]
+  ConnectionContracts["ISignalRConnectionCoordinatorGrain / ISignalRConnectionHolderGrain / ISignalRConnectionPartitionGrain"]
+  GroupContracts["ISignalRGroupCoordinatorGrain / ISignalRGroupGrain / ISignalRGroupPartitionGrain"]
+  UserContract["ISignalRUserGrain"]
+  InvocationContract["ISignalRInvocationGrain"]
+  HeartbeatContract["ISignalRConnectionHeartbeatGrain"]
+  ObserverContract["ISignalRObserver"]
+  ServerGrains["SignalR server grain implementations"]
+
+  Lifetime --> ConnectionContracts
+  Lifetime --> GroupContracts
+  Lifetime --> UserContract
+  Lifetime --> InvocationContract
+  Lifetime --> HeartbeatContract
+  ConnectionContracts --> ServerGrains
+  GroupContracts --> ServerGrains
+  UserContract --> ServerGrains
+  InvocationContract --> ServerGrains
+  HeartbeatContract --> ServerGrains
+  ServerGrains --> ObserverContract
+```
+
+## Key classes / types map
+
+```mermaid
+flowchart TD
+  ClientDI["Client OrleansDependencyInjectionExtensions"]
+  ServerDI["Server OrleansDependencyInjectionExtensions"]
+  Lifetime["OrleansHubLifetimeManager"]
+  Store["HubConnectionStore"]
+  Subscription["Subscription"]
+  Observer["SignalRObserver"]
+  ConnCoordinator["SignalRConnectionCoordinatorGrain"]
+  ConnTarget["SignalRConnectionHolderGrain / SignalRConnectionPartitionGrain"]
+  GroupCoordinator["SignalRGroupCoordinatorGrain"]
+  GroupTarget["SignalRGroupGrain / SignalRGroupPartitionGrain"]
+  Heartbeat["SignalRConnectionHeartbeatGrain"]
+  ObserverBase["SignalRObserverGrainBase"]
+
+  ClientDI --> Lifetime
+  ServerDI --> Lifetime
+  Lifetime --> Store
+  Lifetime --> Subscription
+  Subscription --> Observer
+  Lifetime --> ConnCoordinator --> ConnTarget
+  Lifetime --> GroupCoordinator --> GroupTarget
+  Lifetime --> Heartbeat
+  ConnTarget --> ObserverBase
+  GroupTarget --> ObserverBase
 ```
 
 ## Module catalog (responsibilities + boundaries)
@@ -73,14 +125,21 @@ flowchart LR
 ## Link index (anchors for diagram elements)
 
 - ASP.NET Core host: `ManagedCode.Orleans.SignalR.Tests/TestApp/HttpHostProgram.cs`
-- SignalR hubs: `ManagedCode.Orleans.SignalR.Tests/TestApp/Hubs/SimpleTestHub.cs`
 - ManagedCode.Orleans.SignalR.Client: `ManagedCode.Orleans.SignalR.Client/ManagedCode.Orleans.SignalR.Client.csproj`
+- Client OrleansDependencyInjectionExtensions: `ManagedCode.Orleans.SignalR.Client/Extensions/OrleansDependencyInjectionExtensions.cs`
 - Hub batch group extensions: `ManagedCode.Orleans.SignalR.Client/Extensions/OrleansHubGroupExtensions.cs`
 - ManagedCode.Orleans.SignalR.Core: `ManagedCode.Orleans.SignalR.Core/ManagedCode.Orleans.SignalR.Core.csproj`
+- OrleansHubLifetimeManager, HubConnectionStore: `ManagedCode.Orleans.SignalR.Core/SignalR/OrleansHubLifetimeManager.cs`
+- Subscription, SignalRObserver: `ManagedCode.Orleans.SignalR.Core/SignalR/Observers/Subscription.cs`, `ManagedCode.Orleans.SignalR.Core/SignalR/Observers/SignalRObserver.cs`
+- Grain and observer contracts: `ManagedCode.Orleans.SignalR.Core/Interfaces/`
 - ManagedCode.Orleans.SignalR.Server: `ManagedCode.Orleans.SignalR.Server/ManagedCode.Orleans.SignalR.Server.csproj`
-- Orleans runtime (package references): `Directory.Packages.props`
-- Orleans storage provider key: `ManagedCode.Orleans.SignalR.Core/Config/OrleansSignalROptions.cs`
-- Connected clients (test harness): `ManagedCode.Orleans.SignalR.Tests/HubSmokeTests.cs`
+- Server OrleansDependencyInjectionExtensions: `ManagedCode.Orleans.SignalR.Server/Extensions/OrleansDependencyInjectionExtensions.cs`
+- SignalR server grain implementations: `ManagedCode.Orleans.SignalR.Server/*Grain.cs`
+- SignalRObserverGrainBase: `ManagedCode.Orleans.SignalR.Server/SignalRObserverGrainBase.cs`
+- Connection coordinator and targets: `ManagedCode.Orleans.SignalR.Server/SignalRConnectionCoordinatorGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRConnectionHolderGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRConnectionPartitionGrain.cs`
+- Group coordinator and targets: `ManagedCode.Orleans.SignalR.Server/SignalRGroupCoordinatorGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRGroupGrain.cs`, `ManagedCode.Orleans.SignalR.Server/SignalRGroupPartitionGrain.cs`
+- Connection heartbeat: `ManagedCode.Orleans.SignalR.Server/SignalRConnectionHeartbeatGrain.cs`
+- Microsoft.Orleans.Client / Microsoft.Orleans.Server: `Directory.Packages.props`
 - SignalR metrics: `docs/Features/Diagnostics-Metrics.md`
 
 ## Key ADRs and feature specs

@@ -189,7 +189,12 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         {
             foreach (var connectionId in excludedConnectionIds)
             {
-                var (partition, _, _) = GetOrAssignPartitionWithEpoch(connectionId);
+                if (!_connectionPartitions.TryGetValue(connectionId, out var assignment))
+                {
+                    continue;
+                }
+
+                var partition = assignment.PartitionId;
                 ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(excludedByPartition, partition, out var exists);
                 if (!exists)
                 {
@@ -243,8 +248,15 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
-        var (partition, _, _) = GetOrAssignPartitionWithEpoch(connectionId);
-        var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(GrainFactory, this.GetPrimaryKeyString(), partition);
+        if (!_connectionPartitions.TryGetValue(connectionId, out var assignment))
+        {
+            return false;
+        }
+
+        var partitionGrain = NameHelperGenerator.GetConnectionPartitionGrain(
+            GrainFactory,
+            this.GetPrimaryKeyString(),
+            assignment.PartitionId);
         return await partitionGrain.SendToConnection(message, connectionId);
     }
 
@@ -261,7 +273,12 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         {
             foreach (var connectionId in connectionIds)
             {
-                var (partition, _, _) = GetOrAssignPartitionWithEpoch(connectionId);
+                if (!_connectionPartitions.TryGetValue(connectionId, out var assignment))
+                {
+                    continue;
+                }
+
+                var partition = assignment.PartitionId;
                 ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(connectionsByPartition, partition, out var exists);
                 if (!exists)
                 {

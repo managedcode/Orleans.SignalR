@@ -1,4 +1,3 @@
-using ManagedCode.Orleans.SignalR.Server;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -65,109 +64,32 @@ public class LongIdleServerPushTests : IAsyncLifetime
         var routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         receiver.On<string>("Route", message => routed.TrySetResult(message));
 
-        using var keepAliveCts = new CancellationTokenSource();
-        Task? keepAliveTask = null;
-
         try
         {
             await receiver.StartAsync();
             await sender.StartAsync();
             receiver.ConnectionId.ShouldNotBeNull();
             sender.ConnectionId.ShouldNotBeNull();
-
-            keepAliveTask = Task.Run(async () =>
-            {
-                while (!keepAliveCts.Token.IsCancellationRequested)
-                {
-                    try
-                    {
-                        await receiver.InvokeAsync<int>("Plus", 0, 0, keepAliveCts.Token);
-                    }
-                    catch
-                    {
-                    }
-
-                    try
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(2), keepAliveCts.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        break;
-                    }
-                }
-            }, keepAliveCts.Token);
+            var receiverConnectionId = receiver.ConnectionId;
 
             var idleDuration = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(5);
-            _output.WriteLine($"Waiting {idleDuration} to emulate a five-minute idle interval before server push.");
+            _output.WriteLine($"Waiting {idleDuration} without application traffic, beyond the six-second activation collection age.");
             await Task.Delay(idleDuration);
             receiver.State.ShouldBe(HubConnectionState.Connected, "Receiver disconnected during idle interval.");
             sender.State.ShouldBe(HubConnectionState.Connected, "Sender disconnected during idle interval.");
+            receiver.ConnectionId.ShouldBe(receiverConnectionId, "Receiver reconnected instead of preserving the original connection.");
 
-            var management = _siloCluster.Cluster.Client.GetGrain<IManagementGrain>(0);
-            await management.ForceActivationCollection(TimeSpan.Zero);
-            _ = await WaitUntilAsync(
-                async () =>
-                {
-                    var partitions = await management.GetActiveGrains(GrainType.Create($"ManagedCode.{nameof(SignalRConnectionPartitionGrain)}"));
-                    return partitions.Count == 0;
-                },
-                TimeSpan.FromSeconds(5));
-
-            await Task.Delay(TestDefaults.ClientTimeout + TimeSpan.FromSeconds(5));
-
-            // Force client reconnection after the collection window to simulate real SignalR behaviour.
-            await receiver.StopAsync();
-            await sender.StopAsync();
-
-            await receiver.StartAsync();
-            receiver.ConnectionId.ShouldNotBeNull();
-
-            await sender.StartAsync();
-            sender.ConnectionId.ShouldNotBeNull();
-
-            routed = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            await sender.InvokeAsync("RouteToConnection", receiver.ConnectionId!, payload);
-            var content = await routed.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            await sender.InvokeAsync("RouteToConnection", receiverConnectionId!, payload);
+            var content = await routed.Task.WaitAsync(TestDefaults.ClientTimeout);
             content.ShouldContain(sender.ConnectionId!);
             content.ShouldContain(payload);
         }
         finally
         {
-            keepAliveCts.Cancel();
-            if (keepAliveTask is not null)
-            {
-                try
-                {
-                    await keepAliveTask;
-                }
-                catch (OperationCanceledException)
-                {
-                }
-            }
             await receiver.StopAsync();
             await sender.StopAsync();
             await receiver.DisposeAsync();
             await sender.DisposeAsync();
         }
-    }
-
-    private static async Task<bool> WaitUntilAsync(Func<Task<bool>> predicate, TimeSpan timeout, TimeSpan? pollInterval = null)
-    {
-        var delay = pollInterval ?? TimeSpan.FromMilliseconds(200);
-        var deadline = DateTime.UtcNow + timeout;
-
-        while (DateTime.UtcNow < deadline)
-        {
-            if (await predicate().ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            await Task.Delay(delay).ConfigureAwait(false);
-        }
-
-        return await predicate().ConfigureAwait(false);
     }
 }

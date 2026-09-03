@@ -428,11 +428,13 @@ public class PartitioningTests
     [Fact]
     public async Task BatchGroupMembershipShouldCleanupTouchedPartitionsWhenDisconnectHappensMidJoinAsync()
     {
+        var groupNamePrefix = $"batch-disconnect-group-{Guid.NewGuid():N}";
         var groupNames = Enumerable.Range(0, 512)
-            .Select(index => $"batch-disconnect-group-{index}-{Guid.NewGuid():N}")
+            .Select(index => $"{groupNamePrefix}-{index}")
             .ToArray();
 
         var connection = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
+        using var joinGate = BatchGroupJoinCallFilter.Arm(groupNamePrefix);
 
         try
         {
@@ -451,11 +453,11 @@ public class PartitioningTests
 
             var joinTask = connection.InvokeAsync("AddToGroups", groupNames);
 
-            var joinStarted = await WaitForBatchJoinToStartAsync(partitions, connectionId, joinTask, TimeSpan.FromSeconds(3));
-
-            joinStarted.ShouldBeTrue();
+            await joinGate.WaitUntilPausedAsync(TimeSpan.FromSeconds(10));
+            (await GetTrackedPartitionCountAsync(partitions, connectionId)).ShouldBeGreaterThan(0);
 
             await connection.StopAsync();
+            joinGate.Release();
 
             try
             {
@@ -496,32 +498,6 @@ public class PartitioningTests
         }
 
         return tracked;
-    }
-
-    private static async Task<bool> WaitForBatchJoinToStartAsync(
-        IReadOnlyCollection<Core.Interfaces.ISignalRGroupPartitionGrain> partitions,
-        string connectionId,
-        Task joinTask,
-        TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-
-        while (DateTime.UtcNow < deadline)
-        {
-            if (await GetTrackedPartitionCountAsync(partitions, connectionId) > 0 && !joinTask.IsCompleted)
-            {
-                return true;
-            }
-
-            if (joinTask.IsCompleted)
-            {
-                return false;
-            }
-
-            await Task.Delay(TimeSpan.FromMilliseconds(5));
-        }
-
-        return await GetTrackedPartitionCountAsync(partitions, connectionId) > 0 && !joinTask.IsCompleted;
     }
 
     private async Task<bool> WaitUntilAsync(

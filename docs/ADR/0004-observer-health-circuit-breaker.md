@@ -16,6 +16,7 @@ Track observer health per connection using failure windows, circuit breaker stat
 - Message delivery avoids repeated failures for known-bad observers.
 - A small buffer is used during grace periods, trading memory for resilience.
 - Behavior is configurable via `OrleansSignalROptions` thresholds and durations.
+- Because observer callbacks are one-way, this mechanism does not constitute an end-to-end SignalR delivery acknowledgement. A separate feedback protocol is required if remote host write failures must drive the circuit state.
 
 ## Decision diagram
 

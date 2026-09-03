@@ -130,15 +130,23 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     public async Task SendToGroup(string groupName, HubMessage message)
     {
-        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
-        var partitionGrain = await GetPartitionGrainAsync(partition);
+        if (!GroupPartitions.TryGetValue(groupName, out var assignment))
+        {
+            return;
+        }
+
+        var partitionGrain = await GetPartitionGrainAsync(assignment.PartitionId);
         await partitionGrain.SendToGroups(message, new[] { groupName });
     }
 
     public async Task SendToGroupExcept(string groupName, HubMessage message, string[] excludedConnectionIds)
     {
-        var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
-        var partitionGrain = await GetPartitionGrainAsync(partition);
+        if (!GroupPartitions.TryGetValue(groupName, out var assignment))
+        {
+            return;
+        }
+
+        var partitionGrain = await GetPartitionGrainAsync(assignment.PartitionId);
         await partitionGrain.SendToGroupsExcept(message, new[] { groupName }, excludedConnectionIds);
     }
 
@@ -148,7 +156,12 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         var groupsByPartition = new Dictionary<int, List<string>>();
         foreach (var groupName in groupNames)
         {
-            var (partition, _, _) = GetOrAssignPartitionWithEpoch(groupName);
+            if (!GroupPartitions.TryGetValue(groupName, out var assignment))
+            {
+                continue;
+            }
+
+            var partition = assignment.PartitionId;
             ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(groupsByPartition, partition, out var exists);
             if (!exists)
             {
@@ -408,6 +421,8 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
             }
             else
             {
+                // Cleanup must still reach the deterministic partition when coordinator
+                // metadata was lost after the partition had already recorded membership.
                 partition = PartitionHelper.GetPartitionId(groupName, (uint)_currentPartitionCount);
             }
 

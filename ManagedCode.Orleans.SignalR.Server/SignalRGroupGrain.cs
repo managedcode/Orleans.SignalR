@@ -44,7 +44,7 @@ public class SignalRGroupGrain(
 
         if (LiveObservers.Count > 0)
         {
-            DispatchToLiveObservers(LiveObservers.Values, message);
+            await DispatchToLiveObserversAsync(LiveObservers.Values, message);
             return;
         }
 
@@ -60,7 +60,7 @@ public class SignalRGroupGrain(
         {
             var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
             var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
-            DispatchToLiveObservers(targets, message);
+            await DispatchToLiveObserversAsync(targets, message);
             return;
         }
 

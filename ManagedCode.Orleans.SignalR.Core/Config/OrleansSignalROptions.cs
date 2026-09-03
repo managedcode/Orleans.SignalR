@@ -13,10 +13,10 @@ public class OrleansSignalROptions
     public TimeSpan ClientTimeoutInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    ///     If true each connection should be kept alive by sending a message to the orleans every
-    ///     <see cref="HubOptions.KeepAliveInterval" />.
-    ///     The default value is true.
-    ///     Set to false only if you don't want to send messages to the specific connectionId.
+    ///     When true, each local SignalR connection renews a bounded lease on a dedicated Orleans
+    ///     heartbeat grain, which refreshes the connection's observer registrations.
+    ///     The default value is true. Set it to false to avoid the per-connection heartbeat grain
+    ///     and rely on the regular observer and activation lifecycle instead.
     /// </summary>
     public bool KeepEachConnectionAlive { get; set; } = true;
 

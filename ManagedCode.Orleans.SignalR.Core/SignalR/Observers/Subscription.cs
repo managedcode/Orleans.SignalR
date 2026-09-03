@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Threading;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Orleans.Runtime;
 
@@ -26,13 +27,32 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, true))
         {
             return;
         }
 
-        _disposed = true;
+        DisposeCore();
+    }
 
+    internal void DisposeReference(Action<ISignalRObserver> deleteObjectReference)
+    {
+        if (Interlocked.Exchange(ref _disposed, true))
+        {
+            return;
+        }
+
+        var reference = Reference;
+        DisposeCore();
+
+        if (reference is not null)
+        {
+            deleteObjectReference(reference);
+        }
+    }
+
+    private void DisposeCore()
+    {
         observer?.Dispose();
         _grains.Clear();
         _heartbeatGrainIds.Clear();
@@ -44,8 +64,19 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
 
     public void AddGrain(IObserverConnectionManager grain)
     {
+        if (Volatile.Read(ref _disposed))
+        {
+            return;
+        }
+
         _grains.TryAdd(grain, true);
         _heartbeatGrainIds.TryAdd(((GrainReference)grain).GrainId, true);
+
+        if (Volatile.Read(ref _disposed))
+        {
+            _grains.TryRemove(grain, out _);
+            _heartbeatGrainIds.TryRemove(((GrainReference)grain).GrainId, out _);
+        }
     }
 
     public void RemoveGrain(IObserverConnectionManager grain)

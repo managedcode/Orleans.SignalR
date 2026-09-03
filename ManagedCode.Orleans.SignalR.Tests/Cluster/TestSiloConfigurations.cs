@@ -11,6 +11,7 @@ public class TestSiloConfigurations : ISiloConfigurator
     {
         siloBuilder.ConfigureOrleansSignalR();
         siloBuilder.AddOrleansSignalRInMemoryStorage();
+        siloBuilder.AddIncomingGrainCallFilter<BatchGroupJoinCallFilter>();
         siloBuilder.Services
             .AddSignalR(options =>
             {

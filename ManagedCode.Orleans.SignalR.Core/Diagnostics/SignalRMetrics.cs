@@ -19,6 +19,7 @@ public sealed class SignalRMetrics
     public const string MessagesDroppedTotalName = "signalr.messages.dropped.total";
     public const string MessagesBufferedTotalName = "signalr.messages.buffered.total";
     public const string ObserverFailuresTotalName = "signalr.observer.failures.total";
+    public const string HeartbeatRenewalFailuresTotalName = "signalr.heartbeat.renewal.failures.total";
     public const string ObserversMarkedDeadTotalName = "signalr.observer.dead.total";
     public const string CircuitBreakersOpenedTotalName = "signalr.circuit_breaker.opened.total";
     public const string CircuitBreakersClosedTotalName = "signalr.circuit_breaker.closed.total";
@@ -57,6 +58,7 @@ public sealed class SignalRMetrics
     private readonly Counter<long> _messagesDroppedTotal;
     private readonly Counter<long> _messagesBufferedTotal;
     private readonly Counter<long> _observerFailuresTotal;
+    private readonly Counter<long> _heartbeatRenewalFailuresTotal;
     private readonly Counter<long> _observersMarkedDeadTotal;
     private readonly Counter<long> _circuitBreakersOpenedTotal;
     private readonly Counter<long> _circuitBreakersClosedTotal;
@@ -104,6 +106,11 @@ public sealed class SignalRMetrics
             ObserverFailuresTotalName,
             unit: "{failure}",
             description: "Total number of observer delivery failures");
+
+        _heartbeatRenewalFailuresTotal = _meter.CreateCounter<long>(
+            HeartbeatRenewalFailuresTotalName,
+            unit: "{failure}",
+            description: "Total number of connection heartbeat lease renewal failures");
 
         _observersMarkedDeadTotal = _meter.CreateCounter<long>(
             ObserversMarkedDeadTotalName,
@@ -215,6 +222,18 @@ public sealed class SignalRMetrics
         }
 
         _observerFailuresTotal.Add(1, tags);
+    }
+
+    public void RecordHeartbeatRenewalFailure(string? hubName, string failureType)
+    {
+        var tags = CreateHubFailureTags(hubName, failureType);
+        if (tags.Count == 0)
+        {
+            _heartbeatRenewalFailuresTotal.Add(1);
+            return;
+        }
+
+        _heartbeatRenewalFailuresTotal.Add(1, tags);
     }
 
     public void RecordObserverDead(string? hubName)

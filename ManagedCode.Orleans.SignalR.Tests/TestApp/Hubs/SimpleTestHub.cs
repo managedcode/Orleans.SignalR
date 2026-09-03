@@ -8,6 +8,12 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 
 public class SimpleTestHub : Hub
 {
+    public Task AbortConnection()
+    {
+        Context.Abort();
+        return Task.CompletedTask;
+    }
+
     public async Task<int> DoTest()
     {
         await Clients.Caller.SendAsync("DoTest", "test");

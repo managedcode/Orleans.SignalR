@@ -26,8 +26,8 @@
         <RepositoryUrl>https://github.com/managedcode/Orleans.SignalR</RepositoryUrl>
         <PackageProjectUrl>https://github.com/managedcode/Orleans.SignalR</PackageProjectUrl>
         <Product>Managed Code - Orleans SignalR</Product>
-        <Version>10.1.0</Version>
-        <PackageVersion>10.1.0</PackageVersion>
+        <Version>10.3.0</Version>
+        <PackageVersion>10.3.0</PackageVersion>
 
     </PropertyGroup>
     <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
@@ -39,6 +39,10 @@
     </ItemGroup>
     <ItemGroup>
         <PackageReference Include="DotNet.ReproducibleBuilds">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Roslynator.Analyzers">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
         </PackageReference>

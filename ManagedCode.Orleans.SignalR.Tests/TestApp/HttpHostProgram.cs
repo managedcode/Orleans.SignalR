@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using ManagedCode.Orleans.SignalR.Client.Extensions;
@@ -12,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace ManagedCode.Orleans.SignalR.Tests.TestApp;
 
+[SuppressMessage("Design", "RCS1102:Make class static", Justification = "Used as the WebApplicationFactory entry-point type argument.")]
 public class HttpHostProgram
 {
     public static byte[] GetEncryptionKey()
@@ -19,6 +21,10 @@ public class HttpHostProgram
         return Encoding.ASCII.GetBytes("your_secret_key_here_your_secret_key_here");
     }
 
+    [SuppressMessage(
+        "Maintainability",
+        "CA1506:Avoid excessive class coupling",
+        Justification = "The test-host composition root intentionally wires every hub and authentication dependency.")]
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);

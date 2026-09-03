@@ -1,7 +1,10 @@
+using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.AspNetCore.SignalR.Protocol;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -13,16 +16,18 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
 {
     private readonly HighAvailabilityClusterFixture _cluster = cluster;
     private readonly ITestOutputHelper _output = output;
+    private readonly TestOutputHelperAccessor _loggerAccessor = new();
     private TestWebApplication? _app;
 
     private const int DisconnectScenarioConnections = 32;
-    private static readonly TimeSpan BroadcastTimeout = TimeSpan.FromSeconds(60);
-    private static readonly TimeSpan HeartbeatGracePeriod = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan _broadcastTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan _heartbeatGracePeriod = TestDefaults.ClientTimeout + TimeSpan.FromSeconds(1);
 
     public Task InitializeAsync()
     {
         Environment.SetEnvironmentVariable("ORLEANS_SIGNALR_LOGLEVEL", "Warning");
-        _app = new TestWebApplication(_cluster, port: 8300);
+        _loggerAccessor.Output = _output;
+        _app = new TestWebApplication(_cluster, port: 8300, loggerAccessor: _loggerAccessor);
         return Task.CompletedTask;
     }
 
@@ -33,7 +38,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
     }
 
     [Fact]
-    public async Task ClientsSurviveThirdAndFourthSiloShutdown()
+    public async Task ClientsSurviveThirdAndFourthSiloShutdownAsync()
     {
         if (_app is null)
         {
@@ -46,17 +51,17 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
         try
         {
             await WarmUpConnectionsAsync(connections);
-            await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
+            await BroadcastAndAwaitAsync(connections, connections[0], "baseline");
 
             await cluster.StartAdditionalSiloAsync();
             connections.AddRange(await CreateConnectionsAsync(_app, 50));
-            await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
             await WarmUpConnectionsAsync(connections);
+            await BroadcastAndAwaitAsync(connections, connections[0], "baseline");
 
             await cluster.StartAdditionalSiloAsync();
             connections.AddRange(await CreateConnectionsAsync(_app, 100));
             await WarmUpConnectionsAsync(connections);
-            await BroadcastAndAwaitAsync(connections, connections[0], "baseline", _output);
+            await BroadcastAndAwaitAsync(connections, connections[0], "baseline");
 
             var extraSilos = cluster.Silos.Skip(2).ToArray();
 
@@ -65,9 +70,9 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
                 _output.WriteLine($"[HA] Killing silo {silo.SiloAddress}.");
                 await cluster.KillSiloAsync(silo);
                 await cluster.WaitForLivenessToStabilizeAsync(true);
-                await Task.Delay(HeartbeatGracePeriod);
+                await Task.Delay(_heartbeatGracePeriod);
                 await WarmUpConnectionsAsync(connections);
-                await BroadcastAndAwaitAsync(connections, connections[1], $"after-kill-{silo.InstanceNumber}", _output);
+                await BroadcastAndAwaitAsync(connections, connections[1], $"after-kill-{silo.InstanceNumber}");
             }
         }
         finally
@@ -77,7 +82,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
     }
 
     [Fact]
-    public async Task ServerBroadcastIgnoresDisconnectedClients()
+    public async Task ServerBroadcastIgnoresDisconnectedClientsAsync()
     {
         if (_app is null)
         {
@@ -90,7 +95,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
         try
         {
             await WarmUpConnectionsAsync(connections);
-            await BroadcastAndAwaitAsync(connections, connections[0], "initial", _output);
+            await BroadcastAndAwaitAsync(connections, connections[0], "initial");
 
             foreach (var connection in connections.Take(connections.Count - survivorCount))
             {
@@ -102,7 +107,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
             var survivors = connections.Where(conn => conn.IsConnected).ToArray();
             survivors.Length.ShouldBe(survivorCount, "Expected remaining connected clients.");
 
-            await BroadcastAndAwaitAsync(survivors, survivors[0], "after-disconnect", _output);
+            await BroadcastAndAwaitAsync(survivors, survivors[0], "after-disconnect");
         }
         finally
         {
@@ -124,12 +129,10 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
         return connections;
     }
 
-    private static async Task BroadcastAndAwaitAsync(
+    private async Task BroadcastAndAwaitAsync(
         IEnumerable<BroadcastConnection> connections,
         BroadcastConnection sender,
-        string tag,
-        ITestOutputHelper output,
-        int attempt = 1)
+        string tag)
     {
         var connectionList = connections as IList<BroadcastConnection> ?? connections.ToList();
         if (connectionList.Count == 0)
@@ -146,7 +149,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
         }
 
         await sender.Connection.InvokeAsync("BroadcastPayload", payload);
-        var deliveries = await Task.WhenAll(connectionList.Select(conn => conn.WaitForReceiptAsync(BroadcastTimeout, payload)));
+        var deliveries = await Task.WhenAll(connectionList.Select(conn => conn.WaitForReceiptAsync(_broadcastTimeout, payload)));
         var stalled = connectionList.Where((conn, index) => !deliveries[index]).ToArray();
         if (stalled.Length == 0)
         {
@@ -155,20 +158,27 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
 
         var stalledList = string.Join(", ",
             stalled.Select(conn => conn.Connection.ConnectionId ?? "<unknown>"));
-        output.WriteLine($"[HA] Broadcast '{tag}' stalled on {stalled.Length} connection(s): {stalledList}. Attempt {attempt}.");
+        _output.WriteLine($"[HA] Broadcast '{tag}' stalled on {stalled.Length} connection(s): {stalledList}.");
+        await ProbeStalledConnectionsAsync(stalled);
+        throw new TimeoutException($"Connections [{stalledList}] did not observe broadcast '{tag}'.");
+    }
 
-        foreach (var stalledConnection in stalled)
+    private async Task ProbeStalledConnectionsAsync(IReadOnlyCollection<BroadcastConnection> stalled)
+    {
+        var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<SimpleTestHub>(_cluster.Cluster.Client);
+        var probes = stalled.Select(async connection =>
         {
-            await stalledConnection.RestartAsync();
-        }
+            var connectionId = connection.Connection.ConnectionId ?? "<unknown>";
+            var payload = $"probe:{Guid.NewGuid():N}";
+            connection.ResetReceipt();
+            var routed = await coordinator.SendToConnection(
+                new InvocationMessage("PerfBroadcast", [payload]),
+                connectionId);
+            var delivered = routed && await connection.WaitForReceiptAsync(TimeSpan.FromSeconds(5), payload);
+            _output.WriteLine($"[HA] Targeted probe for {connectionId}: routed={routed}, delivered={delivered}.");
+        });
 
-        if (attempt >= 3)
-        {
-            throw new TimeoutException($"Connections [{stalledList}] did not observe broadcast '{tag}' after {attempt} attempts.");
-        }
-
-        await Task.Delay(TestDefaults.ClientTimeout);
-        await BroadcastAndAwaitAsync(connectionList, sender, tag, output, attempt + 1);
+        await Task.WhenAll(probes);
     }
 
     private static async Task EnsureAllConnectedAsync(IEnumerable<BroadcastConnection> connections)
@@ -218,7 +228,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
             IsConnected = true;
             connection.On<string>("PerfBroadcast", message =>
             {
-                _receipt.TrySetResult(message);
+                Volatile.Read(ref _receipt).TrySetResult(message);
             });
             connection.Reconnecting += _ =>
             {
@@ -240,19 +250,20 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
         public HubConnection Connection { get; }
         public bool IsConnected { get; private set; }
 
-        public void ResetReceipt() => _receipt = CreateReceipt();
+        public void ResetReceipt() => Interlocked.Exchange(ref _receipt, CreateReceipt());
 
-        public async Task<bool> WaitForReceiptAsync(TimeSpan timeout, string _)
+        public async Task<bool> WaitForReceiptAsync(TimeSpan timeout, string expectedPayload)
         {
             if (!IsConnected)
             {
-                return true;
+                return false;
             }
 
             try
             {
-                await _receipt.Task.WaitAsync(timeout);
-                return true;
+                var receipt = Volatile.Read(ref _receipt);
+                var receivedPayload = await receipt.Task.WaitAsync(timeout);
+                return string.Equals(receivedPayload, expectedPayload, StringComparison.Ordinal);
             }
             catch (TimeoutException)
             {
@@ -263,7 +274,7 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
         public void MarkDisconnected()
         {
             IsConnected = false;
-            _receipt.TrySetCanceled();
+            Volatile.Read(ref _receipt).TrySetCanceled();
         }
 
         public async Task EnsureConnectedAsync()
@@ -274,20 +285,6 @@ public sealed class HighAvailabilityTests(HighAvailabilityClusterFixture cluster
                 return;
             }
 
-            try
-            {
-                await Connection.StopAsync();
-            }
-            catch
-            {
-            }
-
-            await Connection.StartAsync();
-            IsConnected = true;
-        }
-
-        public async Task RestartAsync()
-        {
             try
             {
                 await Connection.StopAsync();

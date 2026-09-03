@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
+using ManagedCode.Orleans.SignalR.Tests.Infrastructure;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
@@ -15,6 +17,8 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 public class HubLoadTests
 {
     private const string HubName = nameof(SimpleTestHub);
+    private const string ServerToClientInvocationScenarioKey = "server-to-client-invocation";
+    private const string ServerToClientInvocationScenarioName = "Server-to-client invocation load";
     private readonly LoadClusterFixture _cluster;
     private readonly TestWebApplication _firstApp;
     private readonly TestWebApplication _secondApp;
@@ -171,6 +175,82 @@ public class HubLoadTests
         }
 
         await DisposeAsync(connections);
+    }
+
+    [Fact]
+    public async Task ServerToClientInvocationsRemainResponsiveUnderLoadAsync()
+    {
+        const int connectionPairCount = 20;
+        const int invocationsPerConnection = 3;
+        var expectedInvocations = connectionPairCount * invocationsPerConnection;
+        var receivedInvocations = 0;
+        var completedInvocations = 0;
+        var connections = await CreateConnectionsAsync(connectionPairCount * 2, "client-result");
+        var expectedResults = new Dictionary<string, string>(connectionPairCount, StringComparer.Ordinal);
+
+        try
+        {
+            for (var pairIndex = 0; pairIndex < connectionPairCount; pairIndex++)
+            {
+                var targetConnection = connections[(pairIndex * 2) + 1];
+                var connectionId = targetConnection.ConnectionId ?? throw new InvalidOperationException("Connection identifier is missing.");
+                var expectedResult = $"client-result-{pairIndex}";
+                expectedResults[connectionId] = expectedResult;
+                targetConnection.On("GetMessage", () =>
+                {
+                    Interlocked.Increment(ref receivedInvocations);
+                    return expectedResult;
+                });
+            }
+
+            // SignalR completes the client handshake before the server's OnConnectedAsync pipeline is guaranteed
+            // to have finished. A hub invocation on every target establishes a measured start line without sleeps.
+            var targetReadiness = Enumerable.Range(0, connectionPairCount)
+                .Select(pairIndex => connections[(pairIndex * 2) + 1].InvokeAsync<int>("Plus", 0, 0));
+            await Task.WhenAll(targetReadiness);
+
+            using var loadCancellation = new CancellationTokenSource(_defaultTimeout);
+            var stopwatch = Stopwatch.StartNew();
+            var workers = Enumerable.Range(0, connectionPairCount).Select(async pairIndex =>
+            {
+                var connection = connections[pairIndex * 2];
+                var targetConnection = connections[(pairIndex * 2) + 1];
+                var connectionId = targetConnection.ConnectionId ?? throw new InvalidOperationException("Connection identifier is missing.");
+                for (var invocation = 0; invocation < invocationsPerConnection; invocation++)
+                {
+                    var result = await connection.InvokeAsync<string>("WaitForMessage", connectionId, loadCancellation.Token);
+                    result.ShouldBe(expectedResults[connectionId]);
+                    Interlocked.Increment(ref completedInvocations);
+                }
+            });
+
+            try
+            {
+                await Task.WhenAll(workers);
+            }
+            catch
+            {
+                _output.WriteLine(
+                    $"Server-to-client invocation load stopped after {receivedInvocations:N0}/{expectedInvocations:N0} received and {completedInvocations:N0}/{expectedInvocations:N0} completed calls.");
+                throw;
+            }
+            stopwatch.Stop();
+
+            completedInvocations.ShouldBe(expectedInvocations);
+            var throughput = expectedInvocations / stopwatch.Elapsed.TotalSeconds;
+            PerformanceSummaryRecorder.RecordRun(
+                ServerToClientInvocationScenarioKey,
+                ServerToClientInvocationScenarioName,
+                useOrleans: true,
+                stopwatch.Elapsed,
+                throughput);
+            _output.WriteLine(
+                $"Server-to-client invocation load completed {expectedInvocations:N0}/{expectedInvocations:N0} in {stopwatch.Elapsed:c} ({throughput:N0} calls/s).");
+        }
+        finally
+        {
+            await DisposeAsync(connections);
+        }
     }
 
     private async Task<List<HubConnection>> CreateConnectionsAsync(int count, string labelPrefix)

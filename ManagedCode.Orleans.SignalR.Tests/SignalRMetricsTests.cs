@@ -43,6 +43,17 @@ public class SignalRMetricsTests
         measurements.ShouldBe(new List<long> { 1, -1 });
     }
 
+    [Fact]
+    public void RecordHeartbeatRenewalFailureEmitsCounter()
+    {
+        var measurements = new List<long>();
+
+        using var listener = CreateListener(SignalRMetrics.HeartbeatRenewalFailuresTotalName, measurements.Add);
+        SignalRMetrics.Instance.RecordHeartbeatRenewalFailure(HubName, nameof(TimeoutException));
+
+        measurements.Sum().ShouldBe(1);
+    }
+
     private static MeterListener CreateListener(string instrumentName, Action<long> onMeasurement)
     {
         var listener = new MeterListener
