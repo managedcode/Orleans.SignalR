@@ -1,5 +1,12 @@
 # Orleans.SignalR
 
+[![CI](https://github.com/managedcode/Orleans.SignalR/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/managedcode/Orleans.SignalR/actions/workflows/ci.yml)
+[![Release](https://github.com/managedcode/Orleans.SignalR/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/managedcode/Orleans.SignalR/actions/workflows/release.yml)
+[![CodeQL](https://github.com/managedcode/Orleans.SignalR/actions/workflows/codeql-analysis.yml/badge.svg?branch=main)](https://github.com/managedcode/Orleans.SignalR/actions/workflows/codeql-analysis.yml)
+[![NuGet](https://img.shields.io/nuget/v/ManagedCode.Orleans.SignalR.Server.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Server)
+[![Downloads](https://img.shields.io/nuget/dt/ManagedCode.Orleans.SignalR.Server.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Server)
+[![License](https://img.shields.io/github/license/managedcode/Orleans.SignalR.svg?style=flat-square)](LICENSE)
+
 Cloud-native SignalR backplane powered by Microsoft Orleans virtual actors. Orleans.SignalR lets you scale ASP.NET Core SignalR hubs horizontally without surrendering real-time guarantees. Connections, groups, and invocations are coordinated and fanned out through Orleans grains, giving you deterministic delivery, automatic resilience, and pluggable persistence.
 
 ## Highlights
@@ -11,11 +18,13 @@ Cloud-native SignalR backplane powered by Microsoft Orleans virtual actors. Orle
 
 ## Packages
 
-| Package | Description |
-| --- | --- |
-| `ManagedCode.Orleans.SignalR.Core` | Core abstractions, options, helper utilities, hub lifetime manager. |
-| `ManagedCode.Orleans.SignalR.Server` | Orleans grains (coordinators, partitions, groups, users, invocations) for silo hosts. |
-| `ManagedCode.Orleans.SignalR.Client` | Client extensions to plug Orleans into SignalR with no ceremony. |
+Package links open the latest stable release on NuGet; badges update automatically.
+
+| Package | Latest version | Downloads | Description |
+| --- | --- | --- | --- |
+| [ManagedCode.Orleans.SignalR.Core](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Core) | [![NuGet](https://img.shields.io/nuget/v/ManagedCode.Orleans.SignalR.Core.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Core) | [![Downloads](https://img.shields.io/nuget/dt/ManagedCode.Orleans.SignalR.Core.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Core) | Core abstractions, options, helper utilities, hub lifetime manager. |
+| [ManagedCode.Orleans.SignalR.Server](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Server) | [![NuGet](https://img.shields.io/nuget/v/ManagedCode.Orleans.SignalR.Server.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Server) | [![Downloads](https://img.shields.io/nuget/dt/ManagedCode.Orleans.SignalR.Server.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Server) | Orleans grains (coordinators, partitions, groups, users, invocations) for silo hosts. |
+| [ManagedCode.Orleans.SignalR.Client](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Client) | [![NuGet](https://img.shields.io/nuget/v/ManagedCode.Orleans.SignalR.Client.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Client) | [![Downloads](https://img.shields.io/nuget/dt/ManagedCode.Orleans.SignalR.Client.svg?style=flat-square&logo=nuget)](https://www.nuget.org/packages/ManagedCode.Orleans.SignalR.Client) | Client extensions to plug Orleans into SignalR with no ceremony. |
 
 ## Quick Start
 
