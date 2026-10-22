@@ -38,6 +38,23 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 - [x] Repair the benchmark's polling quantization and compare repeated before/after Broadcast runs.
 - [x] Verify Broadcast, group, streaming, and invocation load after the reliability changes.
 
+### Asynchronous SignalR write completion and shutdown repair
+
+**In scope:** await both native `HubConnectionContext.WriteAsync` completion paths, including observer delivery acknowledgement and server-to-client invocation, while preserving the existing off-Orleans scheduler boundary. Preserve observer identities across awaited registration and cleanup, cancel disconnected registration, and compensate for late membership recovery. No public API, storage, fan-out, or package-tooling changes are required.
+
+**Out of scope:** application-specific Blazor circuit acknowledgement handling and unrelated local tool manifest edits.
+
+- [x] Add complete native SignalR client/host workflows with an externally blocked transport flush for observer delivery and local server-to-client invocation.
+- [x] Confirm both regressions fail before fixing the two nested `Task<ValueTask>` writes.
+- [x] Await native write completion without changing the existing offloaded execution shape.
+- [x] Reproduce normal shutdown during native connection registration and prevent null-observer admission and orphaned memberships while preserving exact-once reference deletion and the disposed-reference contract.
+- [x] Run the focused regressions, existing invocation load before/after, full Debug suite with coverage, formatting, and final Debug/Release builds.
+- [x] Increment the shared patch version once to 10.4.2 for the combined repair.
+
+The local gate passed 7/7 focused regressions and 112/112 full Debug tests with no skips. Coverage collection recorded 71.46% line coverage and 62.15% branch coverage. Formatting verification and final Debug/Release builds passed without warnings. The existing Release workflow owns the full Release test gate and publication of all three packages. Delivery requires its successful GitHub release and confirmation that each 10.4.2 package is available from NuGet.
+
+Both blocked-flush regressions fail at the completion assertion before the repair and pass afterward. The existing invocation-load workflow completed 60/60 calls in 171.2499 ms before and 226.9862 ms after the combined repair (350 and 264 calls/s respectively). These single samples record the measured comparison; they do not establish a performance improvement.
+
 ## Main flow
 
 ```mermaid
@@ -55,6 +72,8 @@ flowchart TD
 
 - `AddOrleans()` registers `OrleansHubLifetimeManager<THub>` as the `HubLifetimeManager` implementation.
 - The lifetime manager creates a per-connection `Subscription` and registers observers with connection/group/user grains.
+- Offloaded native SignalR writes await the complete `ValueTask` through `AsTask()`. Observer delivery, its acknowledgement/recovery callbacks, and local server-to-client invocation cannot complete before the native transport flush.
+- Connection registration retains its observer identity and exact target grains across awaits. Shutdown/disconnect stops admission through the native connection-reset path and removes any late registration from those captured targets. Group and recovery feedback also retain validated identities and compensate when disposal wins during an awaited update.
 - Package-specific batch group operations (`AddToGroupsAsync` / `RemoveFromGroupsAsync`) also route through the lifetime manager instead of looping over sequential single-group writes.
 - Hub batch helpers fall back to the registered `HubLifetimeManager<THub>` when `IOrleansGroupManager<THub>` is not explicitly registered, so the API still works on plain `AddSignalR()` hosts.
 - If a partitioned batch join finishes after the connection has already disconnected, the lifetime manager immediately routes a compensating batch remove through the coordinator before returning.

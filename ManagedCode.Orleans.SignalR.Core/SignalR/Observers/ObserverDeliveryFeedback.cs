@@ -19,12 +19,18 @@ internal static class ObserverDeliveryFeedback
         Exception exception,
         ILogger logger)
     {
-        if (subscription is null || !subscription.GetObserver().IsExist)
+        if (subscription is null)
         {
             return;
         }
 
-        var observerId = subscription.Reference.GetPrimaryKeyString();
+        var observerReference = subscription.Reference;
+        if (observerReference is null || !subscription.GetObserver().IsExist)
+        {
+            return;
+        }
+
+        var observerId = observerReference.GetPrimaryKeyString();
         var failureType = exception.GetType().Name;
         var source = grainFactory.GetGrain(sourceGrainId);
         try
@@ -50,7 +56,13 @@ internal static class ObserverDeliveryFeedback
         Subscription? subscription,
         ILogger logger)
     {
-        if (subscription is null || !subscription.GetObserver().IsExist)
+        if (subscription is null)
+        {
+            return;
+        }
+
+        var observerReference = subscription.Reference;
+        if (observerReference is null || !subscription.GetObserver().IsExist)
         {
             return;
         }
@@ -58,8 +70,12 @@ internal static class ObserverDeliveryFeedback
         var source = grainFactory.GetGrain(sourceGrainId);
         try
         {
-            await source.AsReference<IObserverConnectionManager>()
-                .AddConnection(connectionId, subscription.Reference);
+            var connectionManager = source.AsReference<IObserverConnectionManager>();
+            await connectionManager.AddConnection(connectionId, observerReference);
+            if (!subscription.GetObserver().IsExist)
+            {
+                await connectionManager.RemoveConnection(connectionId, observerReference);
+            }
         }
         catch (Exception exception)
         {
