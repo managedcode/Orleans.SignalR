@@ -50,10 +50,13 @@ The ASP.NET Core host swaps the default SignalR hub lifetime manager with `Orlea
 - [x] Reproduce normal shutdown during native connection registration and prevent null-observer admission and orphaned memberships while preserving exact-once reference deletion and the disposed-reference contract.
 - [x] Run the focused regressions, existing invocation load before/after, full Debug suite with coverage, formatting, and final Debug/Release builds.
 - [x] Increment the shared patch version once to 10.4.2 for the combined repair.
+- [x] Verify the patched SignalR client/Redis 10.0.13 and required DI 10.0.13 dependencies with audited restore, focused workflows, and the full Debug suite before retrying canonical publication.
 
-The local gate passed 7/7 focused regressions and 112/112 full Debug tests with no skips. Coverage collection recorded 71.46% line coverage and 62.15% branch coverage. Formatting verification and final Debug/Release builds passed without warnings. The existing Release workflow owns the full Release test gate and publication of all three packages. Delivery requires its successful GitHub release and confirmation that each 10.4.2 package is available from NuGet.
+The final dependency graph passed 8/8 focused workflows and 112/112 full Debug tests with no skips on SDK 10.0.402 and ASP.NET Core 10.0.13. Fresh audited restore and transitive vulnerability checks passed for all four projects. Formatting and final Debug/Release builds passed without warnings. Coverage collected against the unchanged product repair before dependency servicing recorded 71.46% line coverage and 62.15% branch coverage.
 
-Both blocked-flush regressions fail at the completion assertion before the repair and pass afterward. The existing invocation-load workflow completed 60/60 calls in 171.2499 ms before and 226.9862 ms after the combined repair (350 and 264 calls/s respectively). These single samples record the measured comparison; they do not establish a performance improvement.
+The security dependency patches resolve [MessagePack to 2.5.303](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h) and [SignalR.Common to 10.0.13](https://github.com/advisories/GHSA-334f-vvp4-7g6p) without audit suppressions. The existing Release workflow owns the full Release test gate and publication of all three packages. Delivery requires its successful GitHub release and confirmation that each 10.4.2 package is available from NuGet.
+
+Both blocked-flush regressions fail at the completion assertion before the repair and pass afterward. The existing invocation-load workflow completed 60/60 calls in 171.2499 ms before and 102.7725 ms after the combined repair and dependency servicing (350 and 584 calls/s respectively). These single samples record the measured comparison; they do not establish a performance improvement.
 
 ## Main flow
 
