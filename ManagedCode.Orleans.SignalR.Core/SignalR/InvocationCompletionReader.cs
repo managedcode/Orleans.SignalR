@@ -24,7 +24,6 @@ internal static class InvocationCompletionReader
                 $"Invocation '{invocationId}' failed for connection '{connectionId}': {result.Problem}");
         }
 
-        return result.Value ??
-               throw new IOException($"Invocation '{invocationId}' returned no result for connection '{connectionId}'.");
+        return result.Value;
     }
 }
