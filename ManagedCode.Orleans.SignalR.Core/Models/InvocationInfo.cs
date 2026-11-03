@@ -45,7 +45,10 @@ public class InvocationInfo
 
     public bool TryComplete(string connectionId, CompletionMessage completion)
     {
-        if (!string.Equals(ConnectionId, connectionId, StringComparison.Ordinal) || Completion is not null)
+        if (Completion is not null ||
+            string.IsNullOrEmpty(InvocationId) ||
+            !string.Equals(ConnectionId, connectionId, StringComparison.Ordinal) ||
+            !string.Equals(InvocationId, completion.InvocationId, StringComparison.Ordinal))
         {
             return false;
         }

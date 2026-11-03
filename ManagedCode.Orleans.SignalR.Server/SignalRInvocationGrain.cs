@@ -64,10 +64,12 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
         {
             var persisted = await _stateWriteLock.RunAsync(() => _stateStorage.WriteStateSafeAsync(state =>
                 state.TryComplete(connectionId, completionMessage)));
-            if (persisted)
+            if (!persisted)
             {
-                _completionAvailable.TrySetResult(completionMessage);
+                return;
             }
+
+            _completionAvailable.TrySetResult(completionMessage);
         }
 
         if (_observerManager.Count > 0)

@@ -23,7 +23,7 @@ Client invocations are routed through a dedicated `SignalRInvocationGrain` that 
 - [x] Persist invocation registration and terminal completion immediately.
 - [x] Replace activation-local results with a typed `IAsyncEnumerable<CqrsStreamChunk<InvocationProgress, CompletionMessage>>` contract.
 - [x] Add reactivation/reopen coverage and a bounded long-running stream scenario without `ResponseTimeout` or heartbeat workarounds.
-- [ ] Verify terminal completion matches the active invocation ID and notify only for the accepted terminal result.
+- [x] Verify terminal completion matches the active invocation ID and notify only for the accepted terminal result.
 
 ## Main flow
 
@@ -39,7 +39,7 @@ flowchart TD
 
 ## Behavior notes
 
-- Each invocation is keyed by hub and invocation ID.
+- Each invocation is keyed by hub and invocation ID. A terminal completion must match both the registered connection and invocation.
 - The invocation grain persists both registration and terminal completion. Callers open the typed CQRS stream after dispatch succeeds and may reopen it after transient activation loss.
 - Cross-host invocation messages include a reserved internal return-type header. The target host removes it and registers the type locally before SignalR performs its synchronous return-type lookup.
 - `TryCompleteResult` is an acknowledged grain call because its delivery is required to unblock the originating request. Observer fan-out remains one-way, and SignalR writes/notifications remain off the Orleans scheduler.

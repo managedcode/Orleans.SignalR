@@ -48,6 +48,44 @@ public sealed class SignalRObserverTests
     }
 
     [Fact]
+    public async Task RecoveryFailureDoesNotPreventAcknowledgingASuccessfulWriteAsync()
+    {
+        var shouldFail = true;
+        var failures = 0;
+        var recoveries = 0;
+        var deliveryId = Guid.NewGuid();
+        var acknowledgements = new List<Guid>();
+        var source = GrainId.Create("test", "retry-recovery");
+        using var observer = new SignalRObserver(
+            _ => shouldFail ? Task.FromException(new IOException("write failed")) : Task.CompletedTask,
+            (_, _) =>
+            {
+                failures++;
+                return Task.CompletedTask;
+            },
+            _ => ++recoveries == 1
+                ? Task.FromException(new InvalidOperationException("recovery failed"))
+                : Task.CompletedTask,
+            (acknowledgedId, _) =>
+            {
+                acknowledgements.Add(acknowledgedId);
+                return Task.CompletedTask;
+            });
+        var message = new InvocationMessage("recovery-feedback", []);
+
+        await Should.ThrowAsync<IOException>(() => observer.OnNextWithDeliverySourceAsync(message, source));
+        shouldFail = false;
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            observer.OnNextWithAcknowledgementAsync(message, deliveryId, "v2:user", source));
+
+        acknowledgements.ShouldBe([deliveryId]);
+        failures.ShouldBe(1);
+        await observer.OnNextWithDeliverySourceAsync(message, source);
+        await observer.OnNextWithDeliverySourceAsync(message, source);
+        recoveries.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task OfflineDeliveryIsAcknowledgedOnlyAfterWriteSucceedsAsync()
     {
         var shouldFail = true;

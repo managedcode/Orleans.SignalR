@@ -22,6 +22,7 @@ When keep-alive is enabled, each connection is associated with a heartbeat grain
 - [x] Expose every renewal failure through a counter and rate-limit warning logs.
 - [x] Retry persistence for an unchanged registration when the previous storage write failed.
 - [x] Prove the retry with a deterministic fail-first storage test.
+- [x] Verify that a default target array and an empty target array represent the same heartbeat registration.
 - [x] Verify the full regression and coverage suites (109/109 tests; 70.77% line and 61.65% branch coverage); focused lease renewal, expiry, cleanup, metrics, HA, and load checks are complete.
 
 ## Main flow

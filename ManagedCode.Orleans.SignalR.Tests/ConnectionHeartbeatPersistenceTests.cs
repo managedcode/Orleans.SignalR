@@ -14,8 +14,10 @@ namespace ManagedCode.Orleans.SignalR.Tests;
 [Collection(nameof(HeartbeatWriteFailureCluster))]
 public sealed class ConnectionHeartbeatPersistenceTests(HeartbeatWriteFailureClusterFixture cluster)
 {
-    [Fact]
-    public async Task IdenticalStartRetriesPersistenceAfterFirstWriteFailsAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task IdenticalStartRetriesPersistenceAfterFirstWriteFailsAsync(bool useDefaultTargets)
     {
         var client = cluster.Cluster.Client;
         var connectionId = $"heartbeat-retry-{Guid.NewGuid():N}";
@@ -32,7 +34,7 @@ public sealed class ConnectionHeartbeatPersistenceTests(HeartbeatWriteFailureClu
             0,
             observer,
             TimeSpan.FromSeconds(5),
-            ImmutableArray<GrainId>.Empty,
+            useDefaultTargets ? default : ImmutableArray<GrainId>.Empty,
             connectionId);
 
         try
@@ -43,6 +45,8 @@ public sealed class ConnectionHeartbeatPersistenceTests(HeartbeatWriteFailureClu
 
             SharedTestGrainStorage.HasSuccessfulWrite(nameof(SignalRConnectionHeartbeatGrain), heartbeatId)
                 .ShouldBeTrue("The identical renewal must retry the failed durable write.");
+
+            await heartbeat.Start(registration with { GrainIds = ImmutableArray<GrainId>.Empty });
         }
         finally
         {

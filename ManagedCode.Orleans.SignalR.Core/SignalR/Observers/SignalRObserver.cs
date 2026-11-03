@@ -39,20 +39,19 @@ public class SignalRObserver(
         await DeliverAsync(message, sourceGrainId);
     }
 
-    public async Task OnNextWithAcknowledgementAsync(
+    public Task OnNextWithAcknowledgementAsync(
         HubMessage message,
         Guid deliveryId,
         string userGrainKey,
         GrainId sourceGrainId)
     {
-        await DeliverAsync(message, sourceGrainId);
-        if (_onDeliveryAcknowledged is { } acknowledged)
-        {
-            await acknowledged.Invoke(deliveryId, userGrainKey);
-        }
+        return DeliverAsync(message, sourceGrainId, (deliveryId, userGrainKey));
     }
 
-    private async Task DeliverAsync(HubMessage message, GrainId? sourceGrainId)
+    private async Task DeliverAsync(
+        HubMessage message,
+        GrainId? sourceGrainId,
+        (Guid DeliveryId, string UserGrainKey)? acknowledgement = null)
     {
         var action = _onNextAction;
         if (action is null)
@@ -63,12 +62,6 @@ public class SignalRObserver(
         try
         {
             await action.Invoke(message);
-            if (sourceGrainId is { } source &&
-                Volatile.Read(ref _failedSources)?.TryRemove(source, out _) == true &&
-                _onDeliveryRecovered is { } recovered)
-            {
-                await recovered.Invoke(source);
-            }
         }
         catch (Exception exception)
         {
@@ -82,6 +75,28 @@ public class SignalRObserver(
             }
 
             throw;
+        }
+
+        if (acknowledgement is { } delivery && _onDeliveryAcknowledged is { } acknowledged)
+        {
+            await acknowledged.Invoke(delivery.DeliveryId, delivery.UserGrainKey);
+        }
+
+        var failedSources = Volatile.Read(ref _failedSources);
+        if (sourceGrainId is { } recoveredSource &&
+            failedSources is not null &&
+            failedSources.TryRemove(recoveredSource, out _) &&
+            _onDeliveryRecovered is { } recovered)
+        {
+            try
+            {
+                await recovered.Invoke(recoveredSource);
+            }
+            catch
+            {
+                failedSources[recoveredSource] = 0;
+                throw;
+            }
         }
     }
 

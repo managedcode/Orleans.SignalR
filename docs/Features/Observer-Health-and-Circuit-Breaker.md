@@ -24,6 +24,7 @@ Observer delivery is protected by health tracking, circuit breaker logic, and op
 - [x] Drive failure/recovery state from the connection host's actual `WriteAsync` outcome.
 - [x] Keep normal one-way fan-out free of per-message acknowledgement traffic.
 - [x] Add integration coverage which fails the host-side observer callback and verifies source-scoped recovery feedback.
+- [x] Separate successful-write acknowledgement from recovery feedback and verify a failed recovery remains eligible for retry.
 
 ## Main flow
 
