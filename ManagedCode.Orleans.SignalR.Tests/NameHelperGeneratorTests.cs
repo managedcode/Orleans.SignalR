@@ -48,6 +48,15 @@ public sealed class NameHelperGeneratorTests
     }
 
     [Fact]
+    public void VersionedLeafKeysKeepTheirExistingEncodingForShortAndLongUtf8Identities()
+    {
+        NameHelperGenerator.CreateVersionedLeafKey("Example.Hub", "група/one")
+            .ShouldBe("v2:2-NmzKg6Jyf8ivmyQEoreiwtg4uYBs2yN0YI6NMKw5k");
+        NameHelperGenerator.CreateVersionedLeafKey("Example.Hub", new string('ж', 1024))
+            .ShouldBe("v2:247CDZGhRxHHktjUOB36a6WIuWl80Z7Q4nzKPbvAzJQ");
+    }
+
+    [Fact]
     public void VersionedLeafKeySeparatesNullAndEmptyIdentity()
     {
         var nullIdentity = NameHelperGenerator.CreateVersionedLeafKey("Example.Hub", null);

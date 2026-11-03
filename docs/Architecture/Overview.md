@@ -144,6 +144,7 @@ flowchart TD
 - Versioned leaf-grain keys: `ManagedCode.Orleans.SignalR.Core/SignalR/NameHelperGenerator.cs`, `docs/Features/Versioned-Grain-Keys.md`
 - Microsoft.Orleans.Client / Microsoft.Orleans.Server: `Directory.Packages.props`
 - SignalR metrics: `docs/Features/Diagnostics-Metrics.md`
+- Load verification harness: `ManagedCode.Orleans.SignalR.Tests/Infrastructure/PerformanceScenarioHarness.cs`
 
 ## Key ADRs and feature specs
 

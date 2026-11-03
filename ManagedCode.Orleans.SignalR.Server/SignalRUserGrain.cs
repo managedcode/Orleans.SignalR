@@ -65,7 +65,10 @@ public class SignalRUserGrain(
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         UntrackConnection(connectionId, observer);
-        var removed = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId)));
+        var observerKey = observer.GetPrimaryKeyString();
+        var removed = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state =>
+            CanRemoveConnection(state.ConnectionIds, connectionId, observer, observerKey) &&
+            state.ConnectionIds.Remove(connectionId)));
 
         if (removed)
         {
@@ -89,7 +92,7 @@ public class SignalRUserGrain(
         var removedByLimit = 0;
         var persisted = await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
         {
-            if (state.Queue.Any(item => item.DeliveryId == deliveryId))
+            if (state.Queue.Exists(item => item.DeliveryId == deliveryId))
             {
                 return false;
             }
@@ -125,15 +128,15 @@ public class SignalRUserGrain(
 
     public async Task RequestMessage()
     {
-        List<QueuedHubMessage> pendingMessages = [];
+        QueuedHubMessage[] pendingMessages = [];
         await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
         {
             var removedExpired = RemoveExpiredMessages(state, DateTime.UtcNow);
-            pendingMessages = [.. state.Queue];
+            pendingMessages = state.Queue.ToArray();
             return removedExpired > 0;
         }));
 
-        if (pendingMessages.Count == 0 || LiveObservers.Count == 0)
+        if (pendingMessages.Length == 0 || LiveObservers.Count == 0)
         {
             return;
         }

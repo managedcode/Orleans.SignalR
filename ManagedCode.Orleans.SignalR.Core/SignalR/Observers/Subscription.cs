@@ -110,17 +110,6 @@ public sealed class Subscription(SignalRObserver observer) : IDisposable
 
     public ImmutableArray<GrainId> GetHeartbeatGrainIds()
     {
-        if (_heartbeatGrainIds.IsEmpty)
-        {
-            return ImmutableArray<GrainId>.Empty;
-        }
-
-        var builder = ImmutableArray.CreateBuilder<GrainId>(_heartbeatGrainIds.Count);
-        foreach (var grainId in _heartbeatGrainIds.Keys)
-        {
-            builder.Add(grainId);
-        }
-
-        return builder.MoveToImmutable();
+        return ImmutableArray.CreateRange(_heartbeatGrainIds.Keys);
     }
 }

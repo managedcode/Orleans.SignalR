@@ -498,9 +498,9 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     private static string[] NormalizeGroupNames(string[] groupNames)
     {
-        if (groupNames.Length == 0)
+        if (groupNames.Length <= 1)
         {
-            return [];
+            return groupNames;
         }
 
         var unique = new HashSet<string>(StringComparer.Ordinal);

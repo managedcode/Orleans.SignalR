@@ -76,6 +76,19 @@ public sealed class SignalRWriteCompletionTests(SmokeClusterFixture cluster)
         (await client.InvokeAsync<int>("Plus", 3, 4)).ShouldBe(7);
     }
 
+    [Fact]
+    public async Task MissingConnectionFailsWithoutWaitingForACompletionAsync()
+    {
+        using var app = new TestWebApplication(cluster);
+        var manager = app.Services.GetRequiredService<HubLifetimeManager<SimpleTestHub>>();
+        var connectionId = $"missing-{Guid.NewGuid():N}";
+        var invocation = manager.InvokeConnectionAsync<string>(connectionId, "GetMessage", [], CancellationToken.None);
+
+        var failure = await Should.ThrowAsync<IOException>(() => invocation.WaitAsync(_timeout));
+
+        failure.Message.ShouldContain(connectionId);
+    }
+
     private TestWebApplication CreateApplication(ConnectionObserverCapture capture) =>
         new(cluster, configureServices: services =>
         {

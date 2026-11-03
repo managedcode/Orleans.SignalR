@@ -27,6 +27,8 @@ Group operations are routed through a coordinator grain that assigns group names
 - [x] Restore the hashed cleanup fallback when batch removals see missing coordinator assignments.
 - [x] Add regression tests for disconnect cleanup and degraded coordinator state.
 - [x] Re-run partition cleanup when a disconnected batch join finishes late so late partition adds cannot outlive the connection.
+- [x] Verify group fan-out under load with a dedicated membership join and receipts matched to the tested broadcast.
+- [x] Verify that group cleanup carrying a previous observer reference leaves replacement membership reachable.
 
 ## Main flow
 

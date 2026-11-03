@@ -20,6 +20,44 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
     private readonly ITestOutputHelper _output = output;
 
     [Fact]
+    public void HeartbeatSnapshotRemainsValidDuringConcurrentMembershipChanges()
+    {
+        var client = _cluster.Cluster.Client;
+        var holder = NameHelperGenerator.GetConnectionHolderGrain<SimpleTestHub>(client);
+        var group = NameHelperGenerator.GetSignalRGroupGrain<SimpleTestHub>(client, "heartbeat-snapshot");
+        var holderId = holder.GetGrainId();
+        var groupId = group.GetGrainId();
+        using var subscription = new Subscription(new SignalRObserver(_ => Task.CompletedTask));
+        subscription.AddGrain(holder);
+
+        const int repetitions = 20_000;
+        Parallel.Invoke(
+            () =>
+            {
+                for (var iteration = 0; iteration < repetitions; iteration++)
+                {
+                    subscription.AddGrain(group);
+                    subscription.RemoveGrain(group);
+                }
+            },
+            () =>
+            {
+                for (var iteration = 0; iteration < repetitions; iteration++)
+                {
+                    var snapshot = subscription.GetHeartbeatGrainIds();
+                    snapshot.ShouldContain(holderId);
+                    if (snapshot.Length > 1)
+                    {
+                        snapshot.Length.ShouldBe(2);
+                        snapshot.ShouldContain(groupId);
+                    }
+                }
+            });
+
+        subscription.GetHeartbeatGrainIds().ShouldBe([holderId]);
+    }
+
+    [Fact]
     public async Task ObserverDeliveryFeedbackOpensCircuitAndRecoveryReplaysBufferedMessageAsync()
     {
         var client = _cluster.Cluster.Client;
@@ -547,6 +585,54 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LateConnectionRemovalKeepsReplacementObserverRegisteredAsync(bool usePartition)
+    {
+        var client = _cluster.Cluster.Client;
+        var holder = NameHelperGenerator.GetConnectionHolderGrain<SimpleTestHub>(client);
+        var partition = NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, 0);
+        IObserverConnectionManager grain = usePartition ? partition : holder;
+        var connectionId = $"replacement-route-{Guid.NewGuid():N}";
+        const string target = "replacement-observer";
+        var delivered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var oldObserver = new SignalRObserver(_ => Task.CompletedTask);
+        using var newObserver = new SignalRObserver(message =>
+        {
+            if (message is InvocationMessage { Target: { } received })
+            {
+                delivered.TrySetResult(received);
+            }
+
+            return Task.CompletedTask;
+        });
+        var oldReference = client.CreateObjectReference<ISignalRObserver>(oldObserver);
+        var newReference = client.CreateObjectReference<ISignalRObserver>(newObserver);
+        using var removal = ConnectionRemovalCallFilter.Observe(connectionId);
+
+        try
+        {
+            await grain.AddConnection(connectionId, oldReference);
+            await grain.AddConnection(connectionId, newReference);
+            await grain.RemoveConnection(connectionId, oldReference);
+            await removal.Completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var message = new InvocationMessage(target, []);
+            var routed = usePartition
+                ? await partition.SendToConnection(message, connectionId)
+                : await holder.SendToConnection(message, connectionId);
+            routed.ShouldBeTrue();
+            (await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBe(target);
+        }
+        finally
+        {
+            await grain.RemoveConnection(connectionId, newReference);
+            client.DeleteObjectReference<ISignalRObserver>(oldReference);
+            client.DeleteObjectReference<ISignalRObserver>(newReference);
+        }
+    }
+
     [Fact]
     public async Task GroupCoordinatorBatchMethodsShouldTrackMembershipAcrossTouchedPartitionsAsync()
     {
@@ -594,6 +680,47 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
         {
             await coordinator.RemoveConnectionFromGroups(groupNames, connectionId, observer);
             client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+    }
+
+    [Fact]
+    public async Task LateGroupRemovalKeepsReplacementObserverRegisteredAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var coordinator = NameHelperGenerator.GetGroupCoordinatorGrain<SimpleTestHub>(client);
+        var connectionId = $"replacement-{Guid.NewGuid():N}";
+        var groupName = $"replacement-group-{Guid.NewGuid():N}";
+        const string target = "after-stale-removal";
+        var delivered = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var oldObserver = new SignalRObserver(_ => Task.CompletedTask);
+        using var newObserver = new SignalRObserver(message =>
+        {
+            if (message is InvocationMessage { Target: { } received })
+            {
+                delivered.TrySetResult(received);
+            }
+
+            return Task.CompletedTask;
+        });
+        var oldReference = client.CreateObjectReference<ISignalRObserver>(oldObserver);
+        var newReference = client.CreateObjectReference<ISignalRObserver>(newObserver);
+
+        try
+        {
+            var partitions = await coordinator.AddConnectionToGroups([groupName], connectionId, oldReference);
+            var partition = NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, partitions.Single());
+            await coordinator.AddConnectionToGroups([groupName], connectionId, newReference);
+
+            await coordinator.RemoveConnectionFromGroups([groupName], connectionId, oldReference);
+            (await partition.HasConnection(connectionId)).ShouldBeTrue();
+            await coordinator.SendToGroup(groupName, new InvocationMessage(target, []));
+            (await delivered.Task.WaitAsync(TimeSpan.FromSeconds(10))).ShouldBe(target);
+        }
+        finally
+        {
+            await coordinator.RemoveConnectionFromGroups([groupName], connectionId, newReference);
+            client.DeleteObjectReference<ISignalRObserver>(oldReference);
+            client.DeleteObjectReference<ISignalRObserver>(newReference);
         }
     }
 

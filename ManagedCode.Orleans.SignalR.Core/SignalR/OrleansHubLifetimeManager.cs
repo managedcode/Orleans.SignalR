@@ -647,12 +647,6 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         try
         {
             await invocationGrain.AddInvocation(null, invocationInfo);
-            var completionTask = InvocationCompletionReader.ReadTerminalAsync(
-                invocationGrain,
-                connectionId,
-                invocationId,
-                cancellationToken);
-
             var invocationMessage = new InvocationMessage(invocationId, methodName, args);
 
             if (connection == null)
@@ -686,7 +680,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
             try
             {
-                var completionMessage = await completionTask;
+                var completionMessage = await InvocationCompletionReader.ReadTerminalAsync(
+                    invocationGrain,
+                    connectionId,
+                    invocationId,
+                    cancellationToken);
 
                 if (completionMessage.HasResult)
                 {
@@ -753,20 +751,21 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     private Subscription CreateConnectionObserver(HubConnectionContext connection)
     {
         WeakReference<HubConnectionContext> weakConnection = new(connection);
+        var connectionId = connection.ConnectionId;
         Subscription? subscription = null;
         var observer = new SignalRObserver(
             message => OnNextAsync(weakConnection, message),
             (source, exception) => ObserverDeliveryFeedback.ReportFailureAsync(
                 _clusterClient,
                 source,
-                connection.ConnectionId,
+                connectionId,
                 subscription,
                 exception,
                 _logger),
             source => ObserverDeliveryFeedback.RestoreAsync(
                 _clusterClient,
                 source,
-                connection.ConnectionId,
+                connectionId,
                 subscription,
                 _logger),
             AcknowledgeUserMessageAsync);
@@ -885,6 +884,11 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
         if (groupNames.Count == 0)
         {
             return [];
+        }
+
+        if (groupNames.Count == 1)
+        {
+            return [groupNames[0]];
         }
 
         var unique = new HashSet<string>(StringComparer.Ordinal);

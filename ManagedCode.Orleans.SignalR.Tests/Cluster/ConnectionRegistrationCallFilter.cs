@@ -93,3 +93,44 @@ internal sealed class ConnectionRegistrationCallFilter : IIncomingGrainCallFilte
         }
     }
 }
+
+internal sealed class ConnectionRemovalCallFilter : IIncomingGrainCallFilter
+{
+    private static RemovalObservation? _activeObservation;
+
+    public static RemovalObservation Observe(string connectionId)
+    {
+        var observation = new RemovalObservation(connectionId);
+        if (Interlocked.CompareExchange(ref _activeObservation, observation, null) is not null)
+        {
+            throw new InvalidOperationException("A connection removal observation is already active.");
+        }
+
+        return observation;
+    }
+
+    public async Task Invoke(IIncomingGrainCallContext context)
+    {
+        var observation = Volatile.Read(ref _activeObservation);
+        await context.Invoke();
+
+        if (observation is not null &&
+            context.MethodName == nameof(IObserverConnectionManager.RemoveConnection) &&
+            context.Request.GetArgument(0) is string connectionId &&
+            string.Equals(connectionId, observation.ConnectionId, StringComparison.Ordinal))
+        {
+            observation.Completed.TrySetResult();
+        }
+    }
+
+    internal sealed class RemovalObservation(string connectionId) : IDisposable
+    {
+        internal string ConnectionId { get; } = connectionId;
+        internal TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Dispose()
+        {
+            Interlocked.CompareExchange(ref _activeObservation, null, this);
+        }
+    }
+}

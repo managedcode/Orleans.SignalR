@@ -132,6 +132,11 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
 
     protected void UntrackConnection(string connectionId, ISignalRObserver observer)
     {
+        if (_liveObservers.TryGetValue(connectionId, out var current) && !current.Equals(observer))
+        {
+            return;
+        }
+
         ObserverManager.Unsubscribe(observer);
         _liveObservers.Remove(connectionId);
         _observerToConnectionId.Remove(observer);
@@ -142,6 +147,14 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
         HealthTracker.RemoveConnection(connectionId);
         ReleaseWhenIdle();
         StopObserverRefreshTimerIfIdle();
+    }
+
+    private protected bool CanRemoveConnection(
+        Dictionary<string, string> storedObservers, string connectionId, ISignalRObserver observer, string observerKey)
+    {
+        return (!TryGetLiveObserver(connectionId, out var liveObserver) || liveObserver.Equals(observer)) &&
+            (!storedObservers.TryGetValue(connectionId, out var storedObserver) ||
+                string.Equals(storedObserver, observerKey, StringComparison.Ordinal));
     }
 
     protected void TouchObserver(ISignalRObserver observer)
@@ -290,12 +303,13 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
     }
 
     private void DispatchToLiveObserversCore(
-        List<(string? ConnectionId, ISignalRObserver Observer)> candidates,
+        List<(string? ConnectionId, ISignalRObserver Observer)> targets,
         HubMessage message)
     {
-        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>(candidates.Count);
-        foreach (var target in candidates)
+        var acceptedCount = 0;
+        for (var index = 0; index < targets.Count; index++)
         {
+            var target = targets[index];
             var connectionId = target.ConnectionId;
             if (connectionId is not null && !HealthTracker.AllowRequest(connectionId))
             {
@@ -331,13 +345,20 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
                 continue;
             }
 
-            targets.Add(target);
+            if (acceptedCount != index)
+            {
+                targets[acceptedCount] = target;
+            }
+
+            acceptedCount++;
         }
 
-        if (targets.Count == 0)
+        if (acceptedCount == 0)
         {
             return;
         }
+
+        targets.RemoveRange(acceptedCount, targets.Count - acceptedCount);
 
         // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
         // The upstream calls are one-way, so the grain must not wait for enqueue completion. Actual

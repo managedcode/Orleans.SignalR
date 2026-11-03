@@ -43,7 +43,7 @@ flowchart TD
 ## Behavior notes
 
 - Heartbeats are enabled by `OrleansSignalROptions.KeepEachConnectionAlive`.
-- The heartbeat grain re-adds the observer to all grains tracked by the subscription.
+- The heartbeat grain re-adds the observer to all grains tracked by the subscription. Each registration reads its target IDs from a single membership snapshot so concurrent group changes cannot break registration or lease renewal.
 - The manager renews the lease while the connection remains locally registered.
 - A failed renewal does not abort the manager-wide renewal loop: the individual lease remains unextended, a failure counter is emitted, warning logs are rate-limited, and a later tick retries it.
 - The timer keeps its activation alive only while that bounded lease remains valid; the durable design is defined by [ADR-0005](../ADR/0005-connection-heartbeat-keepalive.md).

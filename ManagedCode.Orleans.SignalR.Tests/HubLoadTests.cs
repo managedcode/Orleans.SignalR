@@ -81,16 +81,23 @@ public class HubLoadTests
     {
         const int groupSize = 48;
         const string groupName = "load-group";
+        const string payload = "load-group-broadcast";
         _output.WriteLine($"Starting group broadcast test with {groupSize} connections.");
 
         var connections = await CreateConnectionsAsync(groupSize, "group");
         var messages = new ConcurrentDictionary<string, int>();
+        var expectedMessage = $"{connections[^1].ConnectionId} send message: {payload}.";
 
         foreach (var (connection, index) in connections.Select((conn, idx) => (conn, idx)))
         {
             var id = connection.ConnectionId ?? $"#{index}";
-            connection.On("SendAll", (string _) =>
+            connection.On("SendAll", (string message) =>
             {
+                if (!string.Equals(message, expectedMessage, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
                 var total = messages.AddOrUpdate(id, 1, (_, current) => current + 1);
                 if (total == 1)
                 {
@@ -98,12 +105,11 @@ public class HubLoadTests
                 }
             });
 
-            await connection.InvokeAsync("AddToGroup", groupName);
+            await connection.InvokeAsync(nameof(SimpleTestHub.JoinGroup), groupName);
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(1));
         _output.WriteLine($"Sending message to group '{groupName}'.");
-        await connections[^1].InvokeAsync("GroupSendAsync", groupName, "payload");
+        await connections[^1].InvokeAsync(nameof(SimpleTestHub.GroupSendAsync), groupName, payload);
 
         await WaitUntilAsync(
             $"each of the {groupSize} group members to receive the message",
@@ -112,7 +118,7 @@ public class HubLoadTests
 
         foreach (var count in messages.Values)
         {
-            count.ShouldBeGreaterThanOrEqualTo(1);
+            count.ShouldBe(1);
         }
 
         await DisposeAsync(connections);

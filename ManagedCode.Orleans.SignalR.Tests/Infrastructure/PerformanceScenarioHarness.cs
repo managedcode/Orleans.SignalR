@@ -232,6 +232,8 @@ public sealed class PerformanceScenarioHarness(
         var groupAssignments = new string[Settings.GroupConnections];
         var groupMarkers = new string[Settings.GroupConnections];
         var groupMembers = new Dictionary<string, List<int>>();
+        var deliveryCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var expectedDeliveries = long.MaxValue;
         long totalDelivered = 0;
 
         try
@@ -261,7 +263,11 @@ public sealed class PerformanceScenarioHarness(
                     if (message.Contains(marker, StringComparison.Ordinal))
                     {
                         Interlocked.Increment(ref perConnection[connectionIndex]);
-                        Interlocked.Increment(ref totalDelivered);
+                        var delivered = Interlocked.Increment(ref totalDelivered);
+                        if (delivered >= Volatile.Read(ref expectedDeliveries))
+                        {
+                            deliveryCompletion.TrySetResult();
+                        }
                     }
                 });
 
@@ -274,9 +280,8 @@ public sealed class PerformanceScenarioHarness(
 
             for (var index = 0; index < connections.Count; index++)
             {
-                await connections[index].InvokeAsync("AddToGroup", groupAssignments[index]);
+                await connections[index].InvokeAsync(nameof(SimpleTestHub.JoinGroup), groupAssignments[index]);
             }
-            await Task.Delay(TimeSpan.FromSeconds(2));
 
             foreach (var (groupName, members) in groupMembers)
             {
@@ -321,6 +326,8 @@ public sealed class PerformanceScenarioHarness(
                 expectedPerConnection[idx] *= groupPasses;
             }
 
+            var expected = expectedPerConnection.Sum();
+            Volatile.Write(ref expectedDeliveries, expected);
             var sendStopwatch = Stopwatch.StartNew();
 
             for (var pass = 0; pass < groupPasses; pass++)
@@ -353,8 +360,12 @@ public sealed class PerformanceScenarioHarness(
                 await Task.WhenAll(sendTasks);
             }
 
-            var expected = expectedPerConnection.Sum();
-            var completed = await AwaitWithProgressAsync(() => Interlocked.Read(ref totalDelivered), expected, Settings.GroupTimeout, scenarioLabel);
+            var completed = await AwaitCompletionWithProgressAsync(
+                deliveryCompletion.Task,
+                () => Interlocked.Read(ref totalDelivered),
+                expected,
+                Settings.GroupTimeout,
+                scenarioLabel);
             if (!completed)
             {
                 var preview = perConnection

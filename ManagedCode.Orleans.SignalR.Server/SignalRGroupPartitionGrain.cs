@@ -45,12 +45,15 @@ public class SignalRGroupPartitionGrain(
 
     public Task SendToGroups(HubMessage message, string[] groupNames)
     {
-        Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
-            this.GetPrimaryKeyLong(),
-            string.Join(",", groupNames),
-            KeepEachConnectionAlive,
-            LiveObservers.Count,
-            TrackedConnectionCount);
+        if (Logger.IsEnabled(LogLevel.Debug))
+        {
+            Logger.LogDebug("SendToGroups invoked for partition {PartitionId} with groups {Groups} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
+                this.GetPrimaryKeyLong(),
+                string.Join(",", groupNames),
+                KeepEachConnectionAlive,
+                LiveObservers.Count,
+                TrackedConnectionCount);
+        }
 
         if (LiveObservers.Count > 0)
         {
@@ -67,13 +70,16 @@ public class SignalRGroupPartitionGrain(
 
     public Task SendToGroupsExcept(HubMessage message, string[] groupNames, string[] excludedConnectionIds)
     {
-        Logger.LogDebug("SendToGroupsExcept invoked for partition {PartitionId} with groups {Groups}, excluded {Excluded} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
-            this.GetPrimaryKeyLong(),
-            string.Join(",", groupNames),
-            string.Join(",", excludedConnectionIds),
-            KeepEachConnectionAlive,
-            LiveObservers.Count,
-            TrackedConnectionCount);
+        if (Logger.IsEnabled(LogLevel.Debug))
+        {
+            Logger.LogDebug("SendToGroupsExcept invoked for partition {PartitionId} with groups {Groups}, excluded {Excluded} (keepAlive={KeepEachConnectionAlive}, liveObservers={LiveObserversCount}, trackedConnections={TrackedConnectionCount})",
+                this.GetPrimaryKeyLong(),
+                string.Join(",", groupNames),
+                string.Join(",", excludedConnectionIds),
+                KeepEachConnectionAlive,
+                LiveObservers.Count,
+                TrackedConnectionCount);
+        }
 
         if (LiveObservers.Count > 0)
         {
@@ -98,7 +104,12 @@ public class SignalRGroupPartitionGrain(
             var observerChanged = !state.ConnectionObservers.TryGetValue(connectionId, out var existing) ||
                                   !string.Equals(existing, observerKey, StringComparison.Ordinal);
             state.ConnectionObservers[connectionId] = observerKey;
-            var groupsRegistered = state.ConnectionGroups.TryAdd(connectionId, new HashSet<string>());
+            var groupsRegistered = !state.ConnectionGroups.ContainsKey(connectionId);
+            if (groupsRegistered)
+            {
+                state.ConnectionGroups.Add(connectionId, []);
+            }
+
             return observerChanged || groupsRegistered;
         }));
 
@@ -112,8 +123,11 @@ public class SignalRGroupPartitionGrain(
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         UntrackConnection(connectionId, observer);
+        var observerKey = observer.GetPrimaryKeyString();
         List<string>? emptiedGroups = null;
-        var removed = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state => RemoveConnectionState(state, connectionId, out emptiedGroups)));
+        var removed = await _stateWriteLock.RunAsync(() => state.WriteStateSafeAsync(state =>
+            CanRemoveConnection(state.ConnectionObservers, connectionId, observer, observerKey) &&
+            RemoveConnectionState(state, connectionId, out emptiedGroups)));
         if (removed)
         {
             Logger.LogDebug("Removing connection {ConnectionId} from partition {PartitionId}", connectionId,
@@ -207,6 +221,7 @@ public class SignalRGroupPartitionGrain(
             return [];
         }
 
+        var observerKey = observer.GetPrimaryKeyString();
         List<string>? emptiedGroups = null;
         List<string>? removedGroups = null;
         var connectionRemoved = false;
@@ -216,6 +231,11 @@ public class SignalRGroupPartitionGrain(
             emptiedGroups = null;
             removedGroups = null;
             connectionRemoved = false;
+            if (!CanRemoveConnection(state.ConnectionObservers, connectionId, observer, observerKey))
+            {
+                return false;
+            }
+
             var changed = false;
 
             foreach (var groupName in normalizedGroupNames)
@@ -302,9 +322,9 @@ public class SignalRGroupPartitionGrain(
 
     private static string[] NormalizeGroupNames(string[] groupNames)
     {
-        if (groupNames.Length == 0)
+        if (groupNames.Length <= 1)
         {
-            return [];
+            return groupNames;
         }
 
         var unique = new HashSet<string>(StringComparer.Ordinal);

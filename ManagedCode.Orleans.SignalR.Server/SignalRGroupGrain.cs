@@ -98,7 +98,10 @@ public class SignalRGroupGrain(
     public async Task RemoveConnection(string connectionId, ISignalRObserver observer)
     {
         UntrackConnection(connectionId, observer);
-        var removed = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state => state.ConnectionIds.Remove(connectionId)));
+        var observerKey = observer.GetPrimaryKeyString();
+        var removed = await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(state =>
+            CanRemoveConnection(state.ConnectionIds, connectionId, observer, observerKey) &&
+            state.ConnectionIds.Remove(connectionId)));
 
         if (removed)
         {

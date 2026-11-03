@@ -41,6 +41,11 @@ public class SimpleTestHub : Hub
             .SendAsync("SendAll", $"{Context.ConnectionId} has joined the group {groupName}.");
     }
 
+    public Task JoinGroup(string groupName)
+    {
+        return Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+    }
+
     public async Task RemoveFromGroup(string groupName)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);

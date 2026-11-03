@@ -14,6 +14,8 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 
 public static class NameHelperGenerator
 {
+    private const int StackInputByteLimit = 256;
+
     // Cache cleaned type names to avoid repeated allocations
     private static readonly ConcurrentDictionary<Type, string> _typeNameCache = new();
 
@@ -115,11 +117,14 @@ public static class NameHelperGenerator
     {
         var hubByteCount = Encoding.UTF8.GetByteCount(hubIdentity);
         var identityByteCount = logicalIdentity is null ? 0 : Encoding.UTF8.GetByteCount(logicalIdentity);
-        var input = ArrayPool<byte>.Shared.Rent(sizeof(int) + hubByteCount + sizeof(byte) + identityByteCount);
+        var inputLength = sizeof(int) + hubByteCount + sizeof(byte) + identityByteCount;
+        byte[]? rentedInput = null;
+        var inputSpan = inputLength <= StackInputByteLimit
+            ? stackalloc byte[inputLength]
+            : (rentedInput = ArrayPool<byte>.Shared.Rent(inputLength)).AsSpan(0, inputLength);
 
         try
         {
-            var inputSpan = input.AsSpan(0, sizeof(int) + hubByteCount + sizeof(byte) + identityByteCount);
             BinaryPrimitives.WriteInt32BigEndian(inputSpan, hubByteCount);
             Encoding.UTF8.GetBytes(hubIdentity, inputSpan[sizeof(int)..]);
             inputSpan[sizeof(int) + hubByteCount] = logicalIdentity is null ? (byte)0 : (byte)1;
@@ -130,11 +135,18 @@ public static class NameHelperGenerator
 
             Span<byte> hash = stackalloc byte[SHA256.HashSizeInBytes];
             SHA256.HashData(inputSpan, hash);
-            return string.Concat("v2:", Base64Url.EncodeToString(hash));
+            ReadOnlySpan<char> prefix = "v2:";
+            Span<char> key = stackalloc char[prefix.Length + Base64Url.GetEncodedLength(hash.Length)];
+            prefix.CopyTo(key);
+            Base64Url.EncodeToChars(hash, key[prefix.Length..]);
+            return new string(key);
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(input);
+            if (rentedInput is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rentedInput);
+            }
         }
     }
 

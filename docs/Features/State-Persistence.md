@@ -37,6 +37,7 @@ flowchart TD
 - All SignalR grains use `OrleansSignalROptions.OrleansSignalRStorage` as the storage provider name.
 - Reentrant grains serialize `WriteStateSafeAsync`/`ClearStateSafeAsync` calls with `StateWriteLock` to prevent concurrent ETag conflicts.
 - Safe write helpers retry on `InconsistentStateException` and memory storage ETag mismatch errors.
+- Connection, group and user removal validates the supplied observer against the current registration before deleting stored routing. A delayed cleanup for an older observer leaves a replacement registration intact.
 
 ## Configuration knobs
 

@@ -55,8 +55,6 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
     public async Task TryCompleteResult(string connectionId, HubMessage message)
     {
         Logs.TryCompleteResult(_logger, nameof(SignalRInvocationGrain), this.GetPrimaryKeyString(), connectionId);
-        _logger.LogInformation("Hub: {PrimaryKeyString}; TryCompleteResult: {ConnectionId}", this.GetPrimaryKeyString(),
-            connectionId);
         if (_stateStorage.State == null || _stateStorage.State.ConnectionId != connectionId)
         {
             return;
@@ -72,8 +70,11 @@ public class SignalRInvocationGrain : Grain, ISignalRInvocationGrain
             }
         }
 
-        // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
-        await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
+        if (_observerManager.Count > 0)
+        {
+            // Critical: do NOT execute SignalR observer notifications on the Orleans scheduler.
+            await Task.Run(() => _observerManager.Notify(s => s.OnNextAsync(message)));
+        }
     }
 
     public Task<ReturnType> TryGetReturnType()

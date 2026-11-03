@@ -163,7 +163,7 @@ public sealed class SignalRMetrics
 
     public void RecordMessageSent(string? hubName, string targetType, int recipientCount = 1)
     {
-        if (recipientCount <= 0)
+        if (recipientCount <= 0 || !_messagesSentTotal.Enabled)
         {
             return;
         }

@@ -16,6 +16,7 @@ internal sealed class SharedStorageSiloConfigurator : ISiloConfigurator
 {
     public void Configure(ISiloBuilder siloBuilder)
     {
+        siloBuilder.AddIncomingGrainCallFilter<ConnectionRemovalCallFilter>();
         siloBuilder.Services.AddGrainStorage(
             OrleansSignalROptions.OrleansSignalRStorage,
             static (services, _) => new SharedTestGrainStorage(

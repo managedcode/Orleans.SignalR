@@ -58,6 +58,32 @@ The security dependency patches resolve [MessagePack to 2.5.303](https://github.
 
 Both blocked-flush regressions fail at the completion assertion before the repair and pass afterward. The existing invocation-load workflow completed 60/60 calls in 171.2499 ms before and 102.7725 ms after the combined repair and dependency servicing (350 and 584 calls/s respectively). These single samples record the measured comparison; they do not establish a performance improvement.
 
+### Performance review
+
+Scope covers the client and server paths exercised by the SignalR integration host, including routing, delivery, lifecycle, persistence and metrics. Public contracts and persisted schemas are outside the scope of this review.
+
+- [x] Resolve current stable NuGet dependencies and build the updated solution.
+- [x] Capture baseline managed CPU stacks, allocations, GC and process memory during the existing stress workloads.
+- [x] Review 01 — use one stable heartbeat membership snapshot and verify the concurrent join/remove regression.
+- [x] Review 02 — verify actual group broadcast receipts and measure the group workload without synthetic join traffic.
+- [x] Review 03 — avoid constructing group routing debug messages when the log level is disabled.
+- [x] Review 04 — preserve replacement observers when group cleanup arrives with an older reference.
+- [x] Review 05 — preserve stored routing across late one-way connection cleanup.
+- [x] Review 06 — remove the strong transport reference from observer callback closures.
+- [x] Review 07 — use one owned snapshot when filtering observer fan-out.
+- [x] Review 08 — allocate failure tracking only on the first failed observer delivery.
+- [x] Review 09 — reduce temporary allocations in offline user replay.
+- [x] Review 10 — skip empty observer dispatch on durable invocation completion.
+- [x] Review 11 — open the durable completion stream only after successful dispatch.
+- [x] Review 12 — reduce temporary buffers and strings when encoding v2 grain keys.
+- [x] Review 13 — skip preparing message-counter tags without a listener.
+- [x] Review 14 — reuse group membership storage on observer refresh.
+- [x] Review 15 — bypass deduplication allocations for single-group membership changes.
+- [x] Control 16 — review the combined diff with Roslynk and confirm static diagnostics.
+- [x] Control 17 — run the full Debug suite with coverage.
+- [x] Control 18 — format, build and compare the final Release workloads and profiles.
+- [x] Prepare patch 10.4.3 after all control checks pass.
+
 ## Main flow
 
 ```mermaid

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using Microsoft.AspNetCore.SignalR.Protocol;
@@ -17,7 +18,7 @@ public class SignalRObserver(
     private Func<GrainId, Exception, Task>? _onDeliveryFailure = onDeliveryFailure;
     private Func<GrainId, Task>? _onDeliveryRecovered = onDeliveryRecovered;
     private Func<Guid, string, Task>? _onDeliveryAcknowledged = onDeliveryAcknowledged;
-    private readonly ConcurrentDictionary<GrainId, byte> _failedSources = new();
+    private ConcurrentDictionary<GrainId, byte>? _failedSources;
 
     public void Dispose()
     {
@@ -25,7 +26,7 @@ public class SignalRObserver(
         _onDeliveryFailure = null;
         _onDeliveryRecovered = null;
         _onDeliveryAcknowledged = null;
-        _failedSources.Clear();
+        Interlocked.Exchange(ref _failedSources, null);
     }
 
     public async Task OnNextAsync(HubMessage message)
@@ -63,7 +64,7 @@ public class SignalRObserver(
         {
             await action.Invoke(message);
             if (sourceGrainId is { } source &&
-                _failedSources.TryRemove(source, out _) &&
+                Volatile.Read(ref _failedSources)?.TryRemove(source, out _) == true &&
                 _onDeliveryRecovered is { } recovered)
             {
                 await recovered.Invoke(source);
@@ -73,7 +74,7 @@ public class SignalRObserver(
         {
             if (sourceGrainId is { } source)
             {
-                _failedSources[source] = 0;
+                LazyInitializer.EnsureInitialized(ref _failedSources)[source] = 0;
                 if (_onDeliveryFailure is { } failed)
                 {
                     await failed.Invoke(source, exception);
