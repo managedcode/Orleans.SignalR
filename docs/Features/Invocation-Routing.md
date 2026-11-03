@@ -23,6 +23,7 @@ Client invocations are routed through a dedicated `SignalRInvocationGrain` that 
 - [x] Persist invocation registration and terminal completion immediately.
 - [x] Replace activation-local results with a typed `IAsyncEnumerable<CqrsStreamChunk<InvocationProgress, CompletionMessage>>` contract.
 - [x] Add reactivation/reopen coverage and a bounded long-running stream scenario without `ResponseTimeout` or heartbeat workarounds.
+- [ ] Verify terminal completion matches the active invocation ID and notify only for the accepted terminal result.
 
 ## Main flow
 

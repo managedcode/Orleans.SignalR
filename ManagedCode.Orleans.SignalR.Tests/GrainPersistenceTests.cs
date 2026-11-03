@@ -385,6 +385,31 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
     }
 
     [Fact]
+    public async Task CompletionForAnotherInvocationDoesNotReplaceTheRegisteredResultAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var connectionId = $"completion-connection-{Guid.NewGuid():N}";
+        var invocationId = $"completion-invocation-{Guid.NewGuid():N}";
+        var invocation = NameHelperGenerator.GetInvocationGrain<SimpleTestHub>(client, invocationId);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            await invocation.AddInvocation(null, new InvocationInfo(connectionId, invocationId, typeof(string)));
+            await invocation.TryCompleteResult(connectionId, CompletionMessage.WithResult("another-invocation", "wrong"));
+            await invocation.TryCompleteResult(connectionId, CompletionMessage.WithResult(invocationId, "expected"));
+
+            var terminal = await ReadTerminalCompletionAsync(invocation, cancellation.Token);
+            terminal.InvocationId.ShouldBe(invocationId);
+            terminal.Result.ShouldBe("expected");
+        }
+        finally
+        {
+            await invocation.RemoveInvocation();
+        }
+    }
+
+    [Fact]
     public async Task InvocationCompletionStreamDoesNotBlockCompletionTurnAsync()
     {
         var client = _cluster.Cluster.Client;
