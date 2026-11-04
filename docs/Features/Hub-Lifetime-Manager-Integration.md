@@ -84,6 +84,11 @@ Scope covers the client and server paths exercised by the SignalR integration ho
 - [x] Control 18 — format, build and compare the final Release workloads and profiles.
 - [x] Prepare patch 10.4.3 after all control checks pass.
 
+### Follow-up performance review
+
+- [x] Measure and reduce the per-connection cost of tracking grain subscriptions while preserving heartbeat and disconnect snapshots.
+- [x] Measure repeated typed partition-key lookups and verify routing against the original key mapping.
+
 ## Main flow
 
 ```mermaid

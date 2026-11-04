@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -11,6 +12,7 @@ using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Server.Helpers;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans;
@@ -32,6 +34,8 @@ public class SignalRUserGrain(
 {
     private readonly IOptions<OrleansSignalROptions> _orleansSignalOptions = orleansSignalOptions;
     private readonly StateWriteLock _stateWriteLock = new();
+
+    private TimeProvider Clock => field ??= GrainContext.ActivationServices.GetRequiredService<TimeProvider>();
 
     protected override int TrackedConnectionCount => stateStorage.State.ConnectionIds.Count;
 
@@ -87,7 +91,7 @@ public class SignalRUserGrain(
         }
 
         var deliveryId = Guid.NewGuid();
-        var expiresAtUtc = DateTime.UtcNow.Add(_orleansSignalOptions.Value.KeepMessageInterval);
+        var expiresAtUtc = Clock.GetUtcNow().UtcDateTime.Add(_orleansSignalOptions.Value.KeepMessageInterval);
         var maxMessages = _orleansSignalOptions.Value.MaxQueuedMessagesPerUser;
         var removedByLimit = 0;
         var persisted = await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
@@ -97,7 +101,7 @@ public class SignalRUserGrain(
                 return false;
             }
 
-            RemoveExpiredMessages(state, DateTime.UtcNow);
+            RemoveExpiredMessages(state, Clock.GetUtcNow().UtcDateTime);
             state.Queue.Add(new QueuedHubMessage(deliveryId, message, expiresAtUtc));
             removedByLimit = 0;
             if (maxMessages > 0 && state.Queue.Count > maxMessages)
@@ -131,7 +135,7 @@ public class SignalRUserGrain(
         QueuedHubMessage[] pendingMessages = [];
         await _stateWriteLock.RunAsync(() => messagesStorage.WriteStateSafeAsync(state =>
         {
-            var removedExpired = RemoveExpiredMessages(state, DateTime.UtcNow);
+            var removedExpired = RemoveExpiredMessages(state, Clock.GetUtcNow().UtcDateTime);
             pendingMessages = state.Queue.ToArray();
             return removedExpired > 0;
         }));
@@ -176,7 +180,7 @@ public class SignalRUserGrain(
             await _stateWriteLock.RunAsync(() => stateStorage.WriteStateSafeAsync(cancellationToken));
         }
 
-        RemoveExpiredMessages(messagesStorage.State, DateTime.UtcNow);
+        RemoveExpiredMessages(messagesStorage.State, Clock.GetUtcNow().UtcDateTime);
 
         if (messagesStorage.State.Queue.Count == 0)
         {
@@ -216,7 +220,31 @@ public class SignalRUserGrain(
 
     private static int RemoveExpiredMessages(HubMessageState state, DateTime utcNow)
     {
-        return state.Queue.RemoveAll(item => item.ExpiresAtUtc <= utcNow);
+        var queue = state.Queue;
+        var entries = CollectionsMarshal.AsSpan(queue);
+        var kept = 0;
+        while (kept < entries.Length && entries[kept].ExpiresAtUtc > utcNow)
+        {
+            kept++;
+        }
+
+        if (kept == entries.Length)
+        {
+            return 0;
+        }
+
+        for (var index = kept + 1; index < entries.Length; index++)
+        {
+            var entry = entries[index];
+            if (entry.ExpiresAtUtc > utcNow)
+            {
+                entries[kept++] = entry;
+            }
+        }
+
+        var removed = entries.Length - kept;
+        queue.RemoveRange(kept, removed);
+        return removed;
     }
 
     protected override void OnLiveObserverDispatchFailure(Exception exception)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -253,6 +254,69 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
         _observerRefreshTimer = null;
     }
 
+    private protected Task DispatchToAllObservers(HubMessage message)
+    {
+        if (LiveObservers.Count > 0)
+        {
+            DispatchToLiveObservers(LiveObservers.Values, message);
+        }
+        else
+        {
+            DispatchToObservers(message);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private protected void DispatchToLiveObserversExcept(string[] excludedConnectionIds, HubMessage message)
+    {
+        var excluded = excludedConnectionIds is { Length: 1 }
+            ? null
+            : new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
+        var singleExclusion = excluded is null ? excludedConnectionIds[0] : null;
+        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>();
+        foreach (var (connectionId, observer) in _liveObservers)
+        {
+            if (connectionId != singleExclusion && excluded?.Contains(connectionId) != true)
+            {
+                targets.Add((FindConnectionIdForObserver(observer), observer));
+            }
+        }
+
+        DispatchToLiveObserversCore(targets, message);
+    }
+
+    private protected bool TryDispatchToLiveConnections(string[] connectionIds, HubMessage message)
+    {
+        if (LiveObservers.Count == 0)
+        {
+            return false;
+        }
+
+        List<(string? ConnectionId, ISignalRObserver Observer)>? targets = null;
+        foreach (var connectionId in connectionIds)
+        {
+            if (TryGetLiveObserver(connectionId, out var observer))
+            {
+                targets ??= [];
+                targets.Add((FindConnectionIdForObserver(observer), observer));
+            }
+        }
+
+        if (targets is null)
+        {
+            return false;
+        }
+
+        DispatchToLiveObserversCore(targets, message);
+        return true;
+    }
+
+    private protected void DispatchToLiveObserver(ISignalRObserver observer, HubMessage message)
+    {
+        DispatchToLiveObserversCore([(FindConnectionIdForObserver(observer), observer)], message);
+    }
+
     /// <summary>
     /// Dispatches a message to live observers with health tracking and circuit breaker.
     /// Observers with open circuits are skipped or have messages buffered during grace period.
@@ -263,7 +327,8 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
     {
         ArgumentNullException.ThrowIfNull(observers);
 
-        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>();
+        observers.TryGetNonEnumeratedCount(out var count);
+        var targets = new List<(string? ConnectionId, ISignalRObserver Observer)>(count);
         foreach (var observer in observers)
         {
             targets.Add((FindConnectionIdForObserver(observer), observer));
@@ -381,17 +446,26 @@ public abstract class SignalRObserverGrainBase<TGrain> : Grain, IObserverDeliver
         HubMessage message,
         GrainId sourceGrainId)
     {
-        var pending = new List<Task>(targets.Count);
+        List<Task>? pending = null;
         foreach (var target in targets)
         {
             try
             {
-                pending.Add(target.Observer.OnNextWithDeliverySourceAsync(message, sourceGrainId));
+                var enqueue = target.Observer.OnNextWithDeliverySourceAsync(message, sourceGrainId);
+                if (!enqueue.IsCompletedSuccessfully)
+                {
+                    (pending ??= new List<Task>(targets.Count)).Add(enqueue);
+                }
             }
             catch (Exception exception)
             {
                 OnLiveObserverDispatchFailure(exception);
             }
+        }
+
+        if (pending is null)
+        {
+            return;
         }
 
         try

@@ -6,6 +6,7 @@ using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -38,8 +39,12 @@ public class HubLoadTests
         _secondApp = new TestWebApplication(_cluster, 8082, loggerAccessor: _loggerAccessor);
     }
 
-    [Fact]
-    public async Task ManyConnectionsReceiveBroadcastAsync()
+    [Theory]
+    [InlineData(nameof(SimpleTestHub.All), false)]
+    [InlineData(nameof(SimpleTestHub.AllExcept), false)]
+    [InlineData(nameof(SimpleTestHub.AllExcept), true)]
+    [InlineData(nameof(SimpleTestHub.Connections), true)]
+    public async Task ManyConnectionsReceiveBroadcastAsync(string hubMethod, bool excludeSender)
     {
         const int connectionCount = 60;
         _output.WriteLine($"Starting broadcast load test with {connectionCount} connections.");
@@ -60,14 +65,32 @@ public class HubLoadTests
         }
 
         await Task.Delay(TimeSpan.FromSeconds(1));
-        _output.WriteLine("Triggering All() broadcast from the first connection.");
-        await connections[0].InvokeAsync<int>("All");
+        var sender = connections[0];
+        var senderId = sender.ConnectionId ?? throw new InvalidOperationException("Connection identifier is missing.");
+        _output.WriteLine($"Triggering {hubMethod} broadcast from the first connection.");
+        if (hubMethod == nameof(SimpleTestHub.AllExcept))
+        {
+            string[] exclusions = excludeSender ? [senderId] : [];
+            await sender.InvokeAsync<int>(hubMethod, exclusions);
+        }
+        else if (hubMethod == nameof(SimpleTestHub.Connections))
+        {
+            var targetIds = connections.Skip(1).Select(connection => connection.ConnectionId!).ToArray();
+            await sender.InvokeAsync<int>(hubMethod, targetIds);
+        }
+        else
+        {
+            await sender.InvokeAsync<int>(hubMethod);
+        }
 
+        var expectedRecipients = connectionCount - (excludeSender ? 1 : 0);
         await WaitUntilAsync(
-            "all connections to receive broadcast",
-            () => received.Count == connectionCount,
-            progress: () => $"received {received.Count}/{connectionCount}");
+            "all eligible connections to receive broadcast",
+            () => received.Count >= expectedRecipients,
+            progress: () => $"received {received.Count}/{expectedRecipients}");
 
+        received.ContainsKey(senderId).ShouldBe(!excludeSender);
+        received.Count.ShouldBe(expectedRecipients);
         foreach (var kvp in received)
         {
             kvp.Value.ShouldBeGreaterThanOrEqualTo(1);
@@ -76,8 +99,11 @@ public class HubLoadTests
         await DisposeAsync(connections);
     }
 
-    [Fact]
-    public async Task GroupBroadcastScalesAcrossPartitionsAsync()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task GroupBroadcastScalesAcrossPartitionsAsync(bool useExclusions, bool excludeSender)
     {
         const int groupSize = 48;
         const string groupName = "load-group";
@@ -86,7 +112,9 @@ public class HubLoadTests
 
         var connections = await CreateConnectionsAsync(groupSize, "group");
         var messages = new ConcurrentDictionary<string, int>();
-        var expectedMessage = $"{connections[^1].ConnectionId} send message: {payload}.";
+        var sender = connections[^1];
+        var senderId = sender.ConnectionId ?? throw new InvalidOperationException("Connection identifier is missing.");
+        var expectedMessage = $"{senderId} send message: {payload}.";
 
         foreach (var (connection, index) in connections.Select((conn, idx) => (conn, idx)))
         {
@@ -109,13 +137,24 @@ public class HubLoadTests
         }
 
         _output.WriteLine($"Sending message to group '{groupName}'.");
-        await connections[^1].InvokeAsync(nameof(SimpleTestHub.GroupSendAsync), groupName, payload);
+        if (useExclusions)
+        {
+            string[] exclusions = excludeSender ? [senderId] : [];
+            await sender.InvokeAsync(nameof(SimpleTestHub.SendGroupExceptAsync), groupName, payload, exclusions);
+        }
+        else
+        {
+            await sender.InvokeAsync(nameof(SimpleTestHub.GroupSendAsync), groupName, payload);
+        }
 
+        var expectedRecipients = groupSize - (excludeSender ? 1 : 0);
         await WaitUntilAsync(
-            $"each of the {groupSize} group members to receive the message",
-            () => messages.Count == groupSize,
-            progress: () => $"messages received for {messages.Count}/{groupSize} connections");
+            $"each of the {expectedRecipients} eligible group members to receive the message",
+            () => messages.Count >= expectedRecipients,
+            progress: () => $"messages received for {messages.Count}/{expectedRecipients} connections");
 
+        messages.ContainsKey(senderId).ShouldBe(!excludeSender);
+        messages.Count.ShouldBe(expectedRecipients);
         foreach (var count in messages.Values)
         {
             count.ShouldBe(1);
@@ -249,7 +288,8 @@ public class HubLoadTests
                 ServerToClientInvocationScenarioName,
                 useOrleans: true,
                 stopwatch.Elapsed,
-                throughput);
+                throughput,
+                _firstApp.Services.GetRequiredService<TimeProvider>());
             _output.WriteLine(
                 $"Server-to-client invocation load completed {expectedInvocations:N0}/{expectedInvocations:N0} in {stopwatch.Elapsed:c} ({throughput:N0} calls/s).");
         }
@@ -400,18 +440,18 @@ public class HubLoadTests
         Func<string>? progress = null)
     {
         var limit = timeout ?? _defaultTimeout;
-        var start = DateTime.UtcNow;
+        var start = Stopwatch.GetTimestamp();
         var lastLog = TimeSpan.Zero;
 
-        while (DateTime.UtcNow - start < limit)
+        while (Stopwatch.GetElapsedTime(start) < limit)
         {
             if (condition())
             {
-                _output.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                _output.WriteLine($"Condition '{description}' satisfied after {Stopwatch.GetElapsedTime(start):c}.");
                 return;
             }
 
-            var elapsed = DateTime.UtcNow - start;
+            var elapsed = Stopwatch.GetElapsedTime(start);
             if (elapsed - lastLog >= _logInterval)
             {
                 var status = progress?.Invoke();

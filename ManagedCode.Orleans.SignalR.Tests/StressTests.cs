@@ -86,19 +86,19 @@ public abstract class StressTestBase<TFixture> : IAsyncLifetime where TFixture :
         Func<Task<string>>? progress = null)
     {
         var limit = timeout ?? TimeSpan.FromSeconds(20);
-        var start = DateTime.UtcNow;
+        var start = Stopwatch.GetTimestamp();
         var lastLog = TimeSpan.Zero;
         var logInterval = TimeSpan.FromSeconds(1);
 
-        while (DateTime.UtcNow - start < limit)
+        while (Stopwatch.GetElapsedTime(start) < limit)
         {
             if (await condition())
             {
-                Output.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                Output.WriteLine($"Condition '{description}' satisfied after {Stopwatch.GetElapsedTime(start):c}.");
                 return true;
             }
 
-            var elapsed = DateTime.UtcNow - start;
+            var elapsed = Stopwatch.GetElapsedTime(start);
             if (elapsed - lastLog >= logInterval)
             {
                 if (progress is not null)

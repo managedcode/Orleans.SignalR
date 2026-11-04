@@ -434,7 +434,18 @@ public sealed class ObserverHealthTracker(
             }
 
             var now = Stopwatch.GetTimestamp();
-            _failureTimestamps.RemoveAll(t => Stopwatch.GetElapsedTime(t, now) >= _failureWindow);
+            var expiredCount = 0;
+            // Failures are appended in monotonic timestamp order.
+            while (expiredCount < _failureTimestamps.Count &&
+                   Stopwatch.GetElapsedTime(_failureTimestamps[expiredCount], now) >= _failureWindow)
+            {
+                expiredCount++;
+            }
+
+            if (expiredCount > 0)
+            {
+                _failureTimestamps.RemoveRange(0, expiredCount);
+            }
         }
     }
 }

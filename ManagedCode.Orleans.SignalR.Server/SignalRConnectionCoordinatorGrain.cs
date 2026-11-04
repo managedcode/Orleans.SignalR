@@ -105,16 +105,16 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
 
     public async Task<int> GetPartitionForConnection(string connectionId)
     {
-        var stopwatch = Stopwatch.StartNew();
+        var startedAt = Stopwatch.GetTimestamp();
         var (partition, wasNew, wasReassigned) = GetOrAssignPartitionWithEpoch(connectionId);
-        stopwatch.Stop();
+        var elapsed = Stopwatch.GetElapsedTime(startedAt);
 
-        if (stopwatch.Elapsed > TimeSpan.FromMilliseconds(500))
+        if (elapsed > TimeSpan.FromMilliseconds(500))
         {
             _logger.LogWarning(
                 "GetPartitionForConnection for {ConnectionId} took {Elapsed} (tracked={Tracked})",
                 connectionId,
-                stopwatch.Elapsed,
+                elapsed,
                 _connectionPartitions.Count);
         }
 

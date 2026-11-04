@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Core.Config;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
@@ -265,6 +266,55 @@ public class PartitioningTests
     }
 
     [Fact]
+    public async Task PartitionedGroupExceptShouldRespectEmptyAndNonEmptyExclusionsAsync()
+    {
+        const string groupName = "group-except";
+        const string allMembers = "all members";
+        const string selectedMembers = "selected members";
+        var deliveryTimeout = TimeSpan.FromSeconds(10);
+        var exclusionTimeout = TimeSpan.FromSeconds(1);
+        await using var first = _apps[0].CreateSignalRClient(nameof(SimpleTestHub));
+        await using var second = _apps[1].CreateSignalRClient(nameof(SimpleTestHub));
+        var firstBroadcast = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondBroadcast = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFiltered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondFiltered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var firstHandler = first.On<string>("SendAll", message =>
+        {
+            if (message.EndsWith($"send message: {allMembers}.", StringComparison.Ordinal))
+            {
+                firstBroadcast.TrySetResult();
+            }
+            else if (message.EndsWith($"send message: {selectedMembers}.", StringComparison.Ordinal))
+            {
+                firstFiltered.TrySetResult();
+            }
+        });
+        using var secondHandler = second.On<string>("SendAll", message =>
+        {
+            if (message.EndsWith($"send message: {allMembers}.", StringComparison.Ordinal))
+            {
+                secondBroadcast.TrySetResult();
+            }
+            else if (message.EndsWith($"send message: {selectedMembers}.", StringComparison.Ordinal))
+            {
+                secondFiltered.TrySetResult();
+            }
+        });
+
+        await Task.WhenAll(first.StartAsync(), second.StartAsync());
+        await Task.WhenAll(first.InvokeAsync("JoinGroup", groupName), second.InvokeAsync("JoinGroup", groupName));
+        await first.InvokeAsync("SendGroupExceptAsync", groupName, allMembers, Array.Empty<string>());
+        await Task.WhenAll(firstBroadcast.Task, secondBroadcast.Task).WaitAsync(deliveryTimeout);
+
+        var excludedId = second.ConnectionId ?? throw new InvalidOperationException("ConnectionId was not initialized.");
+        await first.InvokeAsync("SendGroupExceptAsync", groupName, selectedMembers, new[] { excludedId });
+        await firstFiltered.Task.WaitAsync(deliveryTimeout);
+        await Should.ThrowAsync<TimeoutException>(() => secondFiltered.Task.WaitAsync(exclusionTimeout));
+    }
+
+    [Fact]
     public async Task PartitionedGroupMembershipCleansUpOnDisconnectAsync()
     {
         const string groupName = "cleanup-group";
@@ -507,18 +557,18 @@ public class PartitioningTests
         TimeSpan? timeout = null)
     {
         var limit = timeout ?? TimeSpan.FromSeconds(10);
-        var start = DateTime.UtcNow;
+        var start = Stopwatch.GetTimestamp();
         var lastLog = TimeSpan.Zero;
 
-        while (DateTime.UtcNow - start < limit)
+        while (Stopwatch.GetElapsedTime(start) < limit)
         {
             if (await condition())
             {
-                _testOutputHelper.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                _testOutputHelper.WriteLine($"Condition '{description}' satisfied after {Stopwatch.GetElapsedTime(start):c}.");
                 return true;
             }
 
-            var elapsed = DateTime.UtcNow - start;
+            var elapsed = Stopwatch.GetElapsedTime(start);
             if (elapsed - lastLog >= _logInterval)
             {
                 if (progress is not null)

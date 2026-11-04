@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
@@ -6,7 +7,9 @@ using ManagedCode.Orleans.SignalR.Core.SignalR.Observers;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Protocol;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Orleans.TestingHost;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -55,6 +58,7 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
             });
 
         subscription.GetHeartbeatGrainIds().ShouldBe([holderId]);
+        subscription.Grains.Select(grain => grain.GetGrainId()).ShouldBe([holderId]);
     }
 
     [Fact]
@@ -293,36 +297,63 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
     }
 
     [Fact]
-    public async Task ExpiredOfflineUserMessageIsNotReplayedAsync()
+    public async Task OfflineUserReplayUsesTheConfiguredClockAsync()
     {
         var client = _cluster.Cluster.Client;
         var user = NameHelperGenerator.GetSignalRUserGrain<SimpleTestHub>(
             client,
             $"expired-user-{Guid.NewGuid():N}");
-        await user.SendToUser(new InvocationMessage("expired-message", Array.Empty<object?>()));
-        await Task.Delay(TestDefaults.MessageRetention + TimeSpan.FromMilliseconds(500));
+        var clocks = _cluster.Cluster.GetActiveSilos().Cast<InProcessSiloHandle>()
+            .Select(silo => (SharedStorageTimeProvider)silo.ServiceProvider.GetRequiredService<TimeProvider>())
+            .ToArray();
+        var start = clocks[0].GetUtcNow();
+        const string expiredMessage = "expired-message";
+        const string retainedMessage = "retained-message";
 
         var connectionId = $"expired-connection-{Guid.NewGuid():N}";
-        var delivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var localObserver = new SignalRObserver(_ =>
+        var retained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var expired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var localObserver = new SignalRObserver(message =>
         {
-            delivered.TrySetResult();
+            if (message is InvocationMessage { Target: retainedMessage })
+            {
+                retained.TrySetResult();
+            }
+            else if (message is InvocationMessage { Target: expiredMessage })
+            {
+                expired.TrySetResult();
+            }
+
             return Task.CompletedTask;
         });
         var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
 
         try
         {
+            SetClock(start);
+            await user.SendToUser(new InvocationMessage(expiredMessage, []));
+            SetClock(start + TestDefaults.MessageRetention / 2);
+            await user.SendToUser(new InvocationMessage(retainedMessage, []));
+            SetClock(start + TestDefaults.MessageRetention);
+
             await user.AddConnection(connectionId, observer);
             await user.RequestMessage();
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-
-            delivered.Task.IsCompleted.ShouldBeFalse("Expired offline messages must be removed instead of replayed.");
+            await retained.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await Should.ThrowAsync<TimeoutException>(() => expired.Task.WaitAsync(TimeSpan.FromMilliseconds(500)));
         }
         finally
         {
+            SetClock(null);
             await user.RemoveConnection(connectionId, observer);
             client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+
+        void SetClock(DateTimeOffset? utcNow)
+        {
+            foreach (var clock in clocks)
+            {
+                clock.SetUtcNow(utcNow);
+            }
         }
     }
 
@@ -525,6 +556,21 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
         }
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public void TypedPartitionKeysMatchCoordinatorKeys(int partitionId)
+    {
+        var client = _cluster.Cluster.Client;
+        var hubKey = NameHelperGenerator.GetConnectionCoordinatorGrain<SimpleTestHub>(client).GetPrimaryKeyString();
+
+        NameHelperGenerator.GetConnectionPartitionGrain<SimpleTestHub>(client, partitionId).GetGrainId()
+            .ShouldBe(NameHelperGenerator.GetConnectionPartitionGrain(client, hubKey, partitionId).GetGrainId());
+        NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, partitionId).GetGrainId()
+            .ShouldBe(NameHelperGenerator.GetGroupPartitionGrain(client, hubKey, partitionId).GetGrainId());
+    }
+
     [Fact]
     public async Task ConnectionsForDistinctHubsDoNotInterfereAsync()
     {
@@ -709,6 +755,32 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
     }
 
     [Fact]
+    public async Task GroupPartitionBatchPreservesDistinctNamesInFirstOccurrenceOrderAsync()
+    {
+        var client = _cluster.Cluster.Client;
+        var partition = NameHelperGenerator.GetGroupPartitionGrain<SimpleTestHub>(client, 0);
+        var connectionId = $"batch-order-{Guid.NewGuid():N}";
+        var prefix = $"batch-{Guid.NewGuid():N}";
+        string[] expected = [$"{prefix}-one", $"{prefix}-One", $"{prefix}-two"];
+        string[] names = [expected[0], expected[1], expected[0], expected[2], expected[1]];
+        using var localObserver = new SignalRObserver(_ => Task.CompletedTask);
+        var observer = client.CreateObjectReference<ISignalRObserver>(localObserver);
+
+        try
+        {
+            (await partition.AddConnectionToGroups(connectionId, names, observer)).ShouldBe(expected);
+            (await partition.HasConnection(connectionId)).ShouldBeTrue();
+            (await partition.RemoveConnectionFromGroups(connectionId, names, observer)).ShouldBe(expected);
+            (await partition.HasConnection(connectionId)).ShouldBeFalse();
+        }
+        finally
+        {
+            await partition.RemoveConnectionFromGroups(connectionId, names, observer);
+            client.DeleteObjectReference<ISignalRObserver>(observer);
+        }
+    }
+
+    [Fact]
     public async Task LateGroupRemovalKeepsReplacementObserverRegisteredAsync()
     {
         var client = _cluster.Cluster.Client;
@@ -800,8 +872,9 @@ public sealed class GrainPersistenceTests(SharedStorageClusterFixture cluster, I
 
     private static async Task AssertRoutedAsync(Func<Task<bool>> sendAction, string reason)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
-        while (DateTime.UtcNow < deadline)
+        var start = Stopwatch.GetTimestamp();
+        var timeout = TimeSpan.FromSeconds(5);
+        while (Stopwatch.GetElapsedTime(start) < timeout)
         {
             if (await sendAction())
             {

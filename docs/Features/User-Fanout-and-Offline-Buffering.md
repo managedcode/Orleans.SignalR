@@ -37,11 +37,14 @@ flowchart TD
 - [x] Retain replayed entries until the connection host acknowledges a successful SignalR write.
 - [x] Replace the legacy dictionary with the single acknowledged queue schema for the new major version.
 - [x] Cover enqueue crash retention, replay acknowledgement, no replay after durable acknowledgement, expiry, and queue bounds.
+- [x] Measure expiration scans and compact surviving entries in replay order.
+- [x] Read UTC from the silo's DI-provided clock and verify replay at the expiration cutoff.
 
 ## Behavior notes
 
 - When live observers exist, messages are delivered immediately.
 - When no observers exist, messages are queued with expiration and a maximum size; oldest messages are dropped if limits are exceeded.
+- The silo's DI-provided `TimeProvider` sets and checks the persisted UTC expiration. A message expires at its recorded cutoff.
 - On reconnect, the user grain replays buffered messages via `RequestMessage` and removes each entry only after a host-side SignalR write acknowledgement. Delivery is at least once.
 
 ## Configuration knobs

@@ -405,11 +405,16 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
 
     private Dictionary<int, List<string>> GetPartitionsForGroups(string[] groupNames, bool assignIfMissing)
     {
-        var normalizedGroupNames = NormalizeGroupNames(groupNames);
+        var seen = groupNames.Length > 1 ? new HashSet<string>(StringComparer.Ordinal) : null;
         var groupsByPartition = new Dictionary<int, List<string>>();
 
-        foreach (var groupName in normalizedGroupNames)
+        foreach (var groupName in groupNames)
         {
+            if (seen?.Add(groupName) is false)
+            {
+                continue;
+            }
+
             int partition;
             if (assignIfMissing)
             {
@@ -494,26 +499,6 @@ public sealed class SignalRGroupCoordinatorGrain : Grain, ISignalRGroupCoordinat
         }));
 
         _stateDirty = false;
-    }
-
-    private static string[] NormalizeGroupNames(string[] groupNames)
-    {
-        if (groupNames.Length <= 1)
-        {
-            return groupNames;
-        }
-
-        var unique = new HashSet<string>(StringComparer.Ordinal);
-        var normalized = new List<string>(groupNames.Length);
-        foreach (var groupName in groupNames)
-        {
-            if (unique.Add(groupName))
-            {
-                normalized.Add(groupName);
-            }
-        }
-
-        return normalized.ToArray();
     }
 
     private static Dictionary<string, PartitionAssignment> EnsureOrdinalDictionary(Dictionary<string, PartitionAssignment>? dictionary)

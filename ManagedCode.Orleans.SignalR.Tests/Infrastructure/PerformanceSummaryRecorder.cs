@@ -43,14 +43,15 @@ public static class PerformanceSummaryRecorder
         WriteIndented = true
     };
 
-    public static void RecordRun(string scenarioKey, string displayName, bool useOrleans, TimeSpan duration, double throughput)
+    public static void RecordRun(string scenarioKey, string displayName, bool useOrleans, TimeSpan duration, double throughput,
+        TimeProvider timeProvider)
     {
         var run = new ScenarioRun(
             useOrleans ? "Orleans" : "In-Memory",
             useOrleans,
             duration.TotalMilliseconds,
             throughput,
-            DateTimeOffset.UtcNow);
+            timeProvider.GetUtcNow());
 
         var summary = _summaries.GetOrAdd(scenarioKey, key => new ScenarioSummary(key, displayName));
         summary.Record(run);

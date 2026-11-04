@@ -34,6 +34,7 @@ flowchart TD
 - [x] Implement consistent hashing with virtual nodes in `PartitionHelper`.
 - [x] Persist partition assignments and epoch data in coordinator grains.
 - [x] Route to partition grains when partitioning is enabled; fall back to holder/group grains otherwise.
+- [x] Measure bulk ring construction and verify the resulting routing, including virtual-node hash collisions.
 
 ## References
 

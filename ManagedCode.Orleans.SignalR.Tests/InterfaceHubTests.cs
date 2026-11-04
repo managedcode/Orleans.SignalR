@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Cluster.Grains.Interfaces;
@@ -293,22 +294,22 @@ public class InterfaceHubTests
     {
         var limit = timeout ?? _defaultTimeout;
         var delay = pollInterval ?? _pollInterval;
-        var start = DateTime.UtcNow;
+        var start = Stopwatch.GetTimestamp();
         var lastLog = TimeSpan.Zero;
 
-        while (DateTime.UtcNow - start < limit)
+        while (Stopwatch.GetElapsedTime(start) < limit)
         {
             if (condition())
             {
                 if (description is not null)
                 {
-                    _outputHelper.WriteLine($"Condition '{description}' satisfied after {(DateTime.UtcNow - start):c}.");
+                    _outputHelper.WriteLine($"Condition '{description}' satisfied after {Stopwatch.GetElapsedTime(start):c}.");
                 }
 
                 return;
             }
 
-            var elapsed = DateTime.UtcNow - start;
+            var elapsed = Stopwatch.GetElapsedTime(start);
             if (description is not null && elapsed - lastLog >= TimeSpan.FromSeconds(1))
             {
                 _outputHelper.WriteLine($"Waiting for {description}... elapsed {elapsed:c}.");

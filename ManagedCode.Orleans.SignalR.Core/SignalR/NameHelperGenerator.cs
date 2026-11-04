@@ -2,7 +2,6 @@ using System;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Buffers.Text;
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,9 +14,6 @@ namespace ManagedCode.Orleans.SignalR.Core.SignalR;
 public static class NameHelperGenerator
 {
     private const int StackInputByteLimit = 256;
-
-    // Cache cleaned type names to avoid repeated allocations
-    private static readonly ConcurrentDictionary<Type, string> _typeNameCache = new();
 
     // SearchValues for allowed characters (optimized for .NET 8+)
     private static readonly SearchValues<char> _allowedChars =
@@ -156,7 +152,7 @@ public static class NameHelperGenerator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string GetCleanedTypeName<THub>()
     {
-        return _typeNameCache.GetOrAdd(typeof(THub), static t => CleanString(t.FullName!));
+        return HubIdentity<THub>.CleanedName;
     }
 
     /// <summary>
@@ -197,23 +193,27 @@ public static class NameHelperGenerator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long GetPartitionGrainKey<THub>(int partitionId)
     {
-        var cleanedName = GetCleanedTypeName<THub>();
-        return ComputePartitionKey(cleanedName.AsSpan(), partitionId);
+        return ComputePartitionKey(HubIdentity<THub>.PartitionHash, partitionId);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long GetPartitionGrainKey(string hubIdentity, int partitionId, bool alreadyCleaned)
     {
         var normalized = alreadyCleaned ? hubIdentity : CleanString(hubIdentity);
-        return ComputePartitionKey(normalized.AsSpan(), partitionId);
+        return ComputePartitionKey(PartitionHelper.ComputeHash(normalized.AsSpan()), partitionId);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static long ComputePartitionKey(ReadOnlySpan<char> hubIdentity, int partitionId)
+    private static long ComputePartitionKey(uint hubHash, int partitionId)
     {
-        var hash = (ulong)PartitionHelper.ComputeHash(hubIdentity);
-        var composite = (hash << 16) ^ (uint)partitionId;
+        var composite = ((ulong)hubHash << 16) ^ (uint)partitionId;
         return unchecked((long)composite);
+    }
+
+    private static class HubIdentity<THub>
+    {
+        public static readonly string CleanedName = CleanString(typeof(THub).FullName!);
+        public static readonly uint PartitionHash = PartitionHelper.ComputeHash(CleanedName.AsSpan());
     }
 
     // public static IAsyncStream<TMessage> GetStream<THub, TMessage>(IClusterClient clusterClient,

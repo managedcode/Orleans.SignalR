@@ -45,7 +45,7 @@ public class TestWebApplication(
                 logging.ClearProviders();
                 var level = GetLogLevelFromEnvironment();
                 logging.SetMinimumLevel(level);
-                logging.AddProvider(new XunitLoggerProvider(_loggerAccessor));
+                logging.Services.AddSingleton<ILoggerProvider, XunitLoggerProvider>();
             });
         }
     }

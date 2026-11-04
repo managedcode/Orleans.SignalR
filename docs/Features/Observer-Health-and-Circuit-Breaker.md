@@ -25,6 +25,9 @@ Observer delivery is protected by health tracking, circuit breaker logic, and op
 - [x] Keep normal one-way fan-out free of per-message acknowledgement traffic.
 - [x] Add integration coverage which fails the host-side observer callback and verifies source-scoped recovery feedback.
 - [x] Separate successful-write acknowledgement from recovery feedback and verify a failed recovery remains eligible for retry.
+- [x] Measure the one-way enqueue worker and allocate its task list only when a result still needs observation.
+- [x] Measure observer snapshot construction and reserve its known size before adding targets.
+- [x] Measure failure-window pruning and remove expired timestamps from the ordered prefix.
 
 ## Main flow
 

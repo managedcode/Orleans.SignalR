@@ -2,12 +2,12 @@ using Microsoft.Extensions.Logging;
 
 namespace ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 
-internal sealed class XunitLoggerProvider(ITestOutputHelperAccessor accessor) : ILoggerProvider, ISupportExternalScope
+internal sealed class XunitLoggerProvider(ITestOutputHelperAccessor accessor, TimeProvider timeProvider) : ILoggerProvider, ISupportExternalScope
 {
     private readonly ITestOutputHelperAccessor _accessor = accessor ?? throw new ArgumentNullException(nameof(accessor));
     private IExternalScopeProvider _scopeProvider = new LoggerExternalScopeProvider();
 
-    public ILogger CreateLogger(string categoryName) => new XunitLogger(categoryName, _accessor, _scopeProvider);
+    public ILogger CreateLogger(string categoryName) => new XunitLogger(categoryName, _accessor, _scopeProvider, timeProvider);
 
     public void Dispose()
     {
@@ -22,7 +22,8 @@ internal sealed class XunitLoggerProvider(ITestOutputHelperAccessor accessor) : 
     private sealed class XunitLogger(
         string categoryName,
         ITestOutputHelperAccessor accessor,
-        IExternalScopeProvider scopeProvider) : ILogger
+        IExternalScopeProvider scopeProvider,
+        TimeProvider timeProvider) : ILogger
     {
         private readonly string _categoryName = categoryName;
         private readonly ITestOutputHelperAccessor _accessor = accessor;
@@ -56,7 +57,7 @@ internal sealed class XunitLoggerProvider(ITestOutputHelperAccessor accessor) : 
                 return;
             }
 
-            var timestamp = DateTimeOffset.UtcNow.ToString("O");
+            var timestamp = timeProvider.GetUtcNow().ToString("O");
             output.WriteLine($"[{timestamp}] {_categoryName} [{logLevel}] {message}");
 
             if (exception is not null)

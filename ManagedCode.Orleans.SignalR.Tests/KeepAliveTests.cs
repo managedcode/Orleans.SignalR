@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Core.Interfaces;
 using ManagedCode.Orleans.SignalR.Core.Models;
 using ManagedCode.Orleans.SignalR.Core.SignalR;
@@ -394,9 +395,9 @@ public class KeepAliveTests : IAsyncLifetime
     private static async Task<bool> WaitUntilAsync(Func<Task<bool>> predicate, TimeSpan timeout, TimeSpan? pollInterval = null)
     {
         var delay = pollInterval ?? TimeSpan.FromMilliseconds(250);
-        var deadline = DateTime.UtcNow + timeout;
+        var start = Stopwatch.GetTimestamp();
 
-        while (DateTime.UtcNow < deadline)
+        while (Stopwatch.GetElapsedTime(start) < timeout)
         {
             if (await predicate())
             {

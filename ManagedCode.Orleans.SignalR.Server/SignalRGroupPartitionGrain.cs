@@ -81,14 +81,16 @@ public class SignalRGroupPartitionGrain(
                 TrackedConnectionCount);
         }
 
+        var excluded = excludedConnectionIds is { Length: 0 }
+            ? null
+            : new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
         if (LiveObservers.Count > 0)
         {
-            var targetConnections = CollectConnectionIds(groupNames, new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal));
+            var targetConnections = CollectConnectionIds(groupNames, excluded);
             DispatchToLiveObservers(GetLiveObservers(targetConnections), message);
             return Task.CompletedTask;
         }
 
-        var excluded = new HashSet<string>(excludedConnectionIds);
         var targetObservers = CollectObservers(groupNames, excluded);
 
         DispatchToObservers(message, observer => targetObservers.Contains(observer.GetPrimaryKeyString()));
@@ -174,7 +176,7 @@ public class SignalRGroupPartitionGrain(
 
             var changed = observerChanged;
 
-            foreach (var groupName in normalizedGroupNames)
+            foreach (var groupName in normalizedGroupNames.Span)
             {
                 if (!state.Groups.TryGetValue(groupName, out var connections))
                 {
@@ -202,7 +204,7 @@ public class SignalRGroupPartitionGrain(
         if (persisted)
         {
             Logger.LogDebug("Adding connection {ConnectionId} to groups {GroupNames} in partition {PartitionId}",
-                connectionId, string.Join(",", normalizedGroupNames), this.GetPrimaryKeyLong());
+                connectionId, string.Join(",", normalizedGroupNames.Span), this.GetPrimaryKeyLong());
         }
 
         return addedGroups?.ToArray() ?? [];
@@ -238,7 +240,7 @@ public class SignalRGroupPartitionGrain(
 
             var changed = false;
 
-            foreach (var groupName in normalizedGroupNames)
+            foreach (var groupName in normalizedGroupNames.Span)
             {
                 if (state.Groups.TryGetValue(groupName, out var members) && members.Remove(connectionId))
                 {
@@ -282,7 +284,7 @@ public class SignalRGroupPartitionGrain(
         if (stateChanged)
         {
             Logger.LogDebug("Removing connection {ConnectionId} from groups {GroupNames} in partition {PartitionId}",
-                connectionId, string.Join(",", normalizedGroupNames), this.GetPrimaryKeyLong());
+                connectionId, string.Join(",", normalizedGroupNames.Span), this.GetPrimaryKeyLong());
 
             if (connectionRemoved)
             {
@@ -320,7 +322,7 @@ public class SignalRGroupPartitionGrain(
         });
     }
 
-    private static string[] NormalizeGroupNames(string[] groupNames)
+    private static ReadOnlyMemory<string> NormalizeGroupNames(string[] groupNames)
     {
         if (groupNames.Length <= 1)
         {
@@ -328,16 +330,17 @@ public class SignalRGroupPartitionGrain(
         }
 
         var unique = new HashSet<string>(StringComparer.Ordinal);
-        var normalized = new List<string>(groupNames.Length);
+        var normalized = new string[groupNames.Length];
+        var count = 0;
         foreach (var groupName in groupNames)
         {
             if (unique.Add(groupName))
             {
-                normalized.Add(groupName);
+                normalized[count++] = groupName;
             }
         }
 
-        return normalized.ToArray();
+        return new ReadOnlyMemory<string>(normalized, 0, count);
     }
 
     private HashSet<string> CollectObservers(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)
@@ -365,8 +368,20 @@ public class SignalRGroupPartitionGrain(
         return observers;
     }
 
-    private HashSet<string> CollectConnectionIds(IEnumerable<string> groupNames, HashSet<string>? excludedConnections)
+    private IEnumerable<string> CollectConnectionIds(string[] groupNames, HashSet<string>? excludedConnections)
     {
+        if (groupNames.Length == 1)
+        {
+            if (!state.State.Groups.TryGetValue(groupNames[0], out var members))
+            {
+                return [];
+            }
+
+            return excludedConnections is null
+                ? members.Keys
+                : EnumerateIncludedConnections(members.Keys, excludedConnections);
+        }
+
         var connections = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var groupName in groupNames)
@@ -388,6 +403,18 @@ public class SignalRGroupPartitionGrain(
         }
 
         return connections;
+    }
+
+    private static IEnumerable<string> EnumerateIncludedConnections(
+        Dictionary<string, string>.KeyCollection members, HashSet<string> excludedConnections)
+    {
+        foreach (var connectionId in members)
+        {
+            if (!excludedConnections.Contains(connectionId))
+            {
+                yield return connectionId;
+            }
+        }
     }
 
     private static bool RemoveConnectionState(GroupPartitionState state, string connectionId, out List<string>? emptiedGroups)

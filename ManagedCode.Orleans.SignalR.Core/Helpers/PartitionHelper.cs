@@ -4,7 +4,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO.Hashing;
-using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -89,6 +88,7 @@ public static class PartitionHelper
 
 public sealed class ConsistentHashRing
 {
+    private const int PartitionBits = 32;
     private readonly uint[] _keys;
     private readonly int[] _partitions;
     private readonly int _partitionCount;
@@ -99,14 +99,23 @@ public sealed class ConsistentHashRing
 
         _partitionCount = partitionCount;
 
-        var ring = InitializeRing(partitionCount, virtualNodes);
-        _keys = ring.Keys.ToArray();
-        _partitions = ring.Values.ToArray();
+        var nodes = InitializeRing(partitionCount, virtualNodes);
+        var count = CompactRing(nodes);
+        _keys = new uint[count];
+        _partitions = new int[count];
+        for (var index = 0; index < count; index++)
+        {
+            _keys[index] = (uint)(nodes[index] >> PartitionBits);
+            _partitions[index] = (int)(uint)nodes[index];
+        }
     }
 
-    private static SortedList<uint, int> InitializeRing(int partitionCount, int virtualNodes)
+    private static ulong[] InitializeRing(int partitionCount, int virtualNodes)
     {
-        var ring = new SortedList<uint, int>(partitionCount * virtualNodes);
+        var capacity = checked(partitionCount * virtualNodes);
+        ArgumentOutOfRangeException.ThrowIfNegative(capacity);
+        var nodes = new ulong[capacity];
+        var index = 0;
 
         Span<char> keyBuffer = stackalloc char[64]; // "partition-XXXX-vnode-XXXX" max ~25 chars
 
@@ -126,11 +135,29 @@ public sealed class ConsistentHashRing
                 written += vnodeChars;
 
                 var hash = PartitionHelper.ComputeHash(keyBuffer[..written]);
-                ring[hash] = partition;
+                nodes[index++] = ((ulong)hash << PartitionBits) | (uint)partition;
             }
         }
 
-        return ring;
+        Array.Sort(nodes);
+        return nodes;
+    }
+
+    private static int CompactRing(ulong[] nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes)
+        {
+            if (count == 0 || (nodes[count - 1] >> PartitionBits) != (node >> PartitionBits))
+            {
+                count++;
+            }
+
+            // Equal hashes are sorted by partition. The last partition wins, as it did during insertion.
+            nodes[count - 1] = node;
+        }
+
+        return count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -4,6 +4,7 @@ using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
 using ManagedCode.Orleans.SignalR.Tests.TestApp.Hubs;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit.Abstractions;
 
@@ -94,7 +95,8 @@ public sealed class PerformanceScenarioHarness(
 
             var throughput = CalculateThroughput(expected, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} msg/s.");
-            PerformanceSummaryRecorder.RecordRun(DeviceScenarioKey, "Device Echo", useOrleans, stopwatch.Elapsed, throughput);
+            PerformanceSummaryRecorder.RecordRun(DeviceScenarioKey, "Device Echo", useOrleans, stopwatch.Elapsed, throughput,
+                apps[0].Services.GetRequiredService<TimeProvider>());
 
             return stopwatch.Elapsed;
         }
@@ -211,7 +213,8 @@ public sealed class PerformanceScenarioHarness(
 
             var throughput = CalculateThroughput(expectedDeliveries, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expectedDeliveries:N0}/{expectedDeliveries:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} deliveries/s.");
-            PerformanceSummaryRecorder.RecordRun(BroadcastScenarioKey, "Broadcast Fan-Out", useOrleans, stopwatch.Elapsed, throughput);
+            PerformanceSummaryRecorder.RecordRun(BroadcastScenarioKey, "Broadcast Fan-Out", useOrleans, stopwatch.Elapsed, throughput,
+                apps[0].Services.GetRequiredService<TimeProvider>());
 
             return stopwatch.Elapsed;
         }
@@ -392,7 +395,8 @@ public sealed class PerformanceScenarioHarness(
 
             var throughput = CalculateThroughput(expected, sendStopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {sendStopwatch.Elapsed}. Throughput ≈ {throughput:N0} deliveries/s.");
-            PerformanceSummaryRecorder.RecordRun(GroupScenarioKey, "Group Broadcast", useOrleans, sendStopwatch.Elapsed, throughput);
+            PerformanceSummaryRecorder.RecordRun(GroupScenarioKey, "Group Broadcast", useOrleans, sendStopwatch.Elapsed, throughput,
+                apps[0].Services.GetRequiredService<TimeProvider>());
 
             return sendStopwatch.Elapsed;
         }
@@ -462,7 +466,8 @@ public sealed class PerformanceScenarioHarness(
 
             var throughput = CalculateThroughput(expected, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} delivered {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} items/s.");
-            PerformanceSummaryRecorder.RecordRun(StreamScenarioKey, "Streaming", useOrleans, stopwatch.Elapsed, throughput);
+            PerformanceSummaryRecorder.RecordRun(StreamScenarioKey, "Streaming", useOrleans, stopwatch.Elapsed, throughput,
+                apps[0].Services.GetRequiredService<TimeProvider>());
 
             return stopwatch.Elapsed;
         }
@@ -526,7 +531,8 @@ public sealed class PerformanceScenarioHarness(
 
             var throughput = CalculateThroughput(expected, stopwatch.Elapsed);
             _output.WriteLine($"{scenarioLabel} completed {expected:N0}/{expected:N0} in {stopwatch.Elapsed}. Throughput ≈ {throughput:N0} calls/s.");
-            PerformanceSummaryRecorder.RecordRun(InvocationScenarioKey, "Invocation", useOrleans, stopwatch.Elapsed, throughput);
+            PerformanceSummaryRecorder.RecordRun(InvocationScenarioKey, "Invocation", useOrleans, stopwatch.Elapsed, throughput,
+                apps[0].Services.GetRequiredService<TimeProvider>());
 
             return stopwatch.Elapsed;
         }

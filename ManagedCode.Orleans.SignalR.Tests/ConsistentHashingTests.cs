@@ -53,6 +53,16 @@ public class ConsistentHashingTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void ConsistentHashRingKeepsLastPartitionForCollidingVirtualNodes()
+    {
+        const int lastPartition = 820;
+        var ring = new ConsistentHashRing(lastPartition + 1);
+
+        Assert.Equal(lastPartition, ring.GetPartition("partition-266-vnode-67"));
+        Assert.Equal(lastPartition, ring.GetPartition("partition-820-vnode-80"));
+    }
+
+    [Fact]
     public void PartitionHelper_Should_Calculate_Optimal_Partition_Count()
     {
         // Arrange & Act & Assert

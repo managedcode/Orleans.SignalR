@@ -17,11 +17,28 @@ internal sealed class SharedStorageSiloConfigurator : ISiloConfigurator
     public void Configure(ISiloBuilder siloBuilder)
     {
         siloBuilder.AddIncomingGrainCallFilter<ConnectionRemovalCallFilter>();
+        siloBuilder.Services.AddSingleton<TimeProvider, SharedStorageTimeProvider>();
         siloBuilder.Services.AddGrainStorage(
             OrleansSignalROptions.OrleansSignalRStorage,
             static (services, _) => new SharedTestGrainStorage(
                 services.GetRequiredService<Serializer>(),
                 services.GetRequiredService<IOptions<ClusterOptions>>()));
+    }
+}
+
+internal sealed class SharedStorageTimeProvider : TimeProvider
+{
+    private long _utcTicks;
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        var ticks = Volatile.Read(ref _utcTicks);
+        return ticks == 0 ? base.GetUtcNow() : new DateTimeOffset(ticks, TimeSpan.Zero);
+    }
+
+    public void SetUtcNow(DateTimeOffset? utcNow)
+    {
+        Volatile.Write(ref _utcTicks, utcNow?.UtcTicks ?? 0);
     }
 }
 

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -75,25 +74,21 @@ public class SignalRConnectionHolderGrain(
     {
         Logs.SendToAll(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString());
 
-        if (LiveObservers.Count > 0)
-        {
-            DispatchToLiveObservers(LiveObservers.Values, message);
-            return Task.CompletedTask;
-        }
-
-        DispatchToObservers(message);
-        return Task.CompletedTask;
+        return DispatchToAllObservers(message);
     }
 
     public Task SendToAllExcept(HubMessage message, string[] excludedConnectionIds)
     {
         Logs.SendToAllExcept(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), excludedConnectionIds);
 
+        if (excludedConnectionIds is { Length: 0 })
+        {
+            return DispatchToAllObservers(message);
+        }
+
         if (LiveObservers.Count > 0)
         {
-            var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
-            var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
-            DispatchToLiveObservers(targets, message);
+            DispatchToLiveObserversExcept(excludedConnectionIds, message);
             return Task.CompletedTask;
         }
 
@@ -121,7 +116,7 @@ public class SignalRConnectionHolderGrain(
 
         if (TryGetLiveObserver(connectionId, out var liveObserver))
         {
-            DispatchToLiveObservers([liveObserver], message);
+            DispatchToLiveObserver(liveObserver, message);
             return Task.FromResult(true);
         }
 
@@ -134,23 +129,9 @@ public class SignalRConnectionHolderGrain(
     {
         Logs.SendToConnections(Logger, nameof(SignalRConnectionHolderGrain), this.GetPrimaryKeyString(), connectionIds);
 
-        if (LiveObservers.Count > 0)
+        if (TryDispatchToLiveConnections(connectionIds, message))
         {
-            List<ISignalRObserver>? targets = null;
-            foreach (var connectionId in connectionIds)
-            {
-                if (TryGetLiveObserver(connectionId, out var observer))
-                {
-                    targets ??= [];
-                    targets.Add(observer);
-                }
-            }
-
-            if (targets is not null)
-            {
-                DispatchToLiveObservers(targets, message);
-                return Task.CompletedTask;
-            }
+            return Task.CompletedTask;
         }
 
         var hashSet = new HashSet<string>();

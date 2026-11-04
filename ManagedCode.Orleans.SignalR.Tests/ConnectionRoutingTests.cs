@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -87,9 +88,10 @@ public class ConnectionRoutingTests : IAsyncLifetime
             await Task.WhenAll(sendTasks);
 
             var receiveTask = Task.WhenAll(completions.Select(tcs => tcs.Task));
-            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            var start = Stopwatch.GetTimestamp();
+            var timeout = TimeSpan.FromSeconds(30);
             string[]? pendingRoutes = null;
-            while (!receiveTask.IsCompleted && DateTime.UtcNow < deadline)
+            while (!receiveTask.IsCompleted && Stopwatch.GetElapsedTime(start) < timeout)
             {
                 var pendingIndexes = completions
                     .Select((tcs, index) => (index, done: tcs.Task.IsCompletedSuccessfully))

@@ -9,7 +9,7 @@ namespace ManagedCode.Orleans.SignalR.Tests.TestApp.Controllers;
 [Route("/[controller]")]
 [ApiController]
 [AllowAnonymous]
-public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBase
+public class AuthController(JwtSecurityTokenHandler tokenHandler, TimeProvider timeProvider) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<string>> OkAction([FromQuery] string? user = null)
@@ -30,10 +30,13 @@ public class AuthController(JwtSecurityTokenHandler tokenHandler) : ControllerBa
 
         SignIn(new ClaimsPrincipal(claims));
 
+        var now = timeProvider.GetUtcNow().UtcDateTime;
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = claims,
-            Expires = DateTime.UtcNow.AddDays(7),
+            IssuedAt = now,
+            NotBefore = now,
+            Expires = now.AddDays(7),
             Issuer = "YourIssuer",
             Audience = "YourAudience",
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(HttpHostProgram.GetEncryptionKey()), SecurityAlgorithms.HmacSha256Signature)

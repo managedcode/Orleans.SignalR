@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using ManagedCode.Orleans.SignalR.Core.Config;
@@ -74,27 +73,29 @@ public class SignalRConnectionPartitionGrain(
 
     public Task SendToPartition(HubMessage message)
     {
-        Logs.SendToAll(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
-
-        if (LiveObservers.Count > 0)
+        if (Logger.IsEnabled(LogLevel.Debug))
         {
-            DispatchToLiveObservers(LiveObservers.Values, message);
-            return Task.CompletedTask;
+            Logs.SendToAll(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture));
         }
 
-        DispatchToObservers(message);
-        return Task.CompletedTask;
+        return DispatchToAllObservers(message);
     }
 
     public Task SendToPartitionExcept(HubMessage message, string[] excludedConnectionIds)
     {
-        Logs.SendToAllExcept(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), excludedConnectionIds);
+        if (Logger.IsEnabled(LogLevel.Debug))
+        {
+            Logs.SendToAllExcept(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), excludedConnectionIds);
+        }
+
+        if (excludedConnectionIds is { Length: 0 })
+        {
+            return DispatchToAllObservers(message);
+        }
 
         if (LiveObservers.Count > 0)
         {
-            var excluded = new HashSet<string>(excludedConnectionIds, StringComparer.Ordinal);
-            var targets = LiveObservers.Where(kvp => !excluded.Contains(kvp.Key)).Select(kvp => kvp.Value);
-            DispatchToLiveObservers(targets, message);
+            DispatchToLiveObserversExcept(excludedConnectionIds, message);
             return Task.CompletedTask;
         }
 
@@ -113,7 +114,10 @@ public class SignalRConnectionPartitionGrain(
 
     public Task<bool> SendToConnection(HubMessage message, string connectionId)
     {
-        Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
+        if (Logger.IsEnabled(LogLevel.Debug))
+        {
+            Logs.SendToConnection(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionId);
+        }
 
         if (!stateStorage.State.ConnectionIds.TryGetValue(connectionId, out var observer))
         {
@@ -127,7 +131,7 @@ public class SignalRConnectionPartitionGrain(
 
         if (TryGetLiveObserver(connectionId, out var live))
         {
-            DispatchToLiveObservers([live], message);
+            DispatchToLiveObserver(live, message);
             return Task.FromResult(true);
         }
 
@@ -143,25 +147,14 @@ public class SignalRConnectionPartitionGrain(
 
     public Task SendToConnections(HubMessage message, string[] connectionIds)
     {
-        Logs.SendToConnections(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionIds);
-
-        if (LiveObservers.Count > 0)
+        if (Logger.IsEnabled(LogLevel.Debug))
         {
-            List<ISignalRObserver>? targets = null;
-            foreach (var connectionId in connectionIds)
-            {
-                if (TryGetLiveObserver(connectionId, out var observer))
-                {
-                    targets ??= [];
-                    targets.Add(observer);
-                }
-            }
+            Logs.SendToConnections(Logger, nameof(SignalRConnectionPartitionGrain), this.GetPrimaryKeyLong().ToString(CultureInfo.InvariantCulture), connectionIds);
+        }
 
-            if (targets is not null)
-            {
-                DispatchToLiveObservers(targets, message);
-                return Task.CompletedTask;
-            }
+        if (TryDispatchToLiveConnections(connectionIds, message))
+        {
+            return Task.CompletedTask;
         }
 
         var hashSet = new HashSet<string>();

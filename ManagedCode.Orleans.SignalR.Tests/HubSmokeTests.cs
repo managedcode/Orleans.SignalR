@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using ManagedCode.Orleans.SignalR.Tests.Cluster;
 using ManagedCode.Orleans.SignalR.Tests.Infrastructure.Logging;
 using ManagedCode.Orleans.SignalR.Tests.TestApp;
@@ -181,9 +182,9 @@ public class HubSmokeTests
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan? timeout = null)
     {
         var limit = timeout ?? _defaultTimeout;
-        var start = DateTime.UtcNow;
+        var start = Stopwatch.GetTimestamp();
 
-        while (DateTime.UtcNow - start < limit)
+        while (Stopwatch.GetElapsedTime(start) < limit)
         {
             if (condition())
             {

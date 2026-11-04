@@ -20,6 +20,12 @@ Orleans.SignalR routes SignalR connection traffic through Orleans grains so hubs
 - [x] Keep existing connection-to-partition assignments stable when partition count scales.
 - [x] Preserve broadcast fan-out even when no active partitions are tracked.
 - [x] Add tests that assert stable assignments across scaling.
+- [x] Measure the direct single-recipient route and remove unnecessary fan-out collections.
+- [x] Measure connection assignment lookup and time it without allocating a stopwatch.
+- [x] Measure unfiltered partition broadcasts reached by AllExcept and share the regular broadcast path.
+- [x] Measure batched connection dispatch and collect its observer targets in one pass.
+- [x] Measure partition send logging and format grain identifiers only when Debug logging is enabled.
+- [x] Measure filtered broadcasts and collect eligible live observers without intermediate iterators.
 
 ## Main flow
 

@@ -200,6 +200,7 @@ If no new rule is detected -> do not update the file.
 
 ### Diagnostics
 
+- Always obtain the current date and time from a `TimeProvider` supplied by DI so production behavior and tests use the configured clock.
 - Use simple metrics counters; avoid concurrent collections or per-hub observable gauges unless explicitly requested
 - Do not use string literals for metrics names, targets, or reasons; define and reuse constants
 

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 
@@ -28,6 +29,7 @@ public class HttpHostProgram
     public static void Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+        builder.Services.TryAddSingleton<TimeProvider>(TimeProvider.System);
         builder.Services.AddControllers();
 
         builder.Services.Configure<OrleansSignalROptions>(options =>

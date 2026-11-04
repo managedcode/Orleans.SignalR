@@ -29,6 +29,11 @@ Group operations are routed through a coordinator grain that assigns group names
 - [x] Re-run partition cleanup when a disconnected batch join finishes late so late partition adds cannot outlive the connection.
 - [x] Verify group fan-out under load with a dedicated membership join and receipts matched to the tested broadcast.
 - [x] Verify that group cleanup carrying a previous observer reference leaves replacement membership reachable.
+- [x] Measure single-group fan-out and reuse its distinct membership keys directly.
+- [x] Measure batch membership routing and deduplicate names while assigning partitions.
+- [x] Measure group dispatch with an empty exclusion list and exercise both exclusion cases across hosts.
+- [x] Measure single-group exclusion and filter its membership without building a second set.
+- [x] Measure partition-side normalization and retain an ordered snapshot of distinct group names without a second array copy.
 
 ## Main flow
 
