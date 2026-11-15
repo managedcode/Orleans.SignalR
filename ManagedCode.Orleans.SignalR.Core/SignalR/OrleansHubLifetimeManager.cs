@@ -317,6 +317,12 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Connection);
+        if (_connections[connectionId] is { } connection)
+        {
+            // Keep native SignalR transport writes off the Orleans scheduler.
+            return Task.Run(() => connection.WriteAsync(message, cancellationToken).AsTask(), cancellationToken);
+        }
+
         if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
         {
             return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
@@ -334,16 +340,40 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     {
         var message = new InvocationMessage(methodName, args);
         _metrics.RecordMessageSent(_hubKey, SignalRMetrics.TargetTypes.Connections, connectionIds.Count);
-        if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1)
+
+        // Keep the entire addressed batch off the Orleans scheduler.
+        return Task.Run(() =>
         {
-            return Task.Run(() => NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient)
-                .SendToConnections(message, connectionIds.ToArray()), cancellationToken);
-        }
-        else
-        {
-            return Task.Run(() => NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient)
-                .SendToConnections(message, connectionIds.ToArray()), cancellationToken);
-        }
+            List<Task>? writes = null;
+            List<string>? remoteConnections = null;
+            foreach (var connectionId in connectionIds)
+            {
+                if (_connections[connectionId] is { } connection)
+                {
+                    (writes ??= []).Add(connection.WriteAsync(message, cancellationToken).AsTask());
+                }
+                else
+                {
+                    (remoteConnections ??= []).Add(connectionId);
+                }
+            }
+
+            if (remoteConnections is not null)
+            {
+                var targets = remoteConnections.ToArray();
+                var remote = _orleansSignalOptions.Value.ConnectionPartitionCount > 1
+                    ? NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient).SendToConnections(message, targets)
+                    : NameHelperGenerator.GetConnectionHolderGrain<THub>(_clusterClient).SendToConnections(message, targets);
+                if (writes is null)
+                {
+                    return remote;
+                }
+
+                writes.Add(remote);
+            }
+
+            return writes is null ? Task.CompletedTask : Task.WhenAll(writes);
+        }, cancellationToken);
     }
 
     public override Task SendGroupAsync(string groupName, string methodName, object?[] args,

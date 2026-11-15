@@ -2,7 +2,7 @@
 
 ## Summary
 
-The ASP.NET Core host swaps the default SignalR hub lifetime manager with `OrleansHubLifetimeManager<THub>` so all hub operations route through Orleans grains.
+The ASP.NET Core host swaps the default SignalR hub lifetime manager with `OrleansHubLifetimeManager<THub>` to route distributed hub operations through Orleans grains and write addressed messages to live local connections through SignalR.
 
 ## Scope
 
@@ -89,6 +89,17 @@ Scope covers the client and server paths exercised by the SignalR integration ho
 - [x] Measure and reduce the per-connection cost of tracking grain subscriptions while preserving heartbeat and disconnect snapshots.
 - [x] Measure repeated typed partition-key lookups and verify routing against the original key mapping.
 
+### Addressed delivery during a backplane outage
+
+- [x] Reproduce lost single and batched addressed sends on a live local socket after stopping its Orleans silo.
+- [x] Verify recovery from an independent sending host and deliver a mixed local and remote batch.
+- [x] Route live local targets through the native SignalR transport and retain partition routing for remote targets.
+- [x] Run the three routing regressions and all 14 load scenarios locally.
+- [x] Run the full Debug suite with coverage: 135 of 135 passed, with 73.26% line and 65.68% branch coverage.
+- [x] Format and rebuild Debug with zero warnings.
+
+The addressed connection fan-out case took 1.718 s before the repair and 1.674 s after it in individual local runs. Both runs delivered the expected messages.
+
 ## Main flow
 
 ```mermaid
@@ -99,7 +110,11 @@ flowchart TD
   Manager["OrleansHubLifetimeManager"]
   Grains["SignalR grains"]
 
-  Host --> Hub --> Batch --> Manager --> Grains
+  Socket["Local SignalR connection"]
+
+  Host --> Hub --> Batch --> Manager
+  Manager -->|"remote targets"| Grains
+  Manager -->|"local addressed targets"| Socket
 ```
 
 ## Behavior notes
@@ -112,7 +127,8 @@ flowchart TD
 - Hub batch helpers fall back to the registered `HubLifetimeManager<THub>` when `IOrleansGroupManager<THub>` is not explicitly registered, so the API still works on plain `AddSignalR()` hosts.
 - If a partitioned batch join finishes after the connection has already disconnected, the lifetime manager immediately routes a compensating batch remove through the coordinator before returning.
 - Cross-host server-to-client invocation return types travel in a reserved header on the Orleans-routed invocation. The connection host removes that header and caches the type before writing the invocation to SignalR; the synchronous `TryGetReturnType` hook performs only an in-memory lookup.
-- Fan-out observer sends remain one-way and run outside the Orleans scheduler. Broadcast/group paths use one bounded offloaded worker per fan-out instead of one `Task.Run` per observer; single-connection routing stays fire-and-forget. `TryCompleteResult` is acknowledged because losing a required completion leaves `InvokeConnectionAsync<T>` permanently waiting.
+- Addressed sends write to a connection already held by the sending host through the native SignalR transport. The host can deliver to that same socket while its Orleans route recovers. An addressed batch writes its local targets and routes the other target IDs through the existing Orleans partitions.
+- Fan-out observer sends remain one-way and run outside the Orleans scheduler. Broadcast and group paths use one offloaded worker per fan-out. `TryCompleteResult` acknowledges server-to-client invocation completion.
 - In the 20-pair cross-host load scenario, the unchanged baseline completed 0/60 calls before the 30-second deadline. The final fire-and-forget path completed 60/60 in 52 ms and 72 ms in two independent runs (1,154 and 831 calls/s).
 - The final comparison runs delivered 20,000/20,000 broadcast messages at 69,529 deliveries/s, 12,000/12,000 group messages at 43,871 deliveries/s, and 16,800/16,800 invocations at 683 calls/s. Orleans-to-in-memory elapsed-time ratios were 1.04x, 1.03x, and 1.00x respectively.
 - Detailed batching behavior and partition persistence rules live in `docs/Features/Group-Partitioning.md`.

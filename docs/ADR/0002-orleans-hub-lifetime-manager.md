@@ -9,12 +9,12 @@ SignalR's default in-memory lifetime manager cannot coordinate connections, grou
 
 ## Decision
 
-Provide a custom `OrleansHubLifetimeManager<THub>` and register it via the client integration extension (`AddOrleans`). The lifetime manager routes connection, group, user, and invocation operations through Orleans grains using `IClusterClient` and per-connection `Subscription` tracking.
+Provide a custom `OrleansHubLifetimeManager<THub>` and register it via the client integration extension (`AddOrleans`). The lifetime manager coordinates connection, group, user, and invocation operations across hosts through Orleans grains using `IClusterClient` and per-connection `Subscription` tracking. Addressed messages for a live local connection use the native SignalR transport.
 
 ## Consequences
 
 - ASP.NET Core hosts must register `AddOrleans()` to activate the Orleans backplane.
-- Hub operations are translated into grain calls; failures from stale grain directory entries are retried.
+- Distributed hub operations are translated into grain calls. Local addressed delivery uses the existing connection even while its distributed routing state recovers.
 - SignalR hubs remain the API surface while Orleans becomes the fan-out and coordination layer.
 
 ## Decision diagram
@@ -26,7 +26,9 @@ flowchart TD
   Grains["Connection/Group/User/Invocation grains"]
   Clients["Connected clients"]
 
-  Hub --> Manager --> Grains --> Clients
+  Hub --> Manager
+  Manager -->|"remote targets"| Grains --> Clients
+  Manager -->|"local addressed targets"| Clients
 ```
 
 ## Implementation plan (step-by-step)
