@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR.Protocol;
 using Orleans;
@@ -10,6 +12,13 @@ public interface ISignalRConnectionCoordinatorGrain : IGrainWithStringKey
     [ReadOnly]
     [AlwaysInterleave]
     Task<int> GetPartitionCount();
+
+    [ReadOnly]
+    [AlwaysInterleave]
+    Task<Guid> GetActivationId();
+
+    [AlwaysInterleave]
+    Task<bool> RestoreConnectionAssignments(Guid activationId, Dictionary<string, int> assignments);
 
     [AlwaysInterleave]
     Task<int> GetPartitionForConnection(string connectionId);

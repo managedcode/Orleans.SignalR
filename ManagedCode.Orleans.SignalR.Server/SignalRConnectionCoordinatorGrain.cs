@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -30,9 +31,11 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
     private readonly IOptions<OrleansSignalROptions> _options;
     private readonly IPersistentState<ConnectionCoordinatorState> _state;
     private readonly StateWriteLock _stateWriteLock = new();
+    private readonly Guid _activationId = Guid.NewGuid();
     private readonly Dictionary<string, PartitionAssignment> _connectionPartitions;
     private readonly HashSet<int> _activePartitions;
     private readonly int _connectionsPerPartitionHint;
+    private bool _restoredAssignmentsPending;
     private uint _basePartitionCount;
     private int _currentPartitionCount;
     private int _partitionEpoch;
@@ -103,6 +106,39 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         return Task.FromResult(_currentPartitionCount);
     }
 
+    public Task<Guid> GetActivationId() => Task.FromResult(_activationId);
+
+    public Task<bool> RestoreConnectionAssignments(Guid activationId, Dictionary<string, int> assignments)
+    {
+        if (activationId != _activationId)
+        {
+            return Task.FromResult(false);
+        }
+
+        return _stateWriteLock.RunAsync(async () =>
+        {
+            var minimumPartitionCount = 0;
+            foreach (var (connectionId, partitionId) in assignments)
+            {
+                if (_connectionPartitions.TryAdd(connectionId, PartitionAssignment.Create(partitionId, _partitionEpoch)))
+                {
+                    _activePartitions.Add(partitionId);
+                    minimumPartitionCount = Math.Max(minimumPartitionCount, checked(partitionId + 1));
+                    _restoredAssignmentsPending = true;
+                }
+            }
+
+            if (_restoredAssignmentsPending)
+            {
+                var retainedPartitionCount = (int)BitOperations.RoundUpToPowerOf2((uint)minimumPartitionCount);
+                EnsurePartitionCapacity(_connectionPartitions.Count, retainedPartitionCount);
+                await PersistConnectionAssignmentsAsync();
+                _restoredAssignmentsPending = false;
+            }
+            return true;
+        });
+    }
+
     public async Task<int> GetPartitionForConnection(string connectionId)
     {
         var startedAt = Stopwatch.GetTimestamp();
@@ -122,18 +158,19 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         // Use safe write with retry for both persistent and memory storage ETag conflicts
         if (wasNew || wasReassigned)
         {
-            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
-            {
-                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
-                state.ConnectionPartitions = _connectionPartitions;
-                state.CurrentPartitionCount = _currentPartitionCount;
-                state.PartitionEpoch = _partitionEpoch;
-                return true;
-            }));
+            await _stateWriteLock.RunAsync(PersistConnectionAssignmentsAsync);
         }
 
         return partition;
     }
+
+    private Task PersistConnectionAssignmentsAsync() => _state.WriteStateSafeAsync(state =>
+    {
+        state.ConnectionPartitions = _connectionPartitions;
+        state.CurrentPartitionCount = _currentPartitionCount;
+        state.PartitionEpoch = _partitionEpoch;
+        return true;
+    });
 
     public async Task SendToAll(HubMessage message)
     {
@@ -353,14 +390,7 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
             }
 
             // Persist state changes with safe retry for ETag conflicts
-            await _stateWriteLock.RunAsync(() => _state.WriteStateSafeAsync(state =>
-            {
-                // Re-sync local dictionaries to state on each retry (ReadStateAsync creates new state object)
-                state.ConnectionPartitions = _connectionPartitions;
-                state.CurrentPartitionCount = _currentPartitionCount;
-                state.PartitionEpoch = _partitionEpoch;
-                return true;
-            }));
+            await _stateWriteLock.RunAsync(PersistConnectionAssignmentsAsync);
         }
     }
 
@@ -429,9 +459,9 @@ public sealed class SignalRConnectionCoordinatorGrain : Grain, ISignalRConnectio
         return (partition, true, false);
     }
 
-    private int EnsurePartitionCapacity(int prospectiveConnections)
+    private int EnsurePartitionCapacity(int prospectiveConnections, int minimumPartitionCount = 0)
     {
-        var desired = Math.Max((int)_basePartitionCount,
+        var desired = Math.Max(Math.Max((int)_basePartitionCount, minimumPartitionCount),
             PartitionHelper.GetOptimalPartitionCount(prospectiveConnections, _connectionsPerPartitionHint));
 
         if (desired > _currentPartitionCount)

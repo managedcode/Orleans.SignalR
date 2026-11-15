@@ -40,6 +40,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
     private readonly SignalRMetrics _metrics = SignalRMetrics.Instance;
     private readonly string _hubKey;
     private long _lastHeartbeatRenewalWarningTimestamp;
+    private Guid _restoredCoordinatorActivationId;
 
     public OrleansHubLifetimeManager(ILogger<OrleansHubLifetimeManager<THub>> logger, IClusterClient clusterClient,
         IHostApplicationLifetime hostLifetime, IOptions<OrleansSignalROptions> orleansSignalOptions,
@@ -993,6 +994,7 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
             MinimumHeartbeatRenewalIntervalMilliseconds,
             heartbeatInterval.TotalMilliseconds / HeartbeatRenewalIntervalDivisor));
         using var timer = new PeriodicTimer(renewalInterval);
+        Task? routingRecovery = null;
 
         try
         {
@@ -1015,12 +1017,63 @@ public class OrleansHubLifetimeManager<THub> : HubLifetimeManager<THub> where TH
 
                 if (renewals.Count > 0)
                 {
+                    if (_orleansSignalOptions.Value.ConnectionPartitionCount > 1 &&
+                        routingRecovery is null or { IsCompleted: true })
+                    {
+                        routingRecovery = RestoreConnectionRoutingAsync();
+                    }
                     await Task.WhenAll(renewals);
                 }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+        }
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A failed coordinator recovery must leave live connection lease renewal running.")]
+    private async Task RestoreConnectionRoutingAsync()
+    {
+        try
+        {
+            var coordinator = NameHelperGenerator.GetConnectionCoordinatorGrain<THub>(_clusterClient);
+            var activationId = await coordinator.GetActivationId();
+            if (activationId == _restoredCoordinatorActivationId)
+            {
+                return;
+            }
+
+            var assignments = new Dictionary<string, int>(StringComparer.Ordinal);
+            var registrationInProgress = false;
+            foreach (var connection in _connections)
+            {
+                if (connection.Features.Get<Subscription>() is { UsePartitioning: true } subscription &&
+                    !IsConnectionDisconnected(connection.ConnectionId))
+                {
+                    assignments.Add(connection.ConnectionId, subscription.PartitionId);
+                }
+                else if (!connection.ConnectionAborted.IsCancellationRequested)
+                {
+                    registrationInProgress = true;
+                }
+            }
+
+            if (assignments.Count > 0 && await coordinator.RestoreConnectionAssignments(activationId, assignments))
+            {
+                // Remove routes for connections that closed while the registration snapshot was in flight.
+                await Task.WhenAll(assignments.Keys.Where(IsConnectionDisconnected).Select(coordinator.NotifyConnectionRemoved));
+                if (!registrationInProgress)
+                {
+                    _restoredCoordinatorActivationId = activationId;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (ShouldLogHeartbeatRenewalWarning())
+            {
+                _logger.LogWarning(ex, "Failed to restore connection routing for hub {HubKey}; the next lease renewal will retry.", _hubKey);
+            }
         }
     }
 

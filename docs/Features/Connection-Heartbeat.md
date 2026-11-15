@@ -18,12 +18,13 @@ When keep-alive is enabled, each connection is associated with a heartbeat grain
 
 - [x] Renew a bounded lease while each local connection remains registered.
 - [x] Expire the lease and clean target routing state when renewal stops.
+- [x] Restore the original live partition assignments after coordinator loss and verify addressed delivery on the same socket.
 - [x] Keep one connection's renewal failure from stopping renewals for other connections.
 - [x] Expose every renewal failure through a counter and rate-limit warning logs.
 - [x] Retry persistence for an unchanged registration when the previous storage write failed.
 - [x] Prove the retry with a deterministic fail-first storage test.
 - [x] Verify that a default target array and an empty target array represent the same heartbeat registration.
-- [x] Verify the full regression and coverage suites (109/109 tests; 70.77% line and 61.65% branch coverage); focused lease renewal, expiry, cleanup, metrics, HA, and load checks are complete.
+- [x] Run the full regression and coverage suite. The local run passed 133 tests with 73.19% line and 65.51% branch coverage.
 
 ## Main flow
 
@@ -46,6 +47,7 @@ flowchart TD
 - Heartbeats are enabled by `OrleansSignalROptions.KeepEachConnectionAlive`.
 - The heartbeat grain re-adds the observer to all grains tracked by the subscription. Each registration reads its target IDs from a single membership snapshot so concurrent group changes cannot break registration or lease renewal.
 - The manager renews the lease while the connection remains locally registered.
+- For a partitioned hub, the renewal cycle checks the coordinator activation once. When the activation changes, the host restores the original partition assignments for its live connections so the coordinator can resume addressed delivery after losing its in-memory routing index.
 - A failed renewal does not abort the manager-wide renewal loop: the individual lease remains unextended, a failure counter is emitted, warning logs are rate-limited, and a later tick retries it.
 - The timer keeps its activation alive only while that bounded lease remains valid; the durable design is defined by [ADR-0005](../ADR/0005-connection-heartbeat-keepalive.md).
 - Missing disconnect cleanup is bounded while the heartbeat's silo remains alive: after twice the effective client-timeout interval, an unrenewed heartbeat removes the connection from its target grains and partition coordinator, clears its state, and deactivates.
